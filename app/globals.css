@@ -1,0 +1,44 @@
+@import "tailwindcss";
+
+:root {
+  --background: #ffffff;
+  --foreground: #171717;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #0a0a0a;
+    --foreground: #ededed;
+  }
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: Arial, Helvetica, sans-serif;
+}
+
+@media print {
+  /* On force le fond blanc pour économiser l'encre */
+  body {
+    background: white !important;
+    padding: 0 !important;
+  }
+  
+  /* On transforme la colonne noire en texte noir sur fond blanc */
+  .bg-gray-900 {
+    background: transparent !important;
+    color: black !important;
+    border: 1px solid #eee !important;
+  }
+  
+  .text-blue-400, .text-green-400 {
+    color: black !important;
+    font-weight: bold !important;
+  }
+
+  /* On cache la barre de navigation pendant l'impression */
+  nav {
+    display: none !important;
+  }
+}
