@@ -14,3 +14,14 @@ export const supabase = createClient(
   supabaseUrl || '', 
   supabaseAnonKey || ''
 )
+
+let supabaseUserPromise: Promise<any> | null = null
+
+export function getUser() {
+  if (!supabaseUserPromise) {
+    supabaseUserPromise = supabase.auth.getUser().finally(() => {
+      supabaseUserPromise = null
+    }) as Promise<any>
+  }
+  return supabaseUserPromise
+}

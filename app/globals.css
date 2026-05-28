@@ -1,44 +1,52 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  /* Votre couleur sable exacte */
+  --bg-app: #F8F7F2;
+  --foreground: #1e293b;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+html,
+body {
+  min-height: 100%;
+  background-color: var(--bg-app) !important;
 }
 
 body {
-  background: var(--background);
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
+  margin: 0;
+  padding: 0;
+  background-color: var(--bg-app) !important;
+
+  /* Intégration de 3 icônes uniques, fixes et bien placées */
+  background-image: 
+    /* 1. Un beau Croissant de Lune avec son étoile en haut à gauche */
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140' viewBox='0 0 24 24' fill='none' stroke='rgba(212, 163, 89, 0.06)' stroke-width='1.2'%3E%3Cpath d='M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9z'/%3E%3Cpolygon points='18 3 18.5 4.5 20 4.5 18.8 5.5 19.2 7 18 6 16.8 7 17.2 5.5 16 4.5 17.5 4.5' fill='rgba(212, 163, 89, 0.03)'/%3E%3C/svg%3E"),
+    
+    /* 2. Le tracé d'une Kaaba stylisée en bas à droite */
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160' viewBox='0 0 24 24' fill='none' stroke='rgba(212, 163, 89, 0.06)' stroke-width='1.2'%3E%3Cpath d='M3 9l9-5 9 5v8l-9 5-9-5V9z'/%3E%3Cpath d='M3 9l9 5 9-5'/%3E%3Cpath d='M12 14v8'/%3E%3Cpath d='M7 11.2V16l5 2.8'/%3E%3C/svg%3E"),
+    
+    /* 3. Un avion discret en vol au milieu à gauche */
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='100' height='100' viewBox='0 0 24 24' fill='none' stroke='rgba(212, 163, 89, 0.04)' stroke-width='1'%3E%3Cpath d='M17.8 19.2L16 11l3.5-3.5C20 7 20 6.4 19.6 6c-.4-.4-1-.4-1.4 0L14.7 9.5 6.5 7.7c-.5-.1-1.1.1-1.4.5-.4.4-.4 1-.1 1.4l5.3 4.4-3.7 3.7L4.3 17c-.3-.1-.6 0-.8.2-.3.3-.3.7 0 1l1.5 1.5c.3.3.7.3 1 0 .2-.2.3-.5.2-.8l-.7-2.3 3.7-3.7 4.4 5.3c.3.4.9.5 1.4.1.4-.3.6-.9.5-1.4z'/%3E%3C/svg%3E");
+
+  /* On refuse la répétition pour n'avoir qu'un seul exemplaire de chaque */
+  background-repeat: no-repeat, no-repeat, no-repeat !important;
+  
+  /* Positionnement fixe et aéré sur l'écran */
+  background-position: 
+    5% 10%,     /* Lune : En haut à gauche */
+    92% 85%,    /* Kaaba : En bas à droite */
+    3% 60% !important;     /* Avion : Sur le flanc gauche */
+  
+  background-attachment: fixed !important;
 }
 
-@media print {
-  /* On force le fond blanc pour économiser l'encre */
-  body {
-    background: white !important;
-    padding: 0 !important;
-  }
-  
-  /* On transforme la colonne noire en texte noir sur fond blanc */
-  .bg-gray-900 {
-    background: transparent !important;
-    color: black !important;
-    border: 1px solid #eee !important;
-  }
-  
-  .text-blue-400, .text-green-400 {
-    color: black !important;
-    font-weight: bold !important;
-  }
-
-  /* On cache la barre de navigation pendant l'impression */
-  nav {
-    display: none !important;
-  }
+/* Scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+}
+::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: #cbd5e1;
 }
