@@ -6,14 +6,21 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server'
-import OpenAI from 'openai'
-
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-})
-
 export async function POST(request: NextRequest) {
   try {
+    // Vérifier la présence de la clé OpenAI au moment de l'appel
+    const apiKey = process.env.OPENAI_API_KEY || process.env.OPENAI_ADMIN_KEY
+    if (!apiKey) {
+      console.error('OPENAI_API_KEY ou OPENAI_ADMIN_KEY non défini')
+      return NextResponse.json(
+        { error: 'OpenAI API key missing on server. Set OPENAI_API_KEY.' },
+        { status: 500 }
+      )
+    }
+
+    const OpenAI = (await import('openai')).default
+    const openai = new OpenAI({ apiKey })
+
     const formData = await request.formData()
     const file = formData.get('file') as File
 
