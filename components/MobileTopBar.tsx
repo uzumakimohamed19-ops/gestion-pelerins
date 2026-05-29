@@ -24,8 +24,8 @@ export default function MobileTopBar() {
             .eq('id', user.id)
             .single()
           
-          if (profileData?.agences?.nom_agence) {
-            setNomAgence(profileData.agences.nom_agence)
+          if (profileData?.agences?.[0]?.nom_agence) {
+            setNomAgence(profileData.agences[0].nom_agence)
           } else {
             setNomAgence('Gestion Globale Hajj')
           }
