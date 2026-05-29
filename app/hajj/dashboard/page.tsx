@@ -58,38 +58,39 @@ function Bar({ value, color }: { value: number; color: string }) {
   )
 }
 
-// ─── Stat Card premium ────────────────────────────────────────────────────────
+// ─── Stat Card premium (Optimisée Mobile Côte à Côte) ────────────────────────
 function Tile({ card, loading, onClick }: { card: TileCard; loading: boolean; onClick: () => void }) {
   return (
     <button
       onClick={onClick}
       disabled={loading}
-      className={`group text-left bg-white border ${card.borderColor} rounded-2xl p-5 hover:shadow-md hover:-translate-y-0.5 active:scale-[0.99] transition-all duration-300 flex flex-col justify-between w-full relative overflow-hidden shadow-sm`}
+      className={`group text-left bg-white border ${card.borderColor} rounded-xl sm:rounded-2xl p-3.5 sm:p-5 hover:shadow-md hover:-translate-y-0.5 active:scale-[0.99] transition-all duration-300 flex flex-col justify-between w-full relative overflow-hidden shadow-sm`}
     >
-      <div className="flex items-center justify-between w-full mb-4">
-        <div className={`p-2.5 rounded-xl ${card.light} border border-white shadow-sm transition-transform group-hover:scale-105`}>
-          <card.icon size={20} className={card.textColor} />
+      <div className="flex items-center justify-between w-full mb-2.5 sm:mb-4">
+        <div className={`p-2 sm:p-2.5 rounded-xl ${card.light} border border-white shadow-sm transition-transform group-hover:scale-105`}>
+          <card.icon size={18} className={`${card.textColor} sm:hidden`} />
+          <card.icon size={20} className={`${card.textColor} hidden sm:block`} />
         </div>
         {card.tag && (
-          <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md uppercase tracking-wider bg-slate-50 text-slate-400 border border-slate-100`}>
+          <span className={`text-[9px] sm:text-[10px] font-bold px-1.5 py-0.5 rounded-md uppercase tracking-wider bg-slate-50 text-slate-400 border border-slate-100`}>
             {card.tag}
           </span>
         )}
       </div>
       
-      <div>
+      <div className="min-w-0 w-full">
         {loading ? (
-          <div className="h-8 w-24 bg-slate-100 rounded-lg animate-pulse mb-2" />
+          <div className="h-7 w-16 sm:h-8 sm:w-24 bg-slate-100 rounded-lg animate-pulse mb-2" />
         ) : (
-          <p className="text-2xl md:text-3xl font-black text-slate-900 leading-none tabular-nums tracking-tight mb-1.5">
+          <p className="text-lg sm:text-2xl md:text-3xl font-black text-slate-900 leading-none tabular-nums tracking-tight mb-1 sm:mb-1.5 truncate">
             {card.value}
           </p>
         )}
-        <p className="text-xs md:text-sm text-slate-500 font-medium tracking-wide uppercase">{card.label}</p>
+        <p className="text-[10px] sm:text-xs md:text-sm text-slate-500 font-medium tracking-wide uppercase truncate">{card.label}</p>
       </div>
 
       {card.subtext && !loading && (
-        <p className={`text-xs font-bold mt-2 ${card.textColor} bg-slate-50/50 px-2 py-1 rounded-lg border border-slate-100 inline-block w-max`}>
+        <p className={`text-[9px] sm:text-xs font-bold mt-1.5 sm:mt-2 ${card.textColor} bg-slate-50/50 px-1.5 py-0.5 sm:px-2 sm:py-1 rounded-md sm:rounded-lg border border-slate-100 inline-block w-max max-w-full truncate`}>
           {card.subtext}
         </p>
       )}
@@ -185,14 +186,14 @@ export default function Dashboard() {
 
   function openModal(label: string) {
     const map: Record<string, { items: Pelerin[]; title: string }> = {
-      'Total Pèlerins':     { items: allData, title: 'Tous les pèlerins' },
-      'Dossiers Complets':  { items: allData.filter(p => p.document_url), title: 'Dossiers complets' },
-      'Dossiers Incomplets':{ items: allData.filter(p => !p.document_url), title: 'Dossiers incomplets' },
+      'Total inscrits':     { items: allData, title: 'Tous les pèlerins' },
+      'Dossiers complets':  { items: allData.filter(p => p.document_url), title: 'Dossiers complets' },
+      'Dossiers incomplets':{ items: allData.filter(p => !p.document_url), title: 'Dossiers incomplets' },
       'Plateforme Gouv':    { items: allData.filter(p => p.sur_plateforme_gouv), title: 'Inscrits — Plateforme Gouv' },
       'Portail Nusuk':      { items: allData.filter(p => p.sur_plateforme_nusuk), title: 'Inscrits — Portail Nusuk' },
-      'Encaissé (CFA)':      { items: allData.filter(p => (p.total_paye ?? 0) > 0), title: 'Pèlerins ayant payé' },
-      'Paiements Reçus':    { items: allData.filter(p => (p.total_paye ?? 0) > 0), title: 'Pèlerins ayant payé' },
-      'En Attente':         { items: allData.filter(p => (p.total_paye ?? 0) === 0), title: 'En attente de paiement' },
+      'Encaissé Global':    { items: allData.filter(p => (p.total_paye ?? 0) > 0), title: 'Pèlerins ayant payé' },
+      'Versements Reçus':   { items: allData.filter(p => (p.total_paye ?? 0) > 0), title: 'Pèlerins ayant payé' },
+      'En attente paiement': { items: allData.filter(p => (p.total_paye ?? 0) === 0), title: 'En attente de paiement' },
     }
     setModal(map[label] || { items: allData, title: label })
     setSearchQuery(''); setAgenceFilter('all'); setActiveTab('all')
@@ -214,12 +215,9 @@ export default function Dashboard() {
     })
   }, [modal, searchQuery, agenceFilter, activeTab])
 
-  // ─── NOUVELLE FONCTION EXCEL (.XLSX) PROPRE ET PARFAITEMENT AUTOMATISÉE ───
   async function exportToExcel(items: Pelerin[], filename: string) {
     try {
       const XLSX = await import('xlsx')
-      
-      // Structuration propre des données pour les colonnes Excel
       const cleanRows = items.map((p) => ({
         'Prénom': p.prenom || '',
         'Nom Complet': p.nom_complet || '',
@@ -235,20 +233,11 @@ export default function Dashboard() {
       const workbook = XLSX.utils.book_new()
       XLSX.utils.book_append_sheet(workbook, worksheet, 'Pèlerins')
 
-      // Auto-ajustement de la largeur des colonnes pour un rendu pro sans texte coupé
       const colWidths = [
-        { wch: 18 }, // Prénom
-        { wch: 25 }, // Nom Complet
-        { wch: 16 }, // Téléphone
-        { wch: 22 }, // Agence
-        { wch: 20 }, // Montant Payé
-        { wch: 15 }, // Dossier
-        { wch: 15 }, // Gouv
-        { wch: 15 }, // Nusuk
+        { wch: 18 }, { wch: 25 }, { wch: 16 }, { wch: 22 },
+        { wch: 20 }, { wch: 15 }, { wch: 15 }, { wch: 15 },
       ]
       worksheet['!cols'] = colWidths
-
-      // Génération et téléchargement du fichier final .xlsx
       XLSX.writeFile(workbook, `${filename.replace(/\s/g, '_')}_${new Date().toISOString().split('T')[0]}.xlsx`)
     } catch (err) {
       console.error("Erreur durant l'export Excel:", err)
@@ -337,8 +326,8 @@ export default function Dashboard() {
         {/* COLONNE GAUCHE (Grilles d'indicateurs & Listes principales) */}
         <div className="flex-1 min-w-0 w-full flex flex-col gap-6">
 
-          {/* Grille responsive des cartes d'analyses */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+          {/* Grille responsive des cartes d'analyses ajustée pour Mobile */}
+          <div className="grid grid-cols-2 xl:grid-cols-4 gap-2.5 sm:gap-4">
             {mainCards.map((card, i) => (
               <Tile key={i} card={card} loading={loading} onClick={() => !loading && openModal(card.label)} />
             ))}
@@ -484,7 +473,7 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* ── MODALE ADAPTATIVE (Responsive Bottom-Sheet sur Mobile / Centrée Desktop) ──────────────────────────────────────────────────────────── */}
+      {/* ── MODALE ADAPTATIVE ──────────────────────────────────────────────────────────── */}
       {modal && (
         <div
           className="fixed inset-0 z-[999] flex items-end sm:items-center justify-center bg-slate-900/60 backdrop-blur-sm p-0 sm:p-4 transition-all duration-300"
