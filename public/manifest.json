@@ -1,0 +1,23 @@
+{
+  "name": "TravelOS - Gestion Hajj",
+  "short_name": "HajjGestion",
+  "description": "Tableau de gestion et de suivi de campagne",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#0f172a",
+  "icons": [
+    {
+      "src": "/iconeTravelos.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/iconeTravelos.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ]
+}

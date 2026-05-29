@@ -1,6 +1,7 @@
 import './globals.css'
 import { Suspense } from 'react'
 import MobileTopBar from '@/components/MobileTopBar' // Ajuste le chemin selon ton dossier components
+import PwaInstaller from '@/components/PwaInstaller' // Importation du système d'installation PWA
 
 export default function RootLayout({
   children,
@@ -21,6 +22,9 @@ export default function RootLayout({
         <main className="pt-16 md:pt-0">
           {children}
         </main>
+
+        {/* Gestionnaire d'installation PWA et du Service Worker */}
+        <PwaInstaller />
 
       </body>
     </html>
