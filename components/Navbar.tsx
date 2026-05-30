@@ -113,6 +113,15 @@ export default function Navbar() {
 
   return (
     <>
+      {/* 🧬 INJECTION COMMANDE CSS DYNAMIQUE (Garantit l'espace uniquement en bas et uniquement sur mobile sans casser le flux) */}
+      <style jsx global>{`
+        @media (max-width: 1023px) {
+          body {
+            padding-bottom: 6rem !important;
+          }
+        }
+      `}</style>
+
       {/* 💻 DESKTOP NAV (Strictement Inaltéré) */}
       <nav className="hidden lg:block bg-white/80 backdrop-blur-md border-b border-gray-100 fixed top-0 left-0 right-0 z-50 shadow-sm print:hidden">
         <div className="max-w-7xl mx-auto px-4 xl:px-8">
@@ -193,13 +202,12 @@ export default function Navbar() {
         </div>
       </nav>
 
-      {/* 📱 MOBILE NAV (Exactement identique au modèle de la capture d'écran) */}
+      {/* 📱 MOBILE NAV */}
       <div className="lg:hidden">
         
-        {/* BARRE DE NAVIGATION BLANCHE COLLÉE EN BAS */}
+        {/* BARRE DE NAVIGATION FIXE EN BAS AVEC EFFET DE FLOU */}
         <div 
-          className={`fixed bottom-0 left-0 right-0 h-20 bg-white border-t border-slate-100 rounded-t-[2.2rem] shadow-[0_-10px_30px_rgba(0,0,0,0.04)] z-[90] flex items-center justify-between px-4 pb-2 transition-all duration-300 ease-in-out
-            ${isButtonVisible ? 'translate-y-0 opacity-100' : 'translate-y-24 opacity-0 pointer-events-none'}`}
+          className="fixed bottom-0 left-0 right-0 h-20 bg-white/80 backdrop-blur-md border-t border-slate-100 rounded-t-[2.2rem] shadow-[0_-10px_30px_rgba(0,0,0,0.04)] z-[90] flex items-center justify-between px-4 pb-2"
         >
           {/* Éléments de gauche (Boutons 1 & 2) */}
           <div className="flex flex-1 justify-around items-center">
