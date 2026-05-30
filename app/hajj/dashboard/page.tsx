@@ -303,10 +303,10 @@ export default function Dashboard() {
           <div className="flex items-center justify-between mb-6">
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 rounded-full bg-white/20 border border-white/30 flex items-center justify-center font-bold text-sm text-white backdrop-blur-md">
-                ZK
+                A
               </div>
               <div>
-                <p className="text-[11px] text-blue-100 font-medium tracking-wide uppercase">Campagne Hajj 2025</p>
+                <p className="text-[11px] text-blue-100 font-medium tracking-wide uppercase">Campagne Hajj 2026</p>
                 <h2 className="text-sm font-black tracking-tight text-white">Gestion & Suivi</h2>
               </div>
             </div>
