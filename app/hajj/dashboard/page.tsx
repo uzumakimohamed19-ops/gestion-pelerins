@@ -4,7 +4,8 @@ import { supabase } from '../../../lib/supabase'
 import {
   Users, FileCheck, FileWarning, ArrowRight, Wallet,
   ShieldCheck, Globe, X, TrendingUp, AlertCircle,
-  Download, Search, UserPlus, AlertTriangle, Filter, ChevronRight, FileSpreadsheet
+  Download, Search, UserPlus, AlertTriangle, Filter, ChevronRight, FileSpreadsheet, Building2,
+  Eye, EyeOff // Ajout uniquement des icônes d'œil nécessaires
 } from 'lucide-react'
 import Link from 'next/link'
 
@@ -140,6 +141,32 @@ export default function Dashboard() {
   const [searchQuery, setSearchQuery] = useState('')
   const [agenceFilter, setAgenceFilter] = useState('all')
   const [activeTab, setActiveTab] = useState('all')
+  
+  // Récupération dynamique du nom de l'agence connectée
+  const [nomAgence, setNomAgence] = useState<string>('Mon Agence')
+
+  // Initialisation de l'état avec vérification et récupération du localStorage
+  const [showAmount, setShowAmount] = useState<boolean>(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('dashboard_show_amount')
+      return saved !== null ? JSON.parse(saved) : true
+    }
+    return true
+  })
+
+  // Sauvegarde automatique du choix de l'utilisateur dans le localStorage
+  useEffect(() => {
+    localStorage.setItem('dashboard_show_amount', JSON.stringify(showAmount))
+  }, [showAmount])
+
+  // Génération de la date du jour au format élégant (ex: samedi 30 mai 2026)
+  const dateDuJour = useMemo(() => {
+    return new Date().toLocaleDateString('fr-FR', {
+      weekday: 'long',
+      day: 'numeric',
+      month: 'long'
+    })
+  }, [])
 
   useEffect(() => {
     async function fetchStats() {
@@ -163,7 +190,15 @@ export default function Dashboard() {
         })
         setRecettes(totalRecettes)
         setAllData(data)
-        setAgences([...new Set(data.map(p => p.agences?.nom_agence).filter(Boolean))].sort())
+        
+        // Extraction des agences
+        const listAgences = [...new Set(data.map(p => p.agences?.nom_agence).filter(Boolean))].sort()
+        setAgences(listAgences)
+
+        // Tente de récupérer le nom de la première agence pour l'en-tête mobile à des fins d'illustration
+        if (data[0]?.agences?.nom_agence) {
+          setNomAgence(data[0].agences.nom_agence)
+        }
       }
       setLoading(false)
     }
@@ -294,37 +329,67 @@ export default function Dashboard() {
     <div className="w-full min-h-screen bg-slate-50/40 select-none">
       
       {/* 📱 ───────────────────────────────────────────────────────────────────
-          AFFICHAGE MOBILE UNIQUE (`md:hidden`)
+          AFFICHAGE MOBILE UNIQUE (`md:hidden`) ENRICHI ET DYNAMISÉ
           ────────────────────────────────────────────────────────────────────── */}
       <div className="block md:hidden pb-10">
-        
-        {/* En-tête Immersif Bleu */}
-        <div className="bg-gradient-to-b from-blue-600 to-blue-700 text-white px-5 pt-7 pb-14 rounded-b-[2.5rem] shadow-lg shadow-blue-600/10 relative">
-          <div className="flex items-center justify-between mb-6">
+      
+        {/* En-tête Immersif Bleu et Dynamique */}
+        <div className="bg-gradient-to-b from-blue-600 to-blue-700 text-white px-5 pt-7 pb-14 rounded-b-[2.5rem] shadow-lg shadow-blue-600/10 relative overflow-hidden">
+          
+          {/* Icône de contexte géante stylisée en arrière-plan filigrane */}
+          <div className="absolute right-[-20px] bottom-[-20px] text-white/5 pointer-events-none transform -rotate-12 select-none">
+            <Building2 size={220} />
+          </div>
+
+          <div className="flex items-start justify-between mb-6 relative z-10">
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-full bg-white/20 border border-white/30 flex items-center justify-center font-bold text-sm text-white backdrop-blur-md">
-                A
+              <div className="w-10 h-10 rounded-full bg-white/20 border border-white/30 flex items-center justify-center font-black text-sm text-white backdrop-blur-md shrink-0">
+                {nomAgence[0]?.toUpperCase() || 'A'}
               </div>
-              <div>
-                <p className="text-[11px] text-blue-100 font-medium tracking-wide uppercase">Campagne Hajj 2026</p>
-                <h2 className="text-sm font-black tracking-tight text-white">Gestion & Suivi</h2>
+              <div className="min-w-0">
+                <div className="flex items-center gap-1.5">
+                  <span className="inline-block w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping" />
+                  <p className="text-[10px] text-blue-100 font-bold tracking-widest uppercase truncate max-w-[150px]">
+                    {nomAgence}
+                  </p>
+                </div>
+                <h2 className="text-sm font-black tracking-tight text-white mt-0.5">
+                  Bienvenue sur votre espace
+                </h2>
               </div>
             </div>
             <Link
               href="/hajj/ajouter-pelerin"
-              className="bg-white text-blue-600 px-3 py-1.5 rounded-full font-bold text-[11px] flex items-center gap-1 shadow-sm active:scale-95 transition-transform"
+              className="bg-white text-blue-600 px-3 py-1.5 rounded-full font-bold text-[11px] flex items-center gap-1 shadow-sm active:scale-95 transition-transform shrink-0"
             >
               <UserPlus size={12} /> Ajouter
             </Link>
           </div>
 
-          <div className="mt-4">
-            <p className="text-xs text-blue-100 font-semibold tracking-wide uppercase opacity-90">Encaissé Global</p>
-            <div className="flex items-baseline gap-1 mt-1">
-              <span className="text-3xl font-black tracking-tight tabular-nums">
-                {loading ? '---' : recettes.toLocaleString('fr-FR')}
-              </span>
-              <span className="text-sm font-bold text-blue-200">CFA</span>
+          {/* Affichage de la date du jour et de la campagne */}
+          <div className="flex justify-between items-end mt-7 relative z-10">
+            <div>
+              <p className="text-xs text-blue-100 font-semibold tracking-wide uppercase opacity-90">Encaissé Global</p>
+              <div className="flex items-center gap-2 mt-0.5">
+                <div className="flex items-baseline gap-1">
+                  <span className="text-3xl font-black tracking-tight tabular-nums">
+                    {loading ? '---' : (showAmount ? recettes.toLocaleString('fr-FR') : '•••••••')}
+                  </span>
+                  <span className="text-sm font-bold text-blue-200">CFA</span>
+                </div>
+                {/* Petit bouton œil pour masquer / afficher le montant */}
+                <button 
+                  onClick={() => setShowAmount(!showAmount)} 
+                  className="p-1 rounded-lg bg-white/10 border border-white/10 active:scale-90 transition-transform flex items-center justify-center"
+                >
+                  {showAmount ? <EyeOff size={14} className="text-blue-100" /> : <Eye size={14} className="text-blue-100" />}
+                </button>
+              </div>
+            </div>
+            
+            <div className="text-right">
+              <p className="text-[10px] text-blue-200 font-bold uppercase tracking-wider">Date du jour</p>
+              <p className="text-xs font-black text-white capitalize mt-0.5">{dateDuJour}</p>
             </div>
           </div>
         </div>
@@ -332,7 +397,7 @@ export default function Dashboard() {
         {/* Contenu Mobile Remontant - mt-6 pour espacer parfaitement et éviter la superposition */}
         <div className="px-4 mt-6 space-y-6">
 
-          {/* BLOCS HORIZONTAUX TOTALEMENT COLORÉS ET BIEN ESPACÉS */}
+          {/* BLOCS HORIZONTAUX TOTALEMENT COLORÉS ET BIEN ESPACÉS (STRICTEMENT D'ORIGINE) */}
           <div className="space-y-2">
             <p className="text-[11px] font-bold text-slate-400 uppercase tracking-wider px-1">Indicateurs clés</p>
             <div className="flex overflow-x-auto gap-3 pb-3 pt-1 px-1 scrollbar-none snap-x snap-mandatory">
@@ -447,7 +512,7 @@ export default function Dashboard() {
 
           {/* BOUTON EXPORT SIMPLE */}
           <button
-            onClick={() => !loading && exportToExcel(allData, 'Global_Hajj_2025')}
+            onClick={() => !loading && exportToExcel(allData, 'Global_Hajj_2026')}
             disabled={loading}
             className="w-full flex items-center justify-center gap-2 p-3.5 bg-slate-900 text-white rounded-2xl text-xs font-bold shadow-md active:bg-slate-800 transition-colors"
           >
@@ -461,9 +526,10 @@ export default function Dashboard() {
           AFFICHAGE PC UNIQUE (RESTÉ STRICTEMENT INTACT ET INALTERÉ)
           ────────────────────────────────────────────────────────────────────── */}
       <div className="hidden md:block max-w-[1600px] mx-auto px-4 sm:px-6 lg:px-8 pt-8 pb-16 w-full">
+        
         <div className="mb-8 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 border-b border-slate-100 pb-6">
           <div>
-            <span className="text-[10px] font-black text-indigo-600 bg-indigo-50 px-2.5 py-1 rounded-md uppercase tracking-widest border border-indigo-100">Campagne Hajj 2025</span>
+            <span className="text-[10px] font-black text-indigo-600 bg-indigo-50 px-2.5 py-1 rounded-md uppercase tracking-widest border border-indigo-100">Campagne Hajj 2026</span>
             <h1 className="text-2xl md:text-3xl font-black text-slate-900 tracking-tight mt-2">Tableau de gestion & de suivi</h1>
           </div>
           <div className="flex items-center flex-wrap gap-3">
