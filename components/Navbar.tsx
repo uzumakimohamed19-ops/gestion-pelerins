@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useMemo } from 'react'
 import { supabase, getUser } from '@/lib/supabase'
 import Link from 'next/link'
 import Image from 'next/image'
@@ -17,7 +17,9 @@ import {
   Menu,
   X,
   PieChart,
-  BarChart3 
+  BarChart3,
+  MoreHorizontal,
+  Plus
 } from 'lucide-react'
 
 export default function Navbar() {
@@ -58,7 +60,7 @@ export default function Navbar() {
     getProfileAndAgence()
   }, [])
 
-  // Effet pour masquer le bouton lors du défilement vers le bas
+  // Effet pour masquer le menu mobile au défilement vers le bas
   useEffect(() => {
     const handleScroll = () => {
       const currentScrollY = window.scrollY
@@ -68,11 +70,9 @@ export default function Navbar() {
         return
       }
 
-      // Si on scroll vers le bas et qu'on a dépassé 20px, on cache le bouton
       if (currentScrollY > lastScrollY && currentScrollY > 20) {
         setIsButtonVisible(false)
       } else {
-        // Si on scroll vers le haut, on le réaffiche
         setIsButtonVisible(true)
       }
       setLastScrollY(currentScrollY)
@@ -98,13 +98,22 @@ export default function Navbar() {
     { name: 'Quitter', href: '/', icon: SquareArrowRight },
   ]
 
+  // Liste filtrée excluant la page sur laquelle on se trouve actuellement
+  const remainingItems = useMemo(() => {
+    return navItems.filter(item => pathname !== item.href)
+  }, [pathname, navItems])
+
+  // Séparation pour entourer le gros bouton central (2 à gauche, 2 à droite) comme sur ton modèle
+  const leftItems = useMemo(() => remainingItems.slice(0, 2), [remainingItems])
+  const rightItems = useMemo(() => remainingItems.slice(2, 4), [remainingItems])
+
   if (pathname === '/login') return null
 
   const avatarFallbackName = encodeURIComponent(userName || nomAgence || 'User')
 
   return (
     <>
-      {/* DESKTOP NAV (Optimisé pour les écrans PC larges et moyens) */}
+      {/* 💻 DESKTOP NAV (Strictement Inaltéré) */}
       <nav className="hidden lg:block bg-white/80 backdrop-blur-md border-b border-gray-100 fixed top-0 left-0 right-0 z-50 shadow-sm print:hidden">
         <div className="max-w-7xl mx-auto px-4 xl:px-8">
           <div className="flex justify-between items-center h-20 gap-4">
@@ -184,86 +193,131 @@ export default function Navbar() {
         </div>
       </nav>
 
-      {/* MOBILE NAV (Actif sur écrans inférieurs à 1024px) */}
+      {/* 📱 MOBILE NAV (Exactement identique au modèle de la capture d'écran) */}
       <div className="lg:hidden">
-        {/* BOUTON FLOTTANT DYNAMIQUE (Animation de disparition au scroll) */}
-        <button
-          onClick={() => setIsMenuOpen(!isMenuOpen)}
-          className={`fixed bottom-6 right-6 z-[100] w-14 h-14 bg-blue-600 text-white rounded-2xl shadow-xl flex items-center justify-center hover:bg-blue-700 transition-all duration-300 ease-in-out
-            ${isButtonVisible ? 'translate-y-0 opacity-100' : 'translate-y-28 opacity-0 pointer-events-none'}`}
+        
+        {/* BARRE DE NAVIGATION BLANCHE COLLÉE EN BAS */}
+        <div 
+          className={`fixed bottom-0 left-0 right-0 h-20 bg-white border-t border-slate-100 rounded-t-[2.2rem] shadow-[0_-10px_30px_rgba(0,0,0,0.04)] z-[90] flex items-center justify-between px-4 pb-2 transition-all duration-300 ease-in-out
+            ${isButtonVisible ? 'translate-y-0 opacity-100' : 'translate-y-24 opacity-0 pointer-events-none'}`}
         >
-          {isMenuOpen ? <X size={26} /> : <Menu size={26} />}
-        </button>
+          {/* Éléments de gauche (Boutons 1 & 2) */}
+          <div className="flex flex-1 justify-around items-center">
+            {leftItems.map((item) => (
+              <Link
+                key={item.name}
+                href={item.href}
+                className="flex flex-col items-center justify-center gap-1 w-14 h-14 text-slate-400 active:scale-90 transition-transform duration-150"
+              >
+                <item.icon size={22} className="text-slate-400" />
+                <span className="text-[10px] font-medium text-slate-400 truncate max-w-[65px]">{item.name.split(' ')[0]}</span>
+              </Link>
+            ))}
+          </div>
 
-        {isMenuOpen && (
-          <>
-            <div
-              className="fixed inset-0 bg-black/40 backdrop-blur-sm z-[90] animate-fade-in"
-              onClick={() => setIsMenuOpen(false)}
-            />
+          {/* 3ÈME BOUTON CENTRAL : LE GRAND BOUTON ROND SURÉLEVÉ (+ / X) */}
+          <div className="relative w-16 h-16 flex items-center justify-center shrink-0 -translate-y-4">
+            <button
+              onClick={() => setIsMenuOpen(!isMenuOpen)}
+              className={`w-16 h-16 rounded-full flex items-center justify-center text-white shadow-lg transition-all duration-300 active:scale-95 border-4 border-white
+                ${isMenuOpen 
+                  ? 'bg-rose-500 rotate-45 shadow-rose-300' 
+                  : 'bg-[#2B3A67] shadow-slate-400'}`}
+            >
+              <Plus size={28} className="transition-transform duration-200" />
+            </button>
+          </div>
 
-            <div className="fixed bottom-24 right-6 left-6 z-[95] bg-white rounded-[2rem] p-5 shadow-2xl border border-gray-100 max-h-[75vh] overflow-y-auto">
-              <div className="flex items-center gap-4 mb-6 pb-4 border-b border-gray-100">
-                <div className="w-11 h-11 bg-blue-50 border border-blue-100 rounded-xl flex items-center justify-center">
-                  <Building2 className="text-blue-600" size={22} />
-                </div>
-                <div>
-                  <p className="text-sm font-bold text-gray-900">{nomAgence}</p>
-                  <p className="text-[10px] font-semibold text-blue-600 uppercase tracking-wider">
-                    Menu de Navigation
-                  </p>
-                </div>
-              </div>
+          {/* Éléments de droite (Boutons 3 & 4) */}
+          <div className="flex flex-1 justify-around items-center">
+            {rightItems.map((item) => (
+              <Link
+                key={item.name}
+                href={item.href}
+                className="flex flex-col items-center justify-center gap-1 w-14 h-14 text-slate-400 active:scale-90 transition-transform duration-150"
+              >
+                <item.icon size={22} className="text-slate-400" />
+                <span className="text-[10px] font-medium text-slate-400 truncate max-w-[65px]">{item.name.split(' ')[0]}</span>
+              </Link>
+            ))}
+          </div>
+        </div>
 
-              <div className="grid grid-cols-2 gap-2.5">
-                {role === 'admin' && (
-                  <Link
-                    href="/hajj/admin"
-                    onClick={() => setIsMenuOpen(false)}
-                    className="flex flex-col items-center justify-center gap-2 p-3 rounded-2xl bg-amber-50 border border-amber-100 text-amber-700"
-                  >
-                    <ShieldCheck size={20} />
-                    <span className="text-[11px] font-bold uppercase">Admin</span>
-                  </Link>
-                )}
+        {/* MODALE DE FOND FLOUE */}
+        <div 
+          className={`fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-[85] transition-opacity duration-300 
+            ${isMenuOpen ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'}`}
+          onClick={() => setIsMenuOpen(false)}
+        />
 
-                {navItems.map((item) => {
-                  const isActive = pathname === item.href
-                  return (
-                    <Link
-                      key={item.name}
-                      href={item.href}
-                      onClick={() => setIsMenuOpen(false)}
-                      className={`flex flex-col items-center justify-center gap-2 p-3 rounded-2xl border transition-all
-                        ${isActive
-                          ? 'bg-blue-50 border-blue-100 text-blue-700 font-bold'
-                          : 'bg-white border-gray-100 text-gray-600'
-                        }`}
-                    >
-                      <item.icon size={20} className={isActive ? 'text-blue-600' : 'text-gray-400'} />
-                      <span className="text-[11px] font-semibold text-center truncate w-full">
-                        {item.name}
-                      </span>
-                    </Link>
-                  )
-                })}
+        {/* COMPARTIMENT DROIT / TIROIR REBONDISSANT POUR LES AUTRES OPTIONS */}
+        <div 
+          className={`fixed bottom-0 left-0 right-0 z-[88] bg-white rounded-t-[2.5rem] border-t border-slate-100 shadow-2xl p-6 pb-28 max-h-[75vh] overflow-y-auto transition-transform duration-500 cubic-bezier(0.32, 0.94, 0.6, 1)
+            ${isMenuOpen ? 'translate-y-0' : 'translate-y-full'}`}
+        >
+          <div className="w-12 h-1 bg-slate-200 rounded-full mx-auto mb-5" />
 
-                <button
-                  onClick={handleLogout}
-                  className="flex flex-col items-center justify-center gap-2 p-3 rounded-2xl bg-red-50 text-red-600 border border-red-100 col-span-2 mt-2"
-                >
-                  <LogOut size={20} />
-                  <span className="text-[11px] font-bold uppercase">
-                    Déconnexion
-                  </span>
-                </button>
-              </div>
+          <div className="flex items-center gap-4 mb-6 pb-4 border-b border-slate-100">
+            <div className="w-10 h-10 bg-blue-50 border border-blue-100 rounded-xl flex items-center justify-center text-blue-600 font-bold shrink-0">
+              <Building2 size={20} />
             </div>
-          </>
-        )}
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-black text-slate-800 truncate">{nomAgence}</p>
+              <p className="text-[10px] font-bold text-blue-600 uppercase tracking-wider">Toutes les sections</p>
+            </div>
+          </div>
+
+          {/* Grille de navigation du Drawer principal */}
+          <div className="grid grid-cols-2 gap-2.5">
+            {role === 'admin' && (
+              <Link
+                href="/hajj/admin"
+                onClick={() => setIsMenuOpen(false)}
+                className="flex flex-col items-center justify-center gap-2 p-3.5 rounded-2xl bg-amber-50 border border-amber-100 text-amber-700 active:scale-[0.98] transition-transform"
+              >
+                <ShieldCheck size={20} />
+                <span className="text-[11px] font-black uppercase tracking-wide">Administration</span>
+              </Link>
+            )}
+
+            {navItems.map((item) => {
+              const isActive = pathname === item.href
+              return (
+                <Link
+                  key={item.name}
+                  href={item.href}
+                  onClick={() => setIsMenuOpen(false)}
+                  className={`flex flex-col items-center justify-center gap-2 p-3.5 rounded-2xl border transition-all active:scale-[0.98]
+                    ${isActive
+                      ? 'bg-blue-600 border-blue-600 text-white font-bold shadow-lg'
+                      : 'bg-slate-50/50 border-slate-100 text-slate-600'
+                    }`}
+                >
+                  <item.icon size={19} className={isActive ? 'text-white' : 'text-slate-400'} />
+                  <span className="text-[11px] font-bold tracking-tight text-center truncate w-full">
+                    {item.name}
+                  </span>
+                </Link>
+              )
+            })}
+
+            {/* Bouton de déconnexion */}
+            <button
+              onClick={() => {
+                setIsMenuOpen(false)
+                handleLogout()
+              }}
+              className="flex flex-col items-center justify-center gap-2 p-3.5 rounded-2xl bg-rose-50 text-rose-600 border border-rose-100 col-span-2 mt-2 active:scale-[0.98] transition-transform"
+            >
+              <LogOut size={19} />
+              <span className="text-[11px] font-black uppercase tracking-wider">Déconnexion</span>
+            </button>
+          </div>
+        </div>
+
       </div>
 
-      {/* Spacer pour compenser le `fixed` sur PC */}
+      {/* Remplissage de l'espace haut réservé au PC */}
       <div className="hidden lg:block h-20" />
     </>
   )

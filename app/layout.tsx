@@ -1,9 +1,7 @@
 import './globals.css'
-import { Suspense } from 'react'
-import MobileTopBar from '@/components/MobileTopBar' 
-import PwaInstaller from '@/components/PwaInstaller'
+import PwaInstaller from '@/components/PwaInstaller' // 1. Remise de l'installateur PWA
 
-// Méthode recommandée par Next.js pour injecter le manifest proprement sans casser ton code
+// 2. Remise de la configuration pour que Chrome détecte le manifest en production
 export const metadata = {
   manifest: '/manifest.json',
 }
@@ -17,17 +15,11 @@ export default function RootLayout({
     <html lang="fr">
       <body className="min-h-screen antialiased text-slate-900 bg-transparent">
         
-        {/* 1. La Top Bar Fixe (visible uniquement sur mobile grâce au md:hidden) */}
-        <Suspense fallback={null}>
-          <MobileTopBar />
-        </Suspense>
-
-        {/* 2. Le reste de ton application */}
-        <main className="pt-16 md:pt-0">
+        <main>
           {children}
         </main>
 
-        {/* Gestionnaire d'installation PWA et du Service Worker */}
+        {/* 3. Remise du composant qui gère le Service Worker et l'affichage du pop-up */}
         <PwaInstaller />
 
       </body>
