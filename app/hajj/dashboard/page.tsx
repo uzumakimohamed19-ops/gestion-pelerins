@@ -394,7 +394,7 @@ export default function Dashboard() {
                 {[
                   { label: 'Dossiers justificatifs', pct: stats.tauxCompletion, color: 'bg-blue-600' },
                   { label: 'Paiements encaissés', pct: stats.tauxPaiement, color: 'bg-emerald-500' },
-                  { label: 'Validations Gouv', pct: stats.tauxTeal || stats.tauxGouv, color: 'bg-teal-500' },
+                  { label: 'Validations Gouv', pct: stats.tauxGouv, color: 'bg-teal-500' },
                   { label: 'Inscriptions Nusuk', pct: stats.tauxNusuk, color: 'bg-purple-500' },
                 ].map((r, i) => (
                   <div key={i} className="space-y-1">
@@ -610,8 +610,8 @@ export default function Dashboard() {
                       <p className="text-xs text-slate-400">{p.telephone_pelerin || 'Pas de numéro'}</p>
                     </div>
                     <div className="shrink-0 text-right">
-                      <span className={`text-xs font-black px-2.5 py-1 rounded-md ${p.total_paye > 0 ? 'text-emerald-700 bg-emerald-50' : 'text-rose-600 bg-rose-50'}`}>
-                        {p.total_paye > 0 ? `${p.total_paye.toLocaleString('fr-FR')} CFA` : 'Impayé'}
+                      <span className={`text-xs font-black px-2.5 py-1 rounded-md ${(p.total_paye ?? 0) > 0 ? 'text-emerald-700 bg-emerald-50' : 'text-rose-600 bg-rose-50'}`}>
+                        {(p.total_paye ?? 0) > 0 ? `${(p.total_paye ?? 0).toLocaleString('fr-FR')} CFA` : 'Impayé'}
                       </span>
                     </div>
                   </li>
