@@ -10,6 +10,7 @@ import {
 } from 'lucide-react'
 import Link from 'next/link'
 import { YearSelector } from '@/components/YearSelector'
+import { useUI } from '@/lib/UIContext'
 
 // ─── AVATARS PÈLERINS AFRICAINS DYNAMIQUES (SVG) ─────────────────────────────
 
@@ -205,6 +206,13 @@ export default function DetailsPelerin() {
   const [showScanModal, setShowScanModal] = useState(false)
   const [role, setRole] = useState<string>('staff')
   const [avatarImgError, setAvatarImgError] = useState({ female: false, male: false })
+
+  const { setHideNavbar } = useUI()
+
+  useEffect(() => {
+    setHideNavbar(!!showScanModal)
+    return () => setHideNavbar(false)
+  }, [showScanModal, setHideNavbar])
 
   const handleChange = (field: string, value: any) => {
     if (!p) return

@@ -24,6 +24,18 @@ import {
 } from 'lucide-react'
 
 export default function Navbar() {
+  const { hideNavbar } = (function safeUseUI() {
+    try {
+      // dynamic import inside component to avoid server-only execution errors
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      const { useUI } = require('@/lib/UIContext')
+      return useUI()
+    } catch (e) {
+      return { hideNavbar: false }
+    }
+  })()
+
+  if (hideNavbar) return null
   const pathname = usePathname()
   const router = useRouter()
   const [nomAgence, setNomAgence] = useState<string>('Chargement...')
