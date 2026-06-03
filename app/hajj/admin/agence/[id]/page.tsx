@@ -4,9 +4,12 @@ import { useParams } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import { Search, Globe, ShieldCheck, Eye, CreditCard, AlertCircle, ArrowLeft } from 'lucide-react'
 import Link from 'next/link'
+import { useYear } from '@/lib/YearContext'
+import { YearSelector } from '@/components/YearSelector'
 
 export default function ListeAdminPelerins() {
   const { id } = useParams()
+  const { selectedYear } = useYear()
   const [pelerins, setPelerins] = useState<any[]>([])
   const [search, setSearch] = useState('')
   const [loading, setLoading] = useState(true)
@@ -62,8 +65,13 @@ export default function ListeAdminPelerins() {
 
   const filtered = pelerins.filter(p => 
     p.nom_complet?.toLowerCase().includes(search.toLowerCase()) ||
+    p.prenom?.toLowerCase().includes(search.toLowerCase()) ||
     p.num_passeport?.toLowerCase().includes(search.toLowerCase())
-  )
+  ).filter(p => {
+    if (selectedYear === 'all') return true
+    if (p.campagne === undefined || p.campagne === null) return false
+    return Number(p.campagne) === selectedYear
+  })
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
@@ -85,15 +93,25 @@ export default function ListeAdminPelerins() {
           </p>
         </div>
         
-        <div className="relative group">
-          <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" size={20} />
-          <input 
-            type="text"
-            placeholder="Rechercher..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="pl-12 pr-6 py-4 bg-white border border-gray-100 rounded-2xl w-full md:w-[350px] shadow-sm focus:ring-4 focus:ring-blue-50 outline-none font-bold text-gray-700"
-          />
+        <div className="flex flex-col sm:flex-row gap-3 items-stretch sm:items-center">
+          <div className="sm:hidden w-full">
+            <YearSelector />
+          </div>
+        
+          <div className="relative group">
+            <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" size={20} />
+            <input 
+              type="text"
+              placeholder="Rechercher..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="pl-12 pr-6 py-4 bg-white border border-gray-100 rounded-2xl w-full md:w-[350px] shadow-sm focus:ring-4 focus:ring-blue-50 outline-none font-bold text-gray-700"
+            />
+          </div>
+        
+          <div className="hidden sm:block">
+            <YearSelector />
+          </div>
         </div>
       </div>
 
@@ -115,53 +133,57 @@ export default function ListeAdminPelerins() {
           </div>
         ) : (
           <div className="grid grid-cols-2 gap-3">
-            {filtered.map((p) => (
-              <div key={p.id} className="bg-white border border-gray-100 rounded-[2rem] p-4 shadow-md flex flex-col justify-between relative overflow-hidden group">
-                <div>
-                  {/* Avatar & Action Eye */}
-                  <div className="flex items-center justify-between gap-2 mb-3">
-                    <div className="w-8 h-8 rounded-xl bg-gray-900 text-white flex items-center justify-center font-black text-[10px]">
-                      {p.nom_complet?.substring(0, 2).toUpperCase()}
+            {filtered.map((p) => {
+              const displayLabel = p.prenom ? `${p.prenom} ${p.nom_complet || ''}` : p.nom_complet
+              return (
+                <div key={p.id} className="bg-white border border-gray-100 rounded-[2rem] p-4 shadow-md flex flex-col justify-between relative overflow-hidden group">
+                  <div>
+                    {/* Avatar & Action Eye */}
+                    <div className="flex items-center justify-between gap-2 mb-3">
+                      <div className="w-8 h-8 rounded-xl bg-gray-900 text-white flex items-center justify-center font-black text-[10px]">
+                        {p.prenom ? p.prenom.substring(0, 1).toUpperCase() : ''}
+                        {p.nom_complet ? p.nom_complet.substring(0, 1).toUpperCase() : ''}
+                      </div>
+                      <Link 
+                        href={`/hajj/admin/pelerin/${p.id}`}
+                        className="w-8 h-8 rounded-xl bg-gray-50 border border-gray-100 text-gray-900 flex items-center justify-center transition-all"
+                      >
+                        <Eye size={14} />
+                      </Link>
                     </div>
-                    <Link 
-                      href={`/hajj/admin/pelerin/${p.id}`}
-                      className="w-8 h-8 rounded-xl bg-gray-50 border border-gray-100 text-gray-900 flex items-center justify-center transition-all"
+
+                    {/* Infos Pèlerin */}
+                    <div className="mb-4">
+                      <p className="font-black text-gray-900 uppercase text-xs truncate leading-tight" title={displayLabel}>
+                        {displayLabel}
+                      </p>
+                      <p className="text-[9px] font-mono font-black text-gray-400 mt-1 flex items-center gap-0.5 truncate">
+                        <CreditCard size={10} /> {p.num_passeport}
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Statuts / Toggles (Empilés verticalement dans le bloc) */}
+                  <div className="flex flex-col gap-2 mt-auto pt-2 border-t border-gray-50">
+                    <button
+                      onClick={() => toggleStatus(p.id, 'sur_plateforme_gouv', !p.sur_plateforme_gouv)}
+                      className={`w-full px-2 py-1.5 rounded-xl flex items-center justify-center gap-1 ${p.sur_plateforme_gouv ? 'bg-green-100 text-green-700' : 'bg-gray-50 text-gray-400 opacity-80'}`}
                     >
-                      <Eye size={14} />
-                    </Link>
-                  </div>
+                      <ShieldCheck size={12} />
+                      <span className="text-[8px] font-black uppercase tracking-tighter">Gouv</span>
+                    </button>
 
-                  {/* Infos Pèlerin */}
-                  <div className="mb-4">
-                    <p className="font-black text-gray-900 uppercase text-xs truncate leading-tight" title={p.nom_complet}>
-                      {p.nom_complet}
-                    </p>
-                    <p className="text-[9px] font-mono font-black text-gray-400 mt-1 flex items-center gap-0.5 truncate">
-                      <CreditCard size={10} /> {p.num_passeport}
-                    </p>
+                    <button
+                      onClick={() => toggleStatus(p.id, 'sur_plateforme_nusuk', !p.sur_plateforme_nusuk)}
+                      className={`w-full px-2 py-1.5 rounded-xl flex items-center justify-center gap-1 ${p.sur_plateforme_nusuk ? 'bg-blue-100 text-blue-700' : 'bg-gray-50 text-gray-400 opacity-80'}`}
+                    >
+                      <Globe size={12} />
+                      <span className="text-[8px] font-black uppercase tracking-tighter">Nusuk</span>
+                    </button>
                   </div>
                 </div>
-
-                {/* Statuts / Toggles (Empilés verticalement dans le bloc) */}
-                <div className="flex flex-col gap-2 mt-auto pt-2 border-t border-gray-50">
-                  <button
-                    onClick={() => toggleStatus(p.id, 'sur_plateforme_gouv', !p.sur_plateforme_gouv)}
-                    className={`w-full px-2 py-1.5 rounded-xl flex items-center justify-center gap-1 ${p.sur_plateforme_gouv ? 'bg-green-100 text-green-700' : 'bg-gray-50 text-gray-400 opacity-80'}`}
-                  >
-                    <ShieldCheck size={12} />
-                    <span className="text-[8px] font-black uppercase tracking-tighter">Gouv</span>
-                  </button>
-
-                  <button
-                    onClick={() => toggleStatus(p.id, 'sur_plateforme_nusuk', !p.sur_plateforme_nusuk)}
-                    className={`w-full px-2 py-1.5 rounded-xl flex items-center justify-center gap-1 ${p.sur_plateforme_nusuk ? 'bg-blue-100 text-blue-700' : 'bg-gray-50 text-gray-400 opacity-80'}`}
-                  >
-                    <Globe size={12} />
-                    <span className="text-[8px] font-black uppercase tracking-tighter">Nusuk</span>
-                  </button>
-                </div>
-              </div>
-            ))}
+              )
+            })}
           </div>
         )}
       </div>
@@ -190,61 +212,65 @@ export default function ListeAdminPelerins() {
                   </td>
                 </tr>
               ) : (
-                filtered.map((p) => (
-                  <tr key={p.id} className="hover:bg-blue-50/20 transition-colors group">
-                    <td className="px-8 py-6">
-                      <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-xl bg-gray-900 text-white flex items-center justify-center font-black text-xs">
-                          {p.nom_complet?.substring(0, 2).toUpperCase()}
+                filtered.map((p) => {
+                  const displayLabel = p.prenom ? `${p.prenom} ${p.nom_complet || ''}` : p.nom_complet
+                  return (
+                    <tr key={p.id} className="hover:bg-blue-50/20 transition-colors group">
+                      <td className="px-8 py-6">
+                        <div className="flex items-center gap-3">
+                          <div className="w-10 h-10 rounded-xl bg-gray-900 text-white flex items-center justify-center font-black text-xs">
+                            {p.prenom ? p.prenom.substring(0, 1).toUpperCase() : ''}
+                            {p.nom_complet ? p.nom_complet.substring(0, 1).toUpperCase() : ''}
+                          </div>
+                          <div>
+                            <p className="font-black text-gray-900 uppercase text-sm leading-tight">{displayLabel}</p>
+                            <p className="text-[10px] font-bold text-blue-600 uppercase mt-0.5">{p.agence_nom}</p>
+                          </div>
                         </div>
-                        <div>
-                          <p className="font-black text-gray-900 uppercase text-sm leading-tight">{p.nom_complet}</p>
-                          <p className="text-[10px] font-bold text-blue-600 uppercase mt-0.5">{p.agence_nom}</p>
+                      </td>
+
+                      <td className="px-6 py-6">
+                        <div className="flex flex-col">
+                          <span className="flex items-center gap-1 font-mono font-black text-gray-900 text-sm">
+                            <CreditCard size={12} className="text-gray-400" /> {p.num_passeport}
+                          </span>
+                          <span className="text-[10px] font-bold text-gray-400 uppercase">Exp: {p.date_expiration || "N/A"}</span>
                         </div>
-                      </div>
-                    </td>
+                      </td>
 
-                    <td className="px-6 py-6">
-                      <div className="flex flex-col">
-                        <span className="flex items-center gap-1 font-mono font-black text-gray-900 text-sm">
-                          <CreditCard size={12} className="text-gray-400" /> {p.num_passeport}
-                        </span>
-                        <span className="text-[10px] font-bold text-gray-400 uppercase">Exp: {p.date_expiration || "N/A"}</span>
-                      </div>
-                    </td>
+                      <td className="px-6 py-6 text-center">
+                        <button
+                          onClick={() => toggleStatus(p.id, 'sur_plateforme_gouv', !p.sur_plateforme_gouv)}
+                          className={`mx-auto w-fit px-3 py-1.5 rounded-full flex items-center gap-1.5 ${p.sur_plateforme_gouv ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-400 opacity-60 hover:bg-gray-200'} transition-all`}
+                          title={p.sur_plateforme_gouv ? 'Désactiver statuts gouv' : 'Valider sur gouv'}
+                        >
+                          <ShieldCheck size={14} />
+                          <span className="text-[9px] font-black uppercase tracking-tighter">{p.sur_plateforme_gouv ? 'Validé' : 'À faire'}</span>
+                        </button>
+                      </td>
 
-                    <td className="px-6 py-6 text-center">
-                      <button
-                        onClick={() => toggleStatus(p.id, 'sur_plateforme_gouv', !p.sur_plateforme_gouv)}
-                        className={`mx-auto w-fit px-3 py-1.5 rounded-full flex items-center gap-1.5 ${p.sur_plateforme_gouv ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-400 opacity-60 hover:bg-gray-200'} transition-all`}
-                        title={p.sur_plateforme_gouv ? 'Désactiver statuts gouv' : 'Valider sur gouv'}
-                      >
-                        <ShieldCheck size={14} />
-                        <span className="text-[9px] font-black uppercase tracking-tighter">{p.sur_plateforme_gouv ? 'Validé' : 'À faire'}</span>
-                      </button>
-                    </td>
+                      <td className="px-6 py-6 text-center">
+                        <button
+                          onClick={() => toggleStatus(p.id, 'sur_plateforme_nusuk', !p.sur_plateforme_nusuk)}
+                          className={`mx-auto w-fit px-3 py-1.5 rounded-full flex items-center gap-1.5 ${p.sur_plateforme_nusuk ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-400 opacity-60 hover:bg-gray-200'} transition-all`}
+                          title={p.sur_plateforme_nusuk ? 'Désactiver statuts nusuk' : 'Valider sur nusuk'}
+                        >
+                          <Globe size={14} />
+                          <span className="text-[9px] font-black uppercase tracking-tighter">{p.sur_plateforme_nusuk ? 'Inscrit' : 'À faire'}</span>
+                        </button>
+                      </td>
 
-                    <td className="px-6 py-6 text-center">
-                      <button
-                        onClick={() => toggleStatus(p.id, 'sur_plateforme_nusuk', !p.sur_plateforme_nusuk)}
-                        className={`mx-auto w-fit px-3 py-1.5 rounded-full flex items-center gap-1.5 ${p.sur_plateforme_nusuk ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-400 opacity-60 hover:bg-gray-200'} transition-all`}
-                        title={p.sur_plateforme_nusuk ? 'Désactiver statuts nusuk' : 'Valider sur nusuk'}
-                      >
-                        <Globe size={14} />
-                        <span className="text-[9px] font-black uppercase tracking-tighter">{p.sur_plateforme_nusuk ? 'Inscrit' : 'À faire'}</span>
-                      </button>
-                    </td>
-
-                    <td className="px-8 py-6 text-right">
-                      <Link 
-                        href={`/hajj/admin/pelerin/${p.id}`}
-                        className="inline-flex items-center justify-center w-10 h-10 rounded-xl bg-white border border-gray-200 text-gray-900 hover:bg-gray-900 hover:text-white transition-all shadow-sm"
-                      >
-                        <Eye size={18} />
-                      </Link>
-                    </td>
-                  </tr>
-                ))
+                      <td className="px-8 py-6 text-right">
+                        <Link 
+                          href={`/hajj/admin/pelerin/${p.id}`}
+                          className="inline-flex items-center justify-center w-10 h-10 rounded-xl bg-white border border-gray-200 text-gray-900 hover:bg-gray-900 hover:text-white transition-all shadow-sm"
+                        >
+                          <Eye size={18} />
+                        </Link>
+                      </td>
+                    </tr>
+                  )
+                })
               )}
             </tbody>
           </table>

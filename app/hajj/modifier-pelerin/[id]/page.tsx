@@ -70,6 +70,7 @@ export default function ModifierPelerin() {
     sur_plateforme_gouv: false,
     sur_plateforme_nusuk: false,
     date_inscription: '',
+    campagne: new Date().getFullYear(),
     document_url: ''
   })
 
@@ -128,6 +129,7 @@ export default function ModifierPelerin() {
             sur_plateforme_gouv: !!data.sur_plateforme_gouv,
             sur_plateforme_nusuk: !!data.sur_plateforme_nusuk,
             date_inscription: data.date_inscription || '',
+            campagne: data.campagne || new Date().getFullYear(),
             document_url: data.document_url || ''
           })
           setPrixPackageInput(formatAmount(prixPackage))
@@ -195,6 +197,7 @@ export default function ModifierPelerin() {
           sur_plateforme_gouv: formData.sur_plateforme_gouv,
           sur_plateforme_nusuk: formData.sur_plateforme_nusuk,
           date_inscription: formData.date_inscription || null,
+          campagne: formData.campagne || null,
           document_url: finalDocUrl 
         })
         .eq('id', id)
@@ -296,6 +299,23 @@ export default function ModifierPelerin() {
                   type="date" value={formData.date_inscription} onChange={(e) => handleInputChange('date_inscription', e.target.value)}
                   className="w-full px-4 py-3.5 rounded-xl border-2 border-gray-100 bg-gray-50 text-gray-900 font-bold focus:border-blue-600 focus:bg-white outline-none transition-all text-sm"
                 />
+              </div>
+              
+              <div>
+                <label className="block text-[10px] font-black text-gray-400 mb-1.5 uppercase tracking-wider">Campagne</label>
+                <select
+                  value={formData.campagne}
+                  onChange={(e) => handleInputChange('campagne', Number(e.target.value))}
+                  className="w-full px-4 py-3.5 rounded-xl border-2 border-gray-100 bg-gray-50 text-gray-900 font-bold focus:border-blue-600 outline-none transition-all text-sm appearance-none"
+                >
+                  {(() => {
+                    const start = 2024
+                    const end = new Date().getFullYear() + 5
+                    const opts: number[] = []
+                    for (let y = start; y <= end; y++) opts.push(y)
+                    return opts.map(y => <option key={y} value={y}>{y}</option>)
+                  })()}
+                </select>
               </div>
             </div>
           </div>

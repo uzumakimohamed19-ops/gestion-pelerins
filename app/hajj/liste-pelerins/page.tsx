@@ -1,6 +1,8 @@
 'use client'
 import { useEffect, useState } from 'react'
 import { supabase, getUser } from '@/lib/supabase'
+import { useYear } from '@/lib/YearContext'
+import { YearSelector } from '@/components/YearSelector'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { Search, Download, Plus, User, CreditCard, ChevronRight, Loader2, Calendar, Hash, Building2, Phone, X } from 'lucide-react'
@@ -33,6 +35,7 @@ interface Pelerin {
 type FilterType = 'date' | 'reference' | 'agence' | 'phone' | 'date_depart' | 'date_retour' | null;
 
 export default function ListePelerins() {
+  const { selectedYear } = useYear()
   const [pelerins, setPelerins] = useState<Pelerin[]>([])
   const [searchTerm, setSearchTerm] = useState('')
   const [loading, setLoading] = useState(true)
@@ -65,7 +68,7 @@ export default function ListePelerins() {
       }
     }
     checkUserAndFetch()
-  }, [router])
+  }, [router, selectedYear])
 
   async function fetchPelerins() {
     setLoading(true)
@@ -74,7 +77,17 @@ export default function ListePelerins() {
       .select('*, agences ( nom_agence )')
       .order('created_at', { ascending: false })
 
-    if (!error) setPelerins((data as any[]) || [])
+    if (!error) {
+      const filteredData = (data as any[]) || []
+      // Filtrer par année sélectionnée
+      const yearFilteredData = selectedYear === 'all'
+        ? filteredData
+        : filteredData.filter(p => {
+            if (p.campagne === undefined || p.campagne === null) return false
+            return Number(p.campagne) === selectedYear
+          })
+      setPelerins(yearFilteredData)
+    }
     setLoading(false)
   }
 
@@ -227,6 +240,7 @@ export default function ListePelerins() {
           <p className="text-gray-500 font-bold mt-1 uppercase text-xs tracking-widest">{pelerins.length} pèlerins au total</p>
         </div>
         <div className="grid grid-cols-2 sm:flex gap-3">
+          <YearSelector />
           <button 
             onClick={exporterExcel} 
             className="flex items-center justify-center gap-2 bg-emerald-50 text-emerald-700 hover:bg-emerald-100/80 px-4 py-3.5 rounded-2xl font-black text-sm border border-emerald-100 transition-all duration-200 hover:-translate-y-0.5 active:translate-y-0 active:scale-95"
@@ -364,8 +378,7 @@ export default function ListePelerins() {
                         <User size={20} />
                       </div>
                       <div>
-                        <h3 className="font-black text-gray-900 leading-tight">{p.prenom}
-                          {p.nom_complet} </h3>
+                        <h3 className="font-black text-gray-900 leading-tight">{p.prenom}  {p.nom_complet} </h3>
                         <p className="text-[10px] font-bold text-gray-400 uppercase tracking-tighter mt-0.5">{p.num_passeport}</p>
                       </div>
                     </div>

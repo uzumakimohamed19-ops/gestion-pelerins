@@ -6,9 +6,10 @@ import {
   User, CreditCard, ArrowLeft, Pencil, Printer, Save, Syringe, 
   BookOpen, Hotel, Plane, Loader2, ShieldCheck, Tag, Building, 
   AlertTriangle, MessageCircle, Clock, TrendingUp, UserPlus, FileCheck, PlaneTakeoff,
-  UserCheck, UserRound, Globe, CheckCircle2, HelpCircle
+  UserCheck, UserRound, Globe, CheckCircle2, HelpCircle, Eye
 } from 'lucide-react'
 import Link from 'next/link'
+import { YearSelector } from '@/components/YearSelector'
 
 // ─── AVATARS PÈLERINS AFRICAINS DYNAMIQUES (SVG) ─────────────────────────────
 
@@ -45,7 +46,7 @@ const AvatarHommeVieux = ({ size = 56 }: { size?: number }) => (
     <rect x="31" y="38" width="10" height="6" rx="3" fill="#6a3e25"/>
     {/* Tête */}
     <ellipse cx="36" cy="27" rx="13" ry="14" fill="#7a4e2d"/>
-    {/* Cheveux gris/blancs */}
+    {/* Cheveux grises */}
     <path d="M23,21 Q24,13 36,11 Q48,13 49,21 Q46,15 36,14 Q26,15 23,21Z" fill="#b8b0a4"/>
     {/* Tempes grises */}
     <path d="M23,21 Q21,26 22,30 Q24,25 23,21Z" fill="#c8c0b4"/>
@@ -201,6 +202,7 @@ export default function DetailsPelerin() {
   const [p, setPelerin] = useState<any | null>(null)
   const [loading, setLoading] = useState(true)
   const [updating, setUpdating] = useState(false)
+  const [showScanModal, setShowScanModal] = useState(false)
   const [role, setRole] = useState<string>('staff')
   const [avatarImgError, setAvatarImgError] = useState({ female: false, male: false })
 
@@ -228,7 +230,8 @@ export default function DetailsPelerin() {
         groupe_encadrement: p.groupe_encadrement || null,
         date_depart: p.date_depart || null,
         date_retour: p.date_retour || null,
-        visa_obtenu: p.visa_obtenu
+        visa_obtenu: p.visa_obtenu,
+        document_url: p.document_url || null
       })
       .eq('id', p.id)
 
@@ -411,6 +414,9 @@ export default function DetailsPelerin() {
                     </span>
                   </div>
                 </div>
+                <div className="sm:hidden w-full mt-3">
+                  <YearSelector />
+                </div>
                 <div className="flex items-center gap-4 text-xs font-bold text-slate-400 mt-3">
                   <p className="flex items-center gap-1 bg-slate-50 px-2.5 py-1 rounded-md border border-slate-100">
                     <Tag size={12} className="text-slate-400" /> Réf : <span className="text-slate-700 font-black">{p.reference || 'Non spécifiée'}</span>
@@ -421,7 +427,18 @@ export default function DetailsPelerin() {
                 </div>
             </div>
             
-            <div className="grid grid-cols-2 md:flex gap-3 items-end">
+            <div className="grid grid-cols-2 md:flex gap-3 items-end flex-wrap">
+              <div className="hidden md:block mr-2">
+                <YearSelector />
+              </div>
+              {/* BOUTON VOIR LE SCAN AJOUTÉ À CÔTÉ DU NOM & WHATSAPP */}
+              <button 
+                onClick={() => setShowScanModal(true)} 
+                className="bg-indigo-50 border border-indigo-200 text-indigo-700 p-4 rounded-2xl hover:bg-indigo-100 hover:scale-[1.03] transition-all duration-200 font-black text-xs flex justify-center items-center gap-2 shadow-lg shadow-indigo-500/10 cursor-pointer"
+              >
+                <Eye size={18} className="text-indigo-600" /> Voir le scan
+              </button>
+
               {p.telephone_pelerin && (
                 <a href={urlWhatsApp} target="_blank" rel="noopener noreferrer" className="bg-emerald-500 text-white p-4 rounded-2xl hover:bg-emerald-600 font-bold text-xs flex justify-center items-center gap-2 shadow-lg shadow-emerald-500/20 hover:shadow-emerald-500/40 hover:scale-[1.03] transition-all duration-200">
                   <MessageCircle size={18} /> WhatsApp
@@ -659,6 +676,130 @@ export default function DetailsPelerin() {
 
         </div>
       </div>
+
+      {/* MODAL POUR VOIR LE SCAN DU PASSEPORT */}
+      {showScanModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-fadeIn">
+          <div className="bg-white rounded-[2rem] shadow-2xl border border-slate-100 max-w-2xl w-full max-h-[90vh] flex flex-col overflow-hidden">
+            
+            {/* Header Modal */}
+            <div className="p-6 border-b border-slate-100 flex items-center justify-between bg-gradient-to-r from-slate-50 to-white">
+              <div>
+                <h3 className="font-black text-slate-800 text-lg uppercase tracking-wide flex items-center gap-2">
+                  <FileCheck className="text-indigo-600" size={20} /> Scan de Document du Pèlerin
+                </h3>
+                <p className="text-xs font-bold text-slate-400 uppercase mt-0.5">{p.prenom} {p.nom_complet} — Réf {p.reference || 'Non spécifiée'}</p>
+              </div>
+              <button 
+                onClick={() => setShowScanModal(false)}
+                className="w-10.5 h-10.5 rounded-full border border-slate-200 flex items-center justify-center text-slate-500 hover:text-slate-800 hover:bg-slate-50 transition-all font-bold cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Content / Viewer */}
+            <div className="p-6 overflow-y-auto flex-1 flex flex-col items-center justify-center bg-slate-50 min-h-[350px]">
+              {p.document_url ? (
+                <div className="w-full h-full flex flex-col items-center gap-4">
+                  <div className="border border-slate-200 rounded-2xl overflow-hidden shadow-inner max-h-[50vh] w-full flex items-center justify-center bg-white p-2">
+                    <img 
+                      src={p.document_url} 
+                      alt={`Scan Passeport - ${p.nom_complet}`} 
+                      className="max-h-[45vh] w-auto max-w-full rounded-lg object-contain transition-transform duration-300 hover:scale-[1.02]"
+                    />
+                  </div>
+                  <div className="flex gap-2">
+                    <button 
+                      onClick={() => {
+                        const win = window.open();
+                        if (win) {
+                          win.document.write(`<iframe src="${p.document_url}" frameborder="0" style="border:0; top:0px; left:0px; bottom:0px; right:0px; width:100%; height:100%;" allowfullscreen></iframe>`);
+                        }
+                      }}
+                      className="bg-slate-200 text-slate-700 px-4 py-2 rounded-xl text-xs font-black uppercase hover:bg-slate-300 transition-all flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <Eye size={14} /> Ouvrir en plein écran
+                    </button>
+                    <button 
+                      onClick={() => handleChange('document_url', '')}
+                      className="bg-red-50 text-red-600 border border-red-100 px-4 py-2 rounded-xl text-xs font-black uppercase hover:bg-red-100 transition-all flex items-center gap-1.5 cursor-pointer"
+                    >
+                      ✕ Supprimer le scan
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="w-full max-w-md bg-white p-6 rounded-2xl border border-slate-200/80 shadow-md flex flex-col items-center text-center space-y-4">
+                  
+                  {/* PASSPORT GRAPHIC PLACEHOLDER */}
+                  <div className="w-24 h-32 bg-indigo-900 rounded-xl relative shadow-md p-3 flex flex-col justify-between overflow-hidden text-yellow-400">
+                    <div className="border border-yellow-400/30 rounded p-1 text-center">
+                      <p className="text-[6px] uppercase font-black tracking-widest leading-none">PASSPORT</p>
+                    </div>
+                    <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2">
+                      <Globe size={32} className="opacity-80 text-yellow-400 animate-pulse" />
+                    </div>
+                    <div className="flex justify-between items-end">
+                      <div className="w-4 h-5 bg-yellow-400/40 rounded-sm"></div>
+                      <div className="w-10 h-1 bg-yellow-400/60 rounded"></div>
+                    </div>
+                  </div>
+
+                  <div className="space-y-1">
+                    <h4 className="font-black text-slate-800 text-sm uppercase">Aucun scan de document enregistré</h4>
+                    <p className="text-xs text-slate-400 font-bold max-w-xs mx-auto">Veuillez téléverser un scan de passeport ou de document d'identité en cliquant sur le bouton ci-dessous.</p>
+                  </div>
+
+                  {/* FILE UPLOAD CONTROLS */}
+                  <div className="w-full">
+                    <label className="w-full border-2 border-dashed border-indigo-200 hover:border-indigo-400 bg-indigo-50/20 hover:bg-indigo-50/50 rounded-2xl p-6 flex flex-col items-center justify-center gap-1.5 cursor-pointer transition-all duration-200">
+                      <FileCheck className="text-indigo-500 animate-bounce" size={24} />
+                      <span className="text-xs font-black text-indigo-700 uppercase">Téléverser un document</span>
+                      <span className="text-[10px] text-slate-400">Formats acceptés: PNG, JPG ou PDF (Max 5Mo)</span>
+                      <input 
+                        type="file" 
+                        accept="image/*, application/pdf" 
+                        onChange={(e) => {
+                          const file = e.target.files?.[0];
+                          if (file) {
+                            const reader = new FileReader();
+                            reader.onloadend = () => {
+                              handleChange('document_url', reader.result);
+                            };
+                            reader.readAsDataURL(file);
+                          }
+                        }}
+                        className="hidden" 
+                      />
+                    </label>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Footer Modal */}
+            <div className="p-6 bg-slate-50 border-t border-slate-150 flex items-center justify-end gap-3">
+              <button 
+                onClick={() => setShowScanModal(false)}
+                className="bg-slate-200 hover:bg-slate-300 text-slate-700 px-5 py-3 rounded-xl text-xs font-black uppercase transition-all cursor-pointer"
+              >
+                Fermer
+              </button>
+              <button 
+                onClick={() => {
+                  saveAdvancedData();
+                  setShowScanModal(false);
+                }}
+                className="bg-indigo-600 text-white px-5 py-3 rounded-xl text-xs font-black uppercase shadow-md shadow-indigo-600/10 hover:shadow-indigo-650/30 hover:scale-[1.02] transition-colors cursor-pointer"
+              >
+                Enregistrer les modifications
+              </button>
+            </div>
+
+          </div>
+        </div>
+      )}
     </div>
   )
 }

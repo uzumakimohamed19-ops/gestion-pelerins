@@ -19,6 +19,7 @@ export default function AjouterPelerin() {
   const [dateNaissance, setDateNaissance] = useState('')
   const [dateExpiration, setDateExpiration] = useState('')
   const [dateInscription, setDateInscription] = useState(new Date().toISOString().split('T')[0])
+  const [campagne, setCampagne] = useState<number | null>(new Date().getFullYear())
   const [associe, setAssocie] = useState('')
   const [total, setTotal] = useState(0)
   const [totalInput, setTotalInput] = useState('')
@@ -58,6 +59,7 @@ export default function AjouterPelerin() {
   const resetForm = () => {
     setNom(''); setPrenom(''); setReference(''); setPasseport(''); setPhone(''); setSexe(''); setDateNaissance('');
     setDateExpiration(''); setDateInscription(new Date().toISOString().split('T')[0]); 
+    setCampagne(new Date().getFullYear())
     setAssocie(''); setTotal(0); setTotalInput(''); setPaye(0); setPayeInput(''); setNomPackage(''); setFileToUpload(null);
     setMessage({ text: '', type: '' });
   }
@@ -188,6 +190,7 @@ export default function AjouterPelerin() {
         date_naissance: dateNaissance, 
         date_expiration: dateExpiration,
         date_inscription: dateInscription,
+        campagne: campagne,
         prix_package: total, 
         total_paye: paye, 
         nom_package: nomPackage || null, // Ajout du champ optionnel
@@ -285,6 +288,23 @@ export default function AjouterPelerin() {
                     type="date" value={dateInscription} onChange={(e) => setDateInscription(e.target.value)}
                     className="w-full px-5 py-4 rounded-2xl border-2 border-blue-50 bg-blue-50/30 text-gray-900 font-bold focus:border-blue-600 outline-none"
                   />
+                </div>
+
+                <div>
+                  <label className="text-[10px] font-black text-gray-400 uppercase ml-4 mb-1 block">Campagne</label>
+                  <select
+                    value={campagne ?? ''}
+                    onChange={(e) => setCampagne(Number(e.target.value))}
+                    className="w-full px-5 py-4 rounded-2xl border-2 border-gray-100 bg-gray-50 text-gray-900 font-bold focus:border-blue-600 outline-none appearance-none"
+                  >
+                    {(() => {
+                      const start = 2024
+                      const end = new Date().getFullYear() + 100
+                      const opts = [] as number[]
+                      for (let y = start; y <= end; y++) opts.push(y)
+                      return opts.map(y => <option key={y} value={y}>{y}</option>)
+                    })()}
+                  </select>
                 </div>
 
                 {/* NOUVEAU CHAMP SEXE TOTALEMENT RESPONSIVE */}

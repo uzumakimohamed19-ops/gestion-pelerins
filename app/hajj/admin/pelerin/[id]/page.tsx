@@ -4,6 +4,7 @@ import { useParams } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import { User, FileText, ArrowLeft, Printer, Calendar, ShieldCheck, Building2, Globe, CheckCircle2, Save, Syringe, Stethoscope, BookOpen, Hotel, Plane } from 'lucide-react'
 import Link from 'next/link'
+import { YearSelector } from '@/components/YearSelector'
 
 export default function DetailsAdminPelerin() {
   const { id } = useParams()
@@ -81,6 +82,8 @@ export default function DetailsAdminPelerin() {
   if (loading) return <div className="p-10 text-center font-bold italic animate-pulse text-gray-400">CHARGEMENT DU DOSSIER ADMIN...</div>
   if (!p) return <div className="p-10 text-center font-black text-red-500">PÈLERIN NON TROUVÉ.</div>
 
+  const scanUrl = p.document_url ? `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/passeports/${p.document_url}` : p.scan_passeport || null
+
   return (
     <div className="max-w-4xl mx-auto px-4 pt-4 pb-28 md:py-10">
       
@@ -89,9 +92,15 @@ export default function DetailsAdminPelerin() {
         <Link href={`/admin/agence/${p.agence_id}`} className="flex items-center gap-2 text-gray-500 font-bold hover:text-blue-600 transition p-2 -ml-2 rounded-lg hover:bg-gray-50">
           <ArrowLeft size={20} /> Retour au panneau Admin
         </Link>
+        <div className="sm:hidden w-full mt-3">
+          <YearSelector />
+        </div>
         
         {/* Actions - Uniquement visibles sur tablette/bureau */}
         <div className="hidden sm:flex items-center gap-3 w-full sm:w-auto">
+          <div className="mr-3">
+            <YearSelector />
+          </div>
           <button 
             onClick={saveAdvancedData}
             disabled={updating}
@@ -117,7 +126,7 @@ export default function DetailsAdminPelerin() {
               <User size={32} />
             </div>
             <div className="w-full min-w-0">
-              <h1 className="text-xl sm:text-3xl font-black text-gray-900 uppercase break-words">{p.nom_complet}</h1>
+              <h1 className="text-xl sm:text-3xl font-black text-gray-900 uppercase break-words"> {p.prenom} {p.nom_complet}</h1>
               <p className="text-blue-600 text-xs sm:text-sm font-bold tracking-widest uppercase mt-1">PASSEPORT : {p.num_passeport}</p>
             </div>
           </div>
@@ -148,7 +157,7 @@ export default function DetailsAdminPelerin() {
                 <Building2 size={10} /> Agence
               </p>
               <p className="font-black text-sm sm:text-base text-gray-900 uppercase text-center sm:text-left break-words">
-                {p.agence_nom || "AL-BOURAQ"}
+                {p.agence_nom}
               </p>
             </div>
           </div>
@@ -185,14 +194,14 @@ export default function DetailsAdminPelerin() {
 
           {/* Section Intégrée : Visualisation Passeport */}
           <div className="border-t border-gray-50 pt-4">
-            {p.document_url ? (
+            {scanUrl ? (
               <a 
-                href={`${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/passeports/${p.document_url}`}
+                href={scanUrl}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="flex items-center justify-center gap-2 p-3.5 rounded-xl border border-blue-200 bg-blue-50 text-blue-700 font-bold hover:bg-blue-100 transition text-xs uppercase tracking-wider"
               >
-                <FileText size={16} /> Ouvrir le Scan du Passeport
+                <FileText size={16} /> {p.document_url ? 'Ouvrir le Scan du Passeport' : 'Ouvrir le Scan du Document'}
               </a>
             ) : (
               <div className="p-3.5 rounded-xl border border-dashed border-amber-200 bg-amber-50 text-amber-700 font-bold text-center text-xs uppercase tracking-wider">

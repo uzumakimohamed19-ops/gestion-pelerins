@@ -354,7 +354,7 @@ export default function NouvelleOperation() {
           </button>
 
           {/* BARRE DE VALIDATION FLOTTANTE MOBILE (UX Type Application Bancaire) */}
-          <div className="fixed bottom-0 left-0 right-0 p-4 bg-white border-t border-gray-100 shadow-[0_-8px_24px_rgba(0,0,0,0.04)] z-40 sm:hidden">
+          <div className=" bottom-0 left-0 right-0 p-4 bg-white border-t border-gray-100 shadow-[0_-8px_24px_rgba(0,0,0,0.04)] z-40 sm:hidden">
             <button
               type="submit"
               disabled={loading}

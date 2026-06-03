@@ -1,13 +1,15 @@
 'use client'
 import { useEffect, useState, useMemo, type ElementType } from 'react'
 import { supabase } from '../../../lib/supabase'
+import { useYear } from '@/lib/YearContext'
 import {
   Users, FileCheck, FileWarning, ArrowRight, Wallet,
   ShieldCheck, Globe, X, TrendingUp, AlertCircle,
   Download, Search, UserPlus, AlertTriangle, Filter, ChevronRight, FileSpreadsheet, Building2,
-  Eye, EyeOff // Ajout uniquement des icônes d'œil nécessaires
+  Eye, EyeOff, FileText, Calendar, CheckCircle2
 } from 'lucide-react'
 import Link from 'next/link'
+import { YearSelector } from '@/components/YearSelector'
 
 type Pelerin = {
   id?: string | number
@@ -32,7 +34,7 @@ type TileCard = {
   progress?: number
   progressColor?: string
   tag?: string
-  bgMobile?: string // Couleur de fond spécifique pour le mobile
+  bgMobile?: string
 }
 
 type AlertType = 'amber' | 'red' | 'blue'
@@ -48,16 +50,295 @@ type ModalState = {
   title: string
 } | null
 
-// ─── Barre de progression micro épurée ────────────────────────────────────────
-function Bar({ value, color }: { value: number; color: string }) {
+// ─── Modal de confirmation export PDF ─────────────────────────────────────────
+type PdfConfirmModalProps = {
+  isOpen: boolean
+  onClose: () => void
+  onConfirm: (includeFinance: boolean) => void
+  title: string
+  count: number
+}
+
+function PdfConfirmModal({ isOpen, onClose, onConfirm, title, count }: PdfConfirmModalProps) {
+  if (!isOpen) return null
   return (
-    <div className="mt-3 h-1.5 w-full bg-slate-100/70 overflow-hidden rounded-full">
+    <div
+      className="fixed inset-0 z-[1100] flex items-center justify-center bg-slate-900/70 backdrop-blur-sm p-4"
+      onClick={onClose}
+    >
       <div
-        className={`h-full rounded-full ${color} transition-all duration-700 ease-out`}
-        style={{ width: `${Math.min(100, Math.max(0, value))}%` }}
-      />
+        className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6 flex flex-col gap-5"
+        onClick={e => e.stopPropagation()}
+      >
+        {/* Icône */}
+        <div className="flex items-center gap-3">
+          <div className="p-3 rounded-xl bg-indigo-50 border border-indigo-100">
+            <FileText size={22} className="text-indigo-600" />
+          </div>
+          <div>
+            <h3 className="text-base font-black text-slate-900">Exporter en PDF</h3>
+            <p className="text-xs text-slate-400 mt-0.5">{count} pèlerin(s) — {title}</p>
+          </div>
+        </div>
+
+        {/* Question finance */}
+        <div className="bg-amber-50 border border-amber-100 rounded-xl p-4">
+          <p className="text-xs font-bold text-amber-800 mb-1 flex items-center gap-1.5">
+            <span className="w-1.5 h-1.5 rounded-full bg-amber-500 inline-block" />
+            Données financières
+          </p>
+          <p className="text-xs text-amber-700 leading-relaxed">
+            Souhaitez-vous inclure les <strong>montants versés</strong> et les <strong>statuts de paiement</strong> dans le rapport PDF ?
+          </p>
+        </div>
+
+        {/* Boutons de choix */}
+        <div className="flex flex-col gap-2">
+          <button
+            onClick={() => onConfirm(true)}
+            className="w-full flex items-center justify-center gap-2 py-3 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-bold rounded-xl transition-colors active:scale-[0.98]"
+          >
+            <FileText size={15} />
+            Inclure les données financières
+          </button>
+          <button
+            onClick={() => onConfirm(false)}
+            className="w-full flex items-center justify-center gap-2 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-bold rounded-xl transition-colors active:scale-[0.98]"
+          >
+            <FileText size={15} className="text-slate-500" />
+            Sans données financières
+          </button>
+          <button
+            onClick={onClose}
+            className="w-full py-2.5 text-xs text-slate-400 hover:text-slate-600 font-medium transition-colors"
+          >
+            Annuler
+          </button>
+        </div>
+      </div>
     </div>
   )
+}
+
+// ─── Génération et impression du PDF via window.print() ───────────────────────
+function generateAndPrintPDF(
+  items: Pelerin[],
+  title: string,
+  includeFinance: boolean,
+  nomAgence: string,
+  stats: {
+    total: number
+    tauxCompletion: number
+    tauxPaiement: number
+    tauxGouv: number
+    tauxNusuk: number
+  },
+  recettes: number
+) {
+  const datePrint = new Date().toLocaleDateString('fr-FR', {
+    weekday: 'long', day: 'numeric', month: 'long', year: 'numeric'
+  })
+
+  const totalPaye = items.reduce((acc, p) => acc + (p.total_paye || 0), 0)
+  const payeCount = items.filter(p => (p.total_paye ?? 0) > 0).length
+  const docsCount = items.filter(p => p.document_url).length
+  const gouvCount = items.filter(p => p.sur_plateforme_gouv).length
+  const nusukCount = items.filter(p => p.sur_plateforme_nusuk).length
+
+  const rows = items.map((p, i) => {
+    const statusPaiement = (p.total_paye ?? 0) > 0
+      ? `<span style="background:#d1fae5;color:#065f46;padding:2px 8px;border-radius:6px;font-weight:700;font-size:11px;">Payé</span>`
+      : `<span style="background:#fee2e2;color:#991b1b;padding:2px 8px;border-radius:6px;font-weight:700;font-size:11px;">Impayé</span>`
+
+    const docStatus = p.document_url
+      ? `<span style="color:#059669;font-weight:700;">✓</span>`
+      : `<span style="color:#f59e0b;font-weight:700;">✗</span>`
+    const gouvStatus = p.sur_plateforme_gouv
+      ? `<span style="color:#0d9488;font-weight:700;">✓</span>`
+      : `<span style="color:#94a3b8;">—</span>`
+    const nusukStatus = p.sur_plateforme_nusuk
+      ? `<span style="color:#7c3aed;font-weight:700;">✓</span>`
+      : `<span style="color:#94a3b8;">—</span>`
+
+    const financeCell = includeFinance
+      ? `<td style="padding:10px 12px;text-align:right;font-weight:700;color:${(p.total_paye ?? 0) > 0 ? '#065f46' : '#b91c1c'};">${(p.total_paye ?? 0) > 0 ? (p.total_paye ?? 0).toLocaleString('fr-FR') + ' CFA' : '—'}</td>
+         <td style="padding:10px 12px;text-align:center;">${statusPaiement}</td>`
+      : ''
+
+    return `
+      <tr style="background:${i % 2 === 0 ? '#fff' : '#f8fafc'};">
+        <td style="padding:10px 12px;color:#94a3b8;font-size:11px;font-weight:600;">${i + 1}</td>
+        <td style="padding:10px 12px;">
+          <div style="font-weight:700;color:#0f172a;font-size:13px;">${p.prenom || ''} ${p.nom_complet || ''}</div>
+          <div style="color:#94a3b8;font-size:11px;margin-top:2px;">${p.telephone_pelerin || 'Pas de numéro'}</div>
+        </td>
+        <td style="padding:10px 12px;font-size:12px;color:#4338ca;font-weight:600;">${p.agences?.nom_agence || '—'}</td>
+        <td style="padding:10px 12px;text-align:center;">${docStatus}</td>
+        <td style="padding:10px 12px;text-align:center;">${gouvStatus}</td>
+        <td style="padding:10px 12px;text-align:center;">${nusukStatus}</td>
+        ${financeCell}
+      </tr>
+    `
+  }).join('')
+
+  const thStyle = `padding:10px 12px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;color:#475569;background:#f1f5f9;border-bottom:2px solid #e2e8f0;`
+  const kpiBox = `flex:1;min-width:140px;padding:14px 16px;border-radius:12px;border:1px solid;`
+
+  const financeHeaders = includeFinance
+    ? `<th style="${thStyle}text-align:right;">Montant (CFA)</th>
+       <th style="${thStyle}text-align:center;">Statut</th>`
+    : ''
+
+  const financeSummary = includeFinance ? `
+    <div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:12px;">
+      <div style="${kpiBox}background:#eff6ff;border-color:#bfdbfe;">
+        <div style="font-size:11px;color:#1d4ed8;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;">Total encaissé</div>
+        <div style="font-size:20px;font-weight:900;color:#1e3a8a;margin-top:4px;">${totalPaye.toLocaleString('fr-FR')} CFA</div>
+      </div>
+      <div style="${kpiBox}background:#f0fdf4;border-color:#bbf7d0;">
+        <div style="font-size:11px;color:#166534;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;">Pèlerins à jour</div>
+        <div style="font-size:20px;font-weight:900;color:#14532d;margin-top:4px;">${payeCount} / ${items.length}</div>
+      </div>
+    </div>
+  ` : ''
+
+  const html = `
+    <!DOCTYPE html>
+    <html lang="fr">
+    <head>
+      <meta charset="UTF-8" />
+      <title>Rapport Hajj — ${title}</title>
+      <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap');
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+          font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+          background: #fff;
+          color: #0f172a;
+          font-size: 13px;
+          line-height: 1.5;
+        }
+        @page {
+          size: A4;
+          margin: 14mm 12mm 14mm 12mm;
+        }
+        @media print {
+          body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+          .no-print { display: none !important; }
+          tr { page-break-inside: avoid; }
+        }
+        table { border-collapse: collapse; width: 100%; }
+        thead { display: table-header-group; }
+        tfoot { display: table-footer-group; }
+      </style>
+    </head>
+    <body>
+
+      <!-- En-tête officiel -->
+      <div style="background:linear-gradient(135deg,#1e3a8a 0%,#1d4ed8 60%,#3b82f6 100%);color:white;padding:28px 32px;border-radius:16px 16px 0 0;margin-bottom:0;position:relative;overflow:hidden;">
+        <div style="position:absolute;right:-30px;bottom:-30px;opacity:0.05;font-size:200px;font-weight:900;line-height:1;">☪</div>
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:20px;">
+          <div>
+            <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.1em;color:#93c5fd;margin-bottom:6px;">Rapport Officiel — Campagne Hajj 2026</div>
+            <h1 style="font-size:24px;font-weight:900;letter-spacing:-0.03em;line-height:1.2;">${title}</h1>
+            <div style="margin-top:8px;font-size:12px;color:#bfdbfe;font-weight:500;">${items.length} pèlerin(s) dans ce rapport</div>
+          </div>
+          <div style="text-align:right;flex-shrink:0;">
+            <div style="font-size:11px;color:#93c5fd;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;">${nomAgence}</div>
+            <div style="font-size:11px;color:#bfdbfe;margin-top:4px;">${datePrint}</div>
+            ${!includeFinance ? '<div style="margin-top:8px;background:rgba(255,255,255,0.15);border:1px solid rgba(255,255,255,0.2);padding:4px 10px;border-radius:6px;font-size:10px;font-weight:700;letter-spacing:0.05em;">DONNÉES FINANCIÈRES MASQUÉES</div>' : ''}
+          </div>
+        </div>
+      </div>
+
+      <!-- Bande KPI rapide -->
+      <div style="background:#f8fafc;border:1px solid #e2e8f0;border-top:none;padding:16px 32px;display:flex;gap:24px;flex-wrap:wrap;align-items:center;">
+        <div style="display:flex;align-items:center;gap:8px;">
+          <div style="width:8px;height:8px;border-radius:50%;background:#059669;"></div>
+          <span style="font-size:11px;color:#64748b;font-weight:600;">Dossiers complets :</span>
+          <span style="font-size:12px;font-weight:800;color:#0f172a;">${docsCount}/${items.length}</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;">
+          <div style="width:8px;height:8px;border-radius:50%;background:#0d9488;"></div>
+          <span style="font-size:11px;color:#64748b;font-weight:600;">Plateforme Gouv :</span>
+          <span style="font-size:12px;font-weight:800;color:#0f172a;">${gouvCount}/${items.length}</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;">
+          <div style="width:8px;height:8px;border-radius:50%;background:#7c3aed;"></div>
+          <span style="font-size:11px;color:#64748b;font-weight:600;">Inscriptions Nusuk :</span>
+          <span style="font-size:12px;font-weight:800;color:#0f172a;">${nusukCount}/${items.length}</span>
+        </div>
+        ${includeFinance ? `
+        <div style="display:flex;align-items:center;gap:8px;margin-left:auto;">
+          <div style="width:8px;height:8px;border-radius:50%;background:#1d4ed8;"></div>
+          <span style="font-size:11px;color:#64748b;font-weight:600;">Total encaissé :</span>
+          <span style="font-size:12px;font-weight:800;color:#1e3a8a;">${totalPaye.toLocaleString('fr-FR')} CFA</span>
+        </div>` : ''}
+      </div>
+
+      <!-- Tableau principal -->
+      <div style="margin-top:24px;">
+        <table>
+          <thead>
+            <tr>
+              <th style="${thStyle}width:40px;">#</th>
+              <th style="${thStyle}">Pèlerin</th>
+              <th style="${thStyle}">Agence</th>
+              <th style="${thStyle}text-align:center;">Dossier</th>
+              <th style="${thStyle}text-align:center;">Gouv</th>
+              <th style="${thStyle}text-align:center;">Nusuk</th>
+              ${financeHeaders}
+            </tr>
+          </thead>
+          <tbody>
+            ${rows}
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Pied de page -->
+      <div style="margin-top:32px;padding-top:16px;border-top:1px solid #e2e8f0;display:flex;justify-content:space-between;align-items:center;">
+        <div style="font-size:10px;color:#94a3b8;font-weight:500;">
+          Généré le ${datePrint} — Système de gestion Hajj 2026
+        </div>
+        <div style="font-size:10px;color:#94a3b8;font-weight:500;">
+          ${nomAgence} — ${items.length} pèlerin(s) — ${title}
+        </div>
+      </div>
+
+      <!-- Bouton imprimer (masqué à l'impression) -->
+      <div class="no-print" style="position:fixed;bottom:24px;right:24px;display:flex;gap:10px;z-index:999;">
+        <button
+          onclick="window.print()"
+          style="background:#1d4ed8;color:white;border:none;padding:12px 24px;border-radius:12px;font-size:13px;font-weight:700;cursor:pointer;box-shadow:0 4px 20px rgba(29,78,216,0.4);display:flex;align-items:center;gap:8px;"
+        >
+          🖨️ Imprimer / Enregistrer PDF
+        </button>
+        <button
+          onclick="window.close()"
+          style="background:#f1f5f9;color:#475569;border:1px solid #e2e8f0;padding:12px 18px;border-radius:12px;font-size:13px;font-weight:600;cursor:pointer;"
+        >
+          ✕ Fermer
+        </button>
+      </div>
+
+    </body>
+    </html>
+  `
+
+  const printWindow = window.open('', '_blank',
+    'width=1200,height=800,scrollbars=yes,resizable=yes'
+  )
+  if (printWindow) {
+    printWindow.document.write(html)
+    printWindow.document.close()
+    printWindow.onload = () => {
+      setTimeout(() => {
+        printWindow.focus()
+        printWindow.print()
+      }, 250)
+    }
+  }
 }
 
 // ─── Stat Card premium (PC uniquement) ────────────────────────────────────────
@@ -103,6 +384,15 @@ function Tile({ card, loading, onClick }: { card: TileCard; loading: boolean; on
   )
 }
 
+// ─── Barre de progression ────────────────────────────────────────────────────
+function Bar({ value, color }: { value: number; color: string }) {
+  return (
+    <div className="mt-3 h-1.5 bg-slate-100 rounded-full overflow-hidden">
+      <div className={`h-full rounded-full ${color} transition-all duration-1000`} style={{ width: `${value}%` }} />
+    </div>
+  )
+}
+
 // ─── Alertes latérales PC ────────────────────────────────────────────────────
 const alertStyles = {
   amber: { dot: 'bg-amber-500', bg: 'hover:bg-amber-50/50', border: 'border-amber-100/70' },
@@ -126,12 +416,15 @@ function AlertPill({ alert, onClick }: { alert: AlertItem; onClick: () => void }
 
 // ─── Dashboard Principal ─────────────────────────────────────────────────────
 export default function Dashboard() {
+  const { selectedYear, setSelectedYear, availableYears } = useYear()
+  
   const [stats, setStats] = useState({
     total: 0, avecDoc: 0, sansDoc: 0,
     totalGouv: 0, totalNusuk: 0,
     avecPaiement: 0, sansPaiement: 0,
     tauxCompletion: 0, montantMoyen: 0,
-    tauxGouv: 0, tauxNusuk: 0, tauxPaiement: 0
+    tauxGouv: 0, tauxNusuk: 0, tauxPaiement: 0,
+    eligiblesNusuk: 0
   })
   const [recettes, setRecettes] = useState(0)
   const [loading, setLoading] = useState(true)
@@ -141,25 +434,32 @@ export default function Dashboard() {
   const [searchQuery, setSearchQuery] = useState('')
   const [agenceFilter, setAgenceFilter] = useState('all')
   const [activeTab, setActiveTab] = useState('all')
+
+  // État pour la modal de confirmation PDF
+  const [pdfConfirmOpen, setPdfConfirmOpen] = useState(false)
+  const [pdfExportTarget, setPdfExportTarget] = useState<{ items: Pelerin[]; title: string } | null>(null)
   
   // Récupération dynamique du nom de l'agence connectée
   const [nomAgence, setNomAgence] = useState<string>('Mon Agence')
 
-  // Initialisation de l'état avec vérification et récupération du localStorage
-  const [showAmount, setShowAmount] = useState<boolean>(() => {
-    if (typeof window !== 'undefined') {
-      const saved = localStorage.getItem('dashboard_show_amount')
-      return saved !== null ? JSON.parse(saved) : true
-    }
-    return true
-  })
+  // État pour le filtre Nusuk
+  const [nusukPaymentFilter, setNusukPaymentFilter] = useState<'all' | 'full' | 'partial' | 'none'>('all')
 
-  // Sauvegarde automatique du choix de l'utilisateur dans le localStorage
+  const [showAmount, setShowAmount] = useState<boolean>(true)
+  const [hasLoadedShowAmount, setHasLoadedShowAmount] = useState(false)
+
   useEffect(() => {
-    localStorage.setItem('dashboard_show_amount', JSON.stringify(showAmount))
-  }, [showAmount])
+    if (typeof window === 'undefined') return
+    const saved = localStorage.getItem('dashboard_show_amount')
+    setShowAmount(saved !== null ? JSON.parse(saved) : true)
+    setHasLoadedShowAmount(true)
+  }, [])
 
-  // Génération de la date du jour au format élégant (ex: samedi 30 mai 2026)
+  useEffect(() => {
+    if (!hasLoadedShowAmount) return
+    localStorage.setItem('dashboard_show_amount', JSON.stringify(showAmount))
+  }, [showAmount, hasLoadedShowAmount])
+
   const dateDuJour = useMemo(() => {
     return new Date().toLocaleDateString('fr-FR', {
       weekday: 'long',
@@ -172,38 +472,48 @@ export default function Dashboard() {
     async function fetchStats() {
       const { data, error } = await supabase.from('pelerins').select('*, agences(nom_agence)')
       if (!error && data) {
-        const total = data.length
-        const avec = data.filter(p => p.document_url).length
-        const totalGouv = data.filter(p => p.sur_plateforme_gouv).length
-        const totalNusuk = data.filter(p => p.sur_plateforme_nusuk).length
-        const avecPaiement = data.filter(p => p.total_paye > 0).length
+        // Filtrer les données selon la campagne sélectionnée
+        const filteredData = selectedYear === 'all'
+          ? data
+          : data.filter(p => {
+              if (p.campagne === undefined || p.campagne === null) return false
+              return Number(p.campagne) === selectedYear
+            })
+        
+        const total = filteredData.length
+        const avec = filteredData.filter(p => p.document_url).length
+        const totalGouv = filteredData.filter(p => p.sur_plateforme_gouv).length
+        const totalNusuk = filteredData.filter(p => p.sur_plateforme_nusuk).length
+        const avecPaiement = filteredData.filter(p => p.total_paye > 0).length
         const sansPaiement = total - avecPaiement
-        const totalRecettes = data.reduce((acc, curr) => acc + (curr.total_paye || 0), 0)
+        const totalRecettes = filteredData.reduce((acc, curr) => acc + (curr.total_paye || 0), 0)
         const pct = (n: number) => total > 0 ? Math.round((n / total) * 100) : 0
+        
+        // Calcul des pèlerins éligibles à Nusuk (plateforme gouv + dossier complet)
+        const eligiblesNusuk = filteredData.filter(p => p.sur_plateforme_gouv && p.document_url).length
         
         setStats({
           total, avecDoc: avec, sansDoc: total - avec,
           totalGouv, totalNusuk, avecPaiement, sansPaiement,
           tauxCompletion: pct(avec),
           montantMoyen: avecPaiement > 0 ? Math.round(totalRecettes / avecPaiement) : 0,
-          tauxGouv: pct(totalGouv), tauxNusuk: pct(totalNusuk), tauxPaiement: pct(avecPaiement)
+          tauxGouv: pct(totalGouv), tauxNusuk: pct(totalNusuk), tauxPaiement: pct(avecPaiement),
+          eligiblesNusuk
         })
         setRecettes(totalRecettes)
-        setAllData(data)
+        setAllData(filteredData)
         
-        // Extraction des agences
-        const listAgences = [...new Set(data.map(p => p.agences?.nom_agence).filter(Boolean))].sort()
+        const listAgences = [...new Set(filteredData.map(p => p.agences?.nom_agence).filter(Boolean))].sort()
         setAgences(listAgences)
 
-        // Tente de récupérer le nom de la première agence pour l'en-tête mobile à des fins d'illustration
-        if (data[0]?.agences?.nom_agence) {
-          setNomAgence(data[0].agences.nom_agence)
+        if (filteredData[0]?.agences?.nom_agence) {
+          setNomAgence(filteredData[0].agences.nom_agence)
         }
       }
       setLoading(false)
     }
     fetchStats()
-  }, [])
+  }, [selectedYear])
 
   const alerts = useMemo(() => {
     if (!allData.length) return []
@@ -224,14 +534,38 @@ export default function Dashboard() {
       'Total inscrits':     { items: allData, title: 'Tous les pèlerins' },
       'Dossiers complets':  { items: allData.filter(p => p.document_url), title: 'Dossiers complets' },
       'Dossiers incomplets':{ items: allData.filter(p => !p.document_url), title: 'Dossiers incomplets' },
+      'Dossiers Incomplets':{ items: allData.filter(p => !p.document_url), title: 'Dossiers incomplets' },
       'Plateforme Gouv':    { items: allData.filter(p => p.sur_plateforme_gouv), title: 'Inscrits — Plateforme Gouv' },
       'Portail Nusuk':      { items: allData.filter(p => p.sur_plateforme_nusuk), title: 'Inscrits — Portail Nusuk' },
       'Encaissé Global':    { items: allData.filter(p => (p.total_paye ?? 0) > 0), title: 'Pèlerins ayant payé' },
       'Versements Reçus':   { items: allData.filter(p => (p.total_paye ?? 0) > 0), title: 'Pèlerins ayant payé' },
       'En attente paiement': { items: allData.filter(p => (p.total_paye ?? 0) === 0), title: 'En attente de paiement' },
+      'En Attente':         { items: allData.filter(p => (p.total_paye ?? 0) === 0), title: 'En attente de paiement' },
+      'Éligibles Nusuk':    { items: allData.filter(p => p.sur_plateforme_gouv && p.document_url), title: 'Pèlerins éligibles à l\'inscription Nusuk' },
     }
     setModal(map[label] || { items: allData, title: label })
-    setSearchQuery(''); setAgenceFilter('all'); setActiveTab('all')
+    setSearchQuery(''); setAgenceFilter('all'); setActiveTab('all'); setNusukPaymentFilter('all')
+  }
+
+  // Ouvre la modal de confirmation PDF
+  function triggerPdfExport(items: Pelerin[], title: string) {
+    setPdfExportTarget({ items, title })
+    setPdfConfirmOpen(true)
+  }
+
+  // Appelé après confirmation dans la modal PDF
+  function handlePdfConfirm(includeFinance: boolean) {
+    setPdfConfirmOpen(false)
+    if (!pdfExportTarget) return
+    generateAndPrintPDF(
+      pdfExportTarget.items,
+      pdfExportTarget.title,
+      includeFinance,
+      nomAgence,
+      stats,
+      recettes
+    )
+    setPdfExportTarget(null)
   }
 
   const filteredItems = useMemo(() => {
@@ -246,9 +580,17 @@ export default function Dashboard() {
         activeTab === 'sans_doc' ? !p.document_url :
         activeTab === 'paye' ? (p.total_paye ?? 0) > 0 :
         activeTab === 'non_paye' ? (p.total_paye ?? 0) === 0 : true
-      return matchSearch && matchAgence && matchTab
+      
+      // Filtre Nusuk spécifique pour les pèlerins éligibles
+      const matchNusukPayment = 
+        nusukPaymentFilter === 'all' ? true :
+        nusukPaymentFilter === 'full' ? (p.total_paye ?? 0) > 0 :
+        nusukPaymentFilter === 'partial' ? (p.total_paye ?? 0) > 0 :
+        nusukPaymentFilter === 'none' ? (p.total_paye ?? 0) === 0 : true
+      
+      return matchSearch && matchAgence && matchTab && matchNusukPayment
     })
-  }, [modal, searchQuery, agenceFilter, activeTab])
+  }, [modal, searchQuery, agenceFilter, activeTab, nusukPaymentFilter])
 
   async function exportToExcel(items: Pelerin[], filename: string) {
     try {
@@ -275,6 +617,20 @@ export default function Dashboard() {
   }
 
   const derniersPelerins = allData.slice(-5).reverse()
+
+  // Calcul des pèlerins éligibles avec filtres de paiement
+  const pelerinsEligiblesNusuk = useMemo(() => {
+    return allData.filter(p => p.sur_plateforme_gouv && p.document_url)
+  }, [allData])
+
+  const pelerinsEligiblesFiltrés = useMemo(() => {
+    return pelerinsEligiblesNusuk.filter(p => {
+      if (nusukPaymentFilter === 'full') return (p.total_paye ?? 0) > 0
+      if (nusukPaymentFilter === 'partial') return (p.total_paye ?? 0) > 0
+      if (nusukPaymentFilter === 'none') return (p.total_paye ?? 0) === 0
+      return true
+    })
+  }, [pelerinsEligiblesNusuk, nusukPaymentFilter])
 
   const mainCards = [
     {
@@ -323,10 +679,25 @@ export default function Dashboard() {
       bgMobile: 'bg-rose-50/90 border-rose-100 text-rose-900', subtext: `${100 - stats.tauxPaiement}% Restant`,
       progress: 100 - stats.tauxPaiement, progressColor: 'bg-rose-500', tag: 'KPI'
     },
+    {
+      label: 'Éligibles Nusuk', value: stats.eligiblesNusuk, icon: CheckCircle2,
+      light: 'bg-indigo-50', textColor: 'text-indigo-600', borderColor: 'border-indigo-100',
+      bgMobile: 'bg-indigo-50/90 border-indigo-100 text-indigo-900', subtext: `Prêts à inscrire`,
+      progress: stats.total > 0 ? Math.round((stats.eligiblesNusuk / stats.total) * 100) : 0, progressColor: 'bg-indigo-500', tag: 'Nusuk'
+    },
   ]
 
   return (
     <div className="w-full min-h-screen bg-slate-50/40 select-none">
+
+      {/* Modal de confirmation export PDF */}
+      <PdfConfirmModal
+        isOpen={pdfConfirmOpen}
+        onClose={() => { setPdfConfirmOpen(false); setPdfExportTarget(null) }}
+        onConfirm={handlePdfConfirm}
+        title={pdfExportTarget?.title || ''}
+        count={pdfExportTarget?.items.length || 0}
+      />
       
       {/* 📱 ───────────────────────────────────────────────────────────────────
           AFFICHAGE MOBILE UNIQUE (`md:hidden`) ENRICHI ET DYNAMISÉ
@@ -336,7 +707,6 @@ export default function Dashboard() {
         {/* En-tête Immersif Bleu et Dynamique */}
         <div className="bg-gradient-to-b from-blue-600 to-blue-700 text-white px-5 pt-7 pb-14 rounded-b-[2.5rem] shadow-lg shadow-blue-600/10 relative overflow-hidden">
           
-          {/* Icône de contexte géante stylisée en arrière-plan filigrane */}
           <div className="absolute right-[-20px] bottom-[-20px] text-white/5 pointer-events-none transform -rotate-12 select-none">
             <Building2 size={220} />
           </div>
@@ -366,7 +736,6 @@ export default function Dashboard() {
             </Link>
           </div>
 
-          {/* Affichage de la date du jour et de la campagne */}
           <div className="flex justify-between items-end mt-7 relative z-10">
             <div>
               <p className="text-xs text-blue-100 font-semibold tracking-wide uppercase opacity-90">Encaissé Global</p>
@@ -377,7 +746,6 @@ export default function Dashboard() {
                   </span>
                   <span className="text-sm font-bold text-blue-200">CFA</span>
                 </div>
-                {/* Petit bouton œil pour masquer / afficher le montant */}
                 <button 
                   onClick={() => setShowAmount(!showAmount)} 
                   className="p-1 rounded-lg bg-white/10 border border-white/10 active:scale-90 transition-transform flex items-center justify-center"
@@ -394,10 +762,17 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {/* Contenu Mobile Remontant - mt-6 pour espacer parfaitement et éviter la superposition */}
+        {/* Contenu Mobile */}
         <div className="px-4 mt-6 space-y-6">
 
-          {/* BLOCS HORIZONTAUX TOTALEMENT COLORÉS ET BIEN ESPACÉS (STRICTEMENT D'ORIGINE) */}
+          <div>
+            {/* Utilise le sélecteur global (liste déroulante) */}
+            <div className="px-1">
+              <YearSelector />
+            </div>
+          </div>
+
+          {/* BLOCS HORIZONTAUX */}
           <div className="space-y-2">
             <p className="text-[11px] font-bold text-slate-400 uppercase tracking-wider px-1">Indicateurs clés</p>
             <div className="flex overflow-x-auto gap-3 pb-3 pt-1 px-1 scrollbar-none snap-x snap-mandatory">
@@ -427,7 +802,7 @@ export default function Dashboard() {
             </div>
           </div>
 
-          {/* BANNER ALERTES SANS BARRE EN BAS */}
+          {/* BANNER ALERTES */}
           {!loading && alerts.length > 0 && (
             <div className="space-y-2">
               <div className="flex overflow-x-auto gap-2 pb-2 px-1 scrollbar-none snap-x">
@@ -447,11 +822,10 @@ export default function Dashboard() {
             </div>
           )}
 
-          {/* COMPLÉTION DES ÉTAPES */}
+          {/* SUIVI DES PROCESSUS */}
           {!loading && (
             <div className="bg-white border border-slate-100 rounded-2xl p-4 shadow-sm space-y-4">
               <div>
-                <h3 className="text-xs font-black text-slate-800 tracking-tight uppercase">Suivi des Processus</h3>
                 <p className="text-[10px] text-slate-400 font-medium">Conformité et synchronisation</p>
               </div>
               
@@ -476,7 +850,7 @@ export default function Dashboard() {
             </div>
           )}
 
-          {/* LISTE INSCRIPTIONS COMPACTE */}
+          {/* DERNIERS PÈLERINS */}
           {derniersPelerins.length > 0 && (
             <div className="bg-white border border-slate-100 rounded-2xl overflow-hidden shadow-sm">
               <div className="px-4 py-3 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
@@ -510,15 +884,25 @@ export default function Dashboard() {
             </div>
           )}
 
-          {/* BOUTON EXPORT SIMPLE */}
-          <button
-            onClick={() => !loading && exportToExcel(allData, 'Global_Hajj_2026')}
-            disabled={loading}
-            className="w-full flex items-center justify-center gap-2 p-3.5 bg-slate-900 text-white rounded-2xl text-xs font-bold shadow-md active:bg-slate-800 transition-colors"
-          >
-            <FileSpreadsheet size={16} className="text-emerald-400" />
-            Exporter les données (.XLSX)
-          </button>
+          {/* BOUTONS EXPORT MOBILE */}
+          <div className="flex gap-2">
+            <button
+              onClick={() => !loading && exportToExcel(allData, 'Global_Hajj_2026')}
+              disabled={loading}
+              className="flex-1 flex items-center justify-center gap-2 p-3.5 bg-slate-900 text-white rounded-2xl text-xs font-bold shadow-md active:bg-slate-800 transition-colors"
+            >
+              <FileSpreadsheet size={15} className="text-emerald-400" />
+              Exporter (.XLSX)
+            </button>
+            <button
+              onClick={() => !loading && triggerPdfExport(allData, 'Tous les pèlerins')}
+              disabled={loading}
+              className="flex-1 flex items-center justify-center gap-2 p-3.5 bg-indigo-600 text-white rounded-2xl text-xs font-bold shadow-md active:bg-indigo-700 transition-colors"
+            >
+              <FileText size={15} className="text-indigo-200" />
+              Exporter (.PDF)
+            </button>
+          </div>
         </div>
       </div>
 
@@ -548,6 +932,10 @@ export default function Dashboard() {
           </div>
         </div>
 
+        <div className="mb-6">
+          <YearSelector />
+        </div>
+
         <div className="flex flex-col lg:flex-row gap-8 items-start w-full">
           <div className="flex-1 min-w-0 w-full flex flex-col gap-6">
             <div className="grid grid-cols-2 xl:grid-cols-4 gap-4">
@@ -555,6 +943,116 @@ export default function Dashboard() {
                 <Tile key={i} card={card} loading={loading} onClick={() => !loading && openModal(card.label)} />
               ))}
             </div>
+
+            {/* ─── NOUVEAU BLOC : PÈLERINS ÉLIGIBLES À L'INSCRIPTION NUSUK ─── */}
+            {!loading && stats.eligiblesNusuk > 0 && (
+              <div className="bg-white border border-indigo-100 rounded-2xl overflow-hidden shadow-sm">
+                <div className="px-5 py-4 border-b border-indigo-100 flex justify-between items-center bg-gradient-to-r from-indigo-50/50 to-purple-50/50">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 rounded-lg bg-indigo-100">
+                      <CheckCircle2 size={18} className="text-indigo-600" />
+                    </div>
+                    <div>
+                      <p className="text-xs font-bold text-indigo-600 uppercase tracking-wider">Pèlerins éligibles</p>
+                      <p className="text-[11px] text-indigo-500 font-medium">Prêts à inscrire sur Nusuk</p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => openModal('Éligibles Nusuk')}
+                    className="text-xs text-indigo-600 font-bold hover:text-indigo-700 flex items-center gap-1 transition-colors"
+                  >
+                    Voir tous <ArrowRight size={13} />
+                  </button>
+                </div>
+
+                {/* Filtres de paiement */}
+                <div className="px-5 py-3 border-b border-indigo-50 bg-indigo-50/30 flex gap-2 flex-wrap">
+                  <button
+                    onClick={() => setNusukPaymentFilter('all')}
+                    className={`text-xs font-bold px-3 py-1.5 rounded-lg transition-all ${
+                      nusukPaymentFilter === 'all'
+                        ? 'bg-indigo-600 text-white'
+                        : 'bg-white text-indigo-600 border border-indigo-100 hover:bg-indigo-50'
+                    }`}
+                  >
+                    Tous ({pelerinsEligiblesNusuk.length})
+                  </button>
+                  <button
+                    onClick={() => setNusukPaymentFilter('full')}
+                    className={`text-xs font-bold px-3 py-1.5 rounded-lg transition-all ${
+                      nusukPaymentFilter === 'full'
+                        ? 'bg-emerald-600 text-white'
+                        : 'bg-white text-emerald-600 border border-emerald-100 hover:bg-emerald-50'
+                    }`}
+                  >
+                    Paiement complet ({pelerinsEligiblesNusuk.filter(p => (p.total_paye ?? 0) > 0).length})
+                  </button>
+                  <button
+                    onClick={() => setNusukPaymentFilter('none')}
+                    className={`text-xs font-bold px-3 py-1.5 rounded-lg transition-all ${
+                      nusukPaymentFilter === 'none'
+                        ? 'bg-rose-600 text-white'
+                        : 'bg-white text-rose-600 border border-rose-100 hover:bg-rose-50'
+                    }`}
+                  >
+                    Non payé ({pelerinsEligiblesNusuk.filter(p => (p.total_paye ?? 0) === 0).length})
+                  </button>
+                </div>
+
+                {/* Liste des pèlerins éligibles */}
+                <div className="overflow-x-auto">
+                  <ul className="divide-y divide-indigo-50">
+                    {pelerinsEligiblesFiltrés.slice(0, 8).map((p, i) => (
+                      <li key={p.id || i} className="px-5 py-3.5 flex items-center justify-between gap-4 hover:bg-indigo-50/30 transition-colors">
+                        <div className="flex items-center gap-3.5 min-w-0 flex-1">
+                          <div className="w-8 h-8 rounded-lg bg-indigo-100 border border-indigo-200 flex items-center justify-center text-xs font-bold text-indigo-600 shrink-0">
+                            {(p.prenom?.[0] || '?').toUpperCase()}
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <p className="text-sm font-bold text-slate-800 truncate">{p.prenom} {p.nom_complet}</p>
+                            <p className="text-xs text-slate-400 truncate">{p.telephone_pelerin || 'Pas de numéro'}</p>
+                          </div>
+                        </div>
+                        <div className="shrink-0 text-right">
+                          {(p.total_paye ?? 0) > 0 ? (
+                            <span className="text-xs font-black text-emerald-700 bg-emerald-50 border border-emerald-100 px-2.5 py-1 rounded-lg">
+                              {(p.total_paye ?? 0).toLocaleString('fr-FR')} CFA
+                            </span>
+                          ) : (
+                            <span className="text-xs font-semibold text-rose-500 bg-rose-50 border border-rose-100 px-2.5 py-1 rounded-lg">
+                              Non payé
+                            </span>
+                          )}
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+
+                {/* Footer avec stats et boutons export */}
+                <div className="px-5 py-3.5 border-t border-indigo-50 bg-indigo-50/20 flex items-center justify-between flex-wrap gap-3">
+                  <div className="text-xs text-indigo-600 font-medium">
+                    <span className="font-black">{pelerinsEligiblesFiltrés.length}</span> pèlerin(s) affiché(s)
+                  </div>
+                  <div className="flex gap-2 flex-wrap">
+                    <button
+                      onClick={() => exportToExcel(pelerinsEligiblesFiltrés, 'Eligibles_Nusuk')}
+                      className="flex items-center gap-1.5 px-3 py-1.5 bg-white border border-indigo-100 text-indigo-600 rounded-lg text-xs font-bold hover:bg-indigo-50 active:scale-95 transition-all"
+                    >
+                      <FileSpreadsheet size={12} />
+                      Excel
+                    </button>
+                    <button
+                      onClick={() => triggerPdfExport(pelerinsEligiblesFiltrés, 'Pèlerins éligibles à l\'inscription Nusuk')}
+                      className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 text-white rounded-lg text-xs font-bold hover:bg-indigo-700 active:scale-95 transition-all"
+                    >
+                      <FileText size={12} />
+                      PDF
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
 
             {derniersPelerins.length > 0 && (
               <div className="bg-white border border-slate-100 rounded-2xl overflow-hidden shadow-sm">
@@ -652,6 +1150,7 @@ export default function Dashboard() {
               <button onClick={() => setModal(null)} className="p-2 rounded-xl bg-slate-50 text-slate-400 border border-slate-100"><X size={16} /></button>
             </div>
 
+            {/* Barre de recherche */}
             <div className="px-5 py-4 border-b border-slate-100 space-y-3 bg-slate-50/50 shrink-0">
               <div className="flex gap-2">
                 <div className="flex-1 relative">
@@ -667,6 +1166,7 @@ export default function Dashboard() {
               </div>
             </div>
 
+            {/* Liste */}
             <div className="overflow-y-auto flex-1 px-5 py-4">
               <ul className="space-y-2">
                 {filteredItems.map((p, i) => (
@@ -684,6 +1184,32 @@ export default function Dashboard() {
                 ))}
               </ul>
             </div>
+
+            {/* Footer avec boutons d'export */}
+            <div className="px-5 py-4 border-t border-slate-100 bg-slate-50/50 shrink-0 flex flex-wrap gap-2 items-center justify-between">
+              <p className="text-xs text-slate-400 font-medium">
+                {filteredItems.length} pèlerin(s) affiché(s)
+              </p>
+              <div className="flex gap-2 flex-wrap">
+                {/* Bouton Export Excel */}
+                <button
+                  onClick={() => exportToExcel(filteredItems, modal.title)}
+                  className="flex items-center gap-1.5 px-3.5 py-2 bg-white border border-slate-200 text-slate-700 rounded-xl text-xs font-bold hover:bg-slate-50 active:scale-95 transition-all shadow-sm"
+                >
+                  <FileSpreadsheet size={13} className="text-emerald-600" />
+                  Excel
+                </button>
+                {/* Bouton Export PDF */}
+                <button
+                  onClick={() => triggerPdfExport(filteredItems, modal.title)}
+                  className="flex items-center gap-1.5 px-3.5 py-2 bg-indigo-600 border border-indigo-600 text-white rounded-xl text-xs font-bold hover:bg-indigo-700 active:scale-95 transition-all shadow-sm"
+                >
+                  <FileText size={13} />
+                  PDF
+                </button>
+              </div>
+            </div>
+
           </div>
         </div>
       )}

@@ -19,7 +19,8 @@ import {
   PieChart,
   BarChart3,
   MoreHorizontal,
-  Plus
+  Plus,
+  Globe // Ajout de l'icône Globe pour l'Espace Nusuk
 } from 'lucide-react'
 
 export default function Navbar() {
@@ -93,6 +94,7 @@ export default function Navbar() {
     { name: 'Pèlerins', href: '/hajj/liste-pelerins', icon: Users },
     { name: 'Ajouter', href: '/hajj/ajouter-pelerin', icon: UserPlus },
     { name: 'Documents', href: '/hajj/documents', icon: FileText },
+    { name: 'Espace Nusuk', href: '/hajj/nusuk', icon: Globe }, // Ajout du bouton Espace Nusuk
     { name: 'État général', href: '/hajj/etat-general', icon: BarChart3 },
     { name: 'Comptabilité', href: '/hajj/comptabilite', icon: PieChart },
     { name: 'Quitter', href: '/', icon: SquareArrowRight },

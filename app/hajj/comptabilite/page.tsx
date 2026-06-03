@@ -1,6 +1,8 @@
-'use client'
+ 'use client'
 import { useEffect, useState } from 'react'
 import { supabase } from '../../../lib/supabase'
+import { useYear } from '@/lib/YearContext'
+import { YearSelector } from '@/components/YearSelector'
 import {
   TrendingUp, Package, AlertCircle, CheckCircle,
   Wallet, CreditCard, BarChart2, ChevronDown, ChevronUp,
@@ -45,6 +47,7 @@ type Depense = {
 }
 
 export default function ComptabiliteHajj() {
+  const { selectedYear } = useYear()
   const [data, setData] = useState<Pelerin[]>([])
   const [depenses, setDepenses] = useState<Depense[]>([])
   const [loading, setLoading] = useState<boolean>(true)
@@ -82,7 +85,14 @@ export default function ComptabiliteHajj() {
       .select('*')
       .order('created_at', { ascending: false })
 
-    if (!pErr && pelerins) setData(pelerins)
+    if (!pErr && pelerins) {
+      const raw = pelerins as any[]
+      const filtered = selectedYear === 'all' ? raw : raw.filter(p => {
+        if (p.campagne === undefined || p.campagne === null) return false
+        return Number(p.campagne) === selectedYear
+      })
+      setData(filtered)
+    }
     if (!dErr && listDepenses) setDepenses(listDepenses)
     
     if (pErr || dErr) console.error({ pErr, dErr })
@@ -192,6 +202,9 @@ export default function ComptabiliteHajj() {
       <div className="mb-8 md:mb-10">
         <h1 className="text-2xl md:text-4xl font-black text-gray-900 tracking-tight leading-none">Comptabilité Hajj</h1>
         <p className="text-xs md:text-base text-gray-500 font-medium mt-1">Vue globale des finances et rentabilité de la saison.</p>
+        <div className="mt-4">
+          <YearSelector />
+        </div>
       </div>
 
       {loading ? (
