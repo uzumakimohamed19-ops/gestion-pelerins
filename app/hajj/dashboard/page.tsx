@@ -10,6 +10,7 @@ import {
 } from 'lucide-react'
 import Link from 'next/link'
 import { YearSelector } from '@/components/YearSelector'
+import { get, set } from 'idb-keyval'
 
 type Pelerin = {
   id?: string | number
@@ -450,14 +451,24 @@ export default function Dashboard() {
 
   useEffect(() => {
     if (typeof window === 'undefined') return
-    const saved = localStorage.getItem('dashboard_show_amount')
-    setShowAmount(saved !== null ? JSON.parse(saved) : true)
-    setHasLoadedShowAmount(true)
+    let mounted = true
+    ;(async () => {
+      try {
+        const saved: any = await get('dashboard_show_amount')
+        if (!mounted) return
+        setShowAmount(saved !== undefined && saved !== null ? Boolean(saved) : true)
+      } catch (e) {
+        setShowAmount(true)
+      } finally {
+        if (mounted) setHasLoadedShowAmount(true)
+      }
+    })()
+    return () => { mounted = false }
   }, [])
 
   useEffect(() => {
     if (!hasLoadedShowAmount) return
-    localStorage.setItem('dashboard_show_amount', JSON.stringify(showAmount))
+    try { set('dashboard_show_amount', showAmount) } catch (e) { /* ignore */ }
   }, [showAmount, hasLoadedShowAmount])
 
   const dateDuJour = useMemo(() => {

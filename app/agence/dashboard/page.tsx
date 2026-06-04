@@ -7,6 +7,7 @@ import {
   ChevronRight, FileSpreadsheet, Building2, Eye, EyeOff
 } from 'lucide-react'
 import Link from 'next/link'
+import { get, set } from 'idb-keyval'
 
 interface Operation {
   id: string
@@ -135,16 +136,25 @@ export default function DashboardAgence() {
   const [searchQuery, setSearchQuery] = useState('')
   const [activeTab, setActiveTab] = useState('all')
 
-  const [showAmount, setShowAmount] = useState<boolean>(() => {
-    if (typeof window !== 'undefined') {
-      const saved = localStorage.getItem('agence_show_amount')
-      return saved !== null ? JSON.parse(saved) : true
-    }
-    return true
-  })
+  const [showAmount, setShowAmount] = useState<boolean>(true)
 
   useEffect(() => {
-    localStorage.setItem('agence_show_amount', JSON.stringify(showAmount))
+    if (typeof window === 'undefined') return
+    let mounted = true
+    ;(async () => {
+      try {
+        const saved: any = await get('agence_show_amount')
+        if (!mounted) return
+        setShowAmount(saved !== undefined && saved !== null ? Boolean(saved) : true)
+      } catch (e) {
+        setShowAmount(true)
+      }
+    })()
+    return () => { mounted = false }
+  }, [])
+
+  useEffect(() => {
+    try { set('agence_show_amount', showAmount) } catch (e) { /* ignore */ }
   }, [showAmount])
 
   const dateDuJour = useMemo(() => {

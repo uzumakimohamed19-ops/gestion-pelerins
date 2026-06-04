@@ -18,6 +18,7 @@
     "@supabase/supabase-js": "^2.99.3",
     "exceljs": "^4.4.0",
     "file-saver": "^2.0.5",
+    "idb-keyval": "^6.2.5",
     "jspdf": "^4.2.1",
     "jspdf-autotable": "^5.0.8",
     "lucide-react": "^0.577.0",

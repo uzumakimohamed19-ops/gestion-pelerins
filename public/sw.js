@@ -18,9 +18,14 @@ self.addEventListener('activate', (event) => {
   event.waitUntil(clients.claim());
 });
 
-// 2. Interception des requêtes réseaux avec gestion du mode hors-ligne
+// 2. Interception des requêtes réseaux avec gestion de cache ultra-rapide
 self.addEventListener('fetch', (event) => {
-  // On applique le traitement de secours uniquement aux requêtes de navigation (les pages HTML)
+  // On ignore les requêtes vers l'API ou ta base de données (Supabase) pour ne pas bloquer les vraies données en temps réel
+  if (event.request.url.includes('/api/') || event.request.url.includes('supabase.co')) {
+    return;
+  }
+
+  // Traitement des pages HTML (Navigation)
   if (event.request.mode === 'navigate') {
     event.respondWith(
       fetch(event.request).catch(() => {
@@ -31,10 +36,24 @@ self.addEventListener('fetch', (event) => {
       })
     );
   } else {
-    // Pour le reste (images, styles CSS, scripts), on tente le réseau, sinon le cache si dispo
+    // STRATÉGIE ULTRA-RAPIDE : Stale-While-Revalidate pour les assets (JS, CSS, Images, Icônes)
     event.respondWith(
-      fetch(event.request).catch(() => {
-        return caches.match(event.request);
+      caches.match(event.request).then((cachedResponse) => {
+        
+        // On lance la requête réseau en tâche de fond pour mettre à jour le cache
+        const fetchPromise = fetch(event.request).then((networkResponse) => {
+          if (networkResponse && networkResponse.status === 200) {
+            caches.open(CACHE_NAME).then((cache) => {
+              cache.put(event.request, networkResponse.clone());
+            });
+          }
+          return networkResponse;
+        }).catch(() => {
+          // Erreur réseau silencieuse (gérée par le retour du cache ci-dessous)
+        });
+
+        // On retourne la réponse du cache IMMEDIATEMENT si elle existe, sinon on attend le réseau
+        return cachedResponse || fetchPromise;
       })
     );
   }

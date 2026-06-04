@@ -1,6 +1,7 @@
 'use client'
 
 import React, { createContext, useContext, useState, useEffect } from 'react'
+import { get, set } from 'idb-keyval'
 
 type YearContextType = {
   selectedYear: number | 'all'
@@ -14,15 +15,24 @@ export function YearProvider({ children }: { children: React.ReactNode }) {
   const currentYear = new Date().getFullYear()
   const [selectedYear, setSelectedYearState] = useState<number | 'all'>(currentYear)
   const [availableYears, setAvailableYears] = useState<number[]>([])
-  // Récupérer l'année sélectionnée depuis localStorage, initialiser
+  // Récupérer l'année sélectionnée depuis IndexedDB (idb-keyval), initialiser
   useEffect(() => {
     if (typeof window === 'undefined') return
-    const saved = localStorage.getItem('selectedYear')
-    if (saved) {
-      setSelectedYearState(saved === 'all' ? 'all' : parseInt(saved))
-    } else {
-      setSelectedYearState(currentYear)
-    }
+    let mounted = true
+    ;(async () => {
+      try {
+        const saved: any = await get('selectedYear')
+        if (!mounted) return
+        if (saved != null) {
+          setSelectedYearState(saved === 'all' ? 'all' : parseInt(String(saved)))
+        } else {
+          setSelectedYearState(currentYear)
+        }
+      } catch (e) {
+        setSelectedYearState(currentYear)
+      }
+    })()
+    return () => { mounted = false }
   }, [currentYear])
 
   // Recalculer la liste d'années visible en fonction de l'année sélectionnée
@@ -39,7 +49,8 @@ export function YearProvider({ children }: { children: React.ReactNode }) {
   const setSelectedYear = (year: number | 'all') => {
     setSelectedYearState(year)
     if (typeof window !== 'undefined') {
-      localStorage.setItem('selectedYear', String(year))
+      // Persist asynchronously in IndexedDB to avoid blocking the main thread
+      try { set('selectedYear', String(year)) } catch (e) { /* ignore */ }
     }
   }
 
