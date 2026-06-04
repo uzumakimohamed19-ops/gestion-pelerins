@@ -494,7 +494,6 @@ export default function Dashboard() {
     const totalGouv = filteredData.filter(p => p.sur_plateforme_gouv).length
     const totalNusuk = filteredData.filter(p => p.sur_plateforme_nusuk).length
     const avecPaiement = filteredData.filter(p => (p.total_paye ?? 0) > 0).length
-  
     const sansPaiement = total - avecPaiement
     const totalRecettes = filteredData.reduce((acc, curr) => acc + (curr.total_paye || 0), 0)
     const pct = (n: number) => total > 0 ? Math.round((n / total) * 100) : 0
@@ -512,7 +511,7 @@ export default function Dashboard() {
     setRecettes(totalRecettes)
     setAllData(filteredData)
 
-    const listAgences = [...new Set(filteredData.map(p => p.agences?.nom_agence).filter(Boolean))].sort()
+    const listAgences = [...new Set(filteredData.map(p => p.agences?.nom_agence).filter((x): x is string => Boolean(x)))].sort()
     setAgences(listAgences)
 
     if (filteredData[0]?.agences?.nom_agence) {
