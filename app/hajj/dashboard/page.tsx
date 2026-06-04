@@ -493,7 +493,8 @@ export default function Dashboard() {
     const avec = filteredData.filter(p => p.document_url).length
     const totalGouv = filteredData.filter(p => p.sur_plateforme_gouv).length
     const totalNusuk = filteredData.filter(p => p.sur_plateforme_nusuk).length
-    const avecPaiement = filteredData.filter(p => p.total_paye > 0).length
+    const avecPaiement = filteredData.filter(p => (p.total_paye ?? 0) > 0).length
+  
     const sansPaiement = total - avecPaiement
     const totalRecettes = filteredData.reduce((acc, curr) => acc + (curr.total_paye || 0), 0)
     const pct = (n: number) => total > 0 ? Math.round((n / total) * 100) : 0
