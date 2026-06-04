@@ -1,6 +1,7 @@
 'use client'
 import { useEffect, useState } from 'react'
 import { supabase, getUser } from '@/lib/supabase'
+import { cacheFirstFetch } from '@/lib/cacheFirst'
 import { useRouter } from 'next/navigation'
 import { 
   BarChart3, Users, Landmark, Plane, ShieldCheck, 
@@ -45,21 +46,25 @@ export default function EtatGeneralHajj() {
     const checkUserAndFetch = async () => {
       const { data: { user } } = await getUser()
       if (!user) { router.push('/login'); return }
-      fetchDonneesGenerales()
+
+      await cacheFirstFetch<any[]>({
+        cacheKey: 'etat_general_pelerins',
+        setLoading,
+        fetchRemote: async () => {
+          const { data, error } = await supabase
+            .from('pelerins')
+            .select('*, agences(nom_agence)')
+            .order('nom_complet', { ascending: true })
+
+          if (error || !data) return undefined
+          return data as any[]
+        },
+        onCache: (data) => setPelerins(data),
+        onRemote: (data) => setPelerins(data),
+      })
     }
     checkUserAndFetch()
   }, [router])
-
-  async function fetchDonneesGenerales() {
-    setLoading(true)
-    const { data, error } = await supabase
-      .from('pelerins')
-      .select('*, agences(nom_agence)')
-      .order('nom_complet', { ascending: true })
-
-    if (!error && data) setPelerins(data as any[])
-    setLoading(false)
-  }
 
   // Extraction unique et dynamique des agences/personnes associées disponibles
   const listeAgencesDuniques = Array.from(

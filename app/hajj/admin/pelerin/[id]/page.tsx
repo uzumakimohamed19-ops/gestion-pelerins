@@ -2,6 +2,7 @@
 import { useEffect, useState } from 'react'
 import { useParams } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
+import { cacheFirstFetch } from '@/lib/cacheFirst'
 import { User, FileText, ArrowLeft, Printer, Calendar, ShieldCheck, Building2, Globe, CheckCircle2, Save, Syringe, Stethoscope, BookOpen, Hotel, Plane } from 'lucide-react'
 import Link from 'next/link'
 import { YearSelector } from '@/components/YearSelector'
@@ -17,22 +18,26 @@ export default function DetailsAdminPelerin() {
       if (!id) return
       const cleanId = Array.isArray(id) ? id[0] : id
 
-      const { data, error } = await supabase
-        .from('pelerins')
-        .select('*')
-        .eq('id', cleanId)
-        .single()
-      
-      if (error) {
-        console.error("Erreur :", error.message)
-        setPelerin(null)
-      } else {
-        setPelerin(data)
-      }
-      loading && setLoading(false)
+      await cacheFirstFetch<any>({
+        cacheKey: `admin_pelerin_${cleanId}`,
+        setLoading,
+        fetchRemote: async () => {
+          const { data, error } = await supabase
+            .from('pelerins')
+            .select('*')
+            .eq('id', cleanId)
+            .single()
+
+          if (error || !data) return undefined
+          return data
+        },
+        onCache: (data) => setPelerin(data),
+        onRemote: (data) => setPelerin(data),
+      })
     }
+
     getPelerin()
-  }, [id, loading])
+  }, [id])
 
   const toggleStatus = async (field: string, currentValue: boolean) => {
     setUpdating(true)

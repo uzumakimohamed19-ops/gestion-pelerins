@@ -2,6 +2,7 @@
 
 import { useEffect, useState, startTransition } from 'react'
 import { supabase } from '@/lib/supabase'
+import { cacheFirstFetch } from '@/lib/cacheFirst'
 import { 
   Plane, 
   Users, 
@@ -56,42 +57,47 @@ export default function GestionVolsManifest() {
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
+    async function fetchDatabaseData() {
+      await cacheFirstFetch<{
+        vols: Vol[]
+        pelerins: Pelerin[]
+      }>({
+        cacheKey: 'vols_manifest_data',
+        setLoading,
+        fetchRemote: async () => {
+          const { data: volsData, error: volsError } = await supabase
+            .from('vols')
+            .select('*')
+            .order('date_depart', { ascending: true })
+
+          if (volsError || !volsData) return undefined
+
+          const { data: pelerinsData, error: pelerinsError } = await supabase
+            .from('pelerins')
+            .select('*, agences(nom_agence)')
+
+          if (pelerinsError || !pelerinsData) return undefined
+
+          return { vols: volsData, pelerins: pelerinsData }
+        },
+        onCache: (cached) => {
+          setVols(cached.vols)
+          setPelerins(cached.pelerins)
+          if (cached.vols.length > 0) {
+            setSelectedVol(current => current ?? cached.vols[0])
+          }
+        },
+        onRemote: (remote) => {
+          setVols(remote.vols)
+          setPelerins(remote.pelerins)
+          if (remote.vols.length > 0) {
+            setSelectedVol(current => current ?? remote.vols[0])
+          }
+        }
+      })
+    }
     fetchDatabaseData()
   }, [])
-
-  // Récupération des données réelles depuis Supabase
-  async function fetchDatabaseData() {
-    setLoading(true)
-    setError(null)
-    try {
-      // 1. Récupération des vols
-      const { data: volsData, error: volsError } = await supabase
-        .from('vols')
-        .select('*')
-        .order('date_depart', { ascending: true })
-
-      if (volsError) throw volsError
-
-      // 2. Récupération des pèlerins avec jointure vers leur agence
-      const { data: pelerinsData, error: pelerinsError } = await supabase
-        .from('pelerins')
-        .select('*, agences(nom_agence)')
-
-      if (pelerinsError) throw pelerinsError
-
-      setVols(volsData || [])
-      setPelerins(pelerinsData || [])
-      
-      // Sélectionner automatiquement le premier vol s'il existe
-      if (volsData && volsData.length > 0 && !selectedVol) {
-        setSelectedVol(volsData[0])
-      }
-    } catch (err: any) {
-      setError(err.message || "Erreur lors de la synchronisation avec Supabase")
-    } finally {
-      setLoading(false)
-    }
-  }
 
   // Affectation réelle en base de données
   async function assignerAuVol(pelerinId: string, volId: string) {

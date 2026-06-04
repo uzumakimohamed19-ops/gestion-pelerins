@@ -1,6 +1,7 @@
 'use client'
 import { useEffect, useState, useMemo, type ElementType } from 'react'
 import { supabase } from '../../../lib/supabase'
+import { cacheFirstFetch } from '@/lib/cacheFirst'
 import {
   TrendingUp, Wallet, Plane, Plus, Clock, Briefcase,
   ShieldCheck, Globe, X, Search, UserPlus, AlertTriangle, 
@@ -167,39 +168,62 @@ export default function DashboardAgence() {
 
   useEffect(() => {
     async function chargerDonnees() {
-      setLoading(true)
-      const { data, error } = await supabase
-        .from('operations_agence')
-        .select('*')
-        .order('created_at', { ascending: false })
+      await cacheFirstFetch<Operation[]>({
+        cacheKey: 'agence_dashboard_operations',
+        setLoading,
+        fetchRemote: async () => {
+          const { data, error } = await supabase
+            .from('operations_agence')
+            .select('*')
+            .order('created_at', { ascending: false })
+          if (error || !data) return undefined
+          return data as Operation[]
+        },
+        onCache: (data) => {
+          const count = data.length
+          const totalCA = data.reduce((acc, curr) => acc + (curr.prix_vente || 0), 0)
+          const totalBenef = data.reduce((acc, curr) => acc + (curr.benefice || 0), 0)
+          const panierMoyen = count > 0 ? Math.round(totalCA / count) : 0
+          const margeMoyenne = count > 0 ? Math.round(totalBenef / count) : 0
+          const tauxRentabilite = totalCA > 0 ? Math.round((totalBenef / totalCA) * 100) : 0
+          const hauteMarge = data.filter(o => o.prix_vente > 0 && (o.benefice / o.prix_vente) >= 0.2).length
+          const pctHauteMarge = count > 0 ? Math.round((hauteMarge / count) * 100) : 0
 
-      if (!error && data) {
-        const count = data.length
-        const totalCA = data.reduce((acc, curr) => acc + (curr.prix_vente || 0), 0)
-        const totalBenef = data.reduce((acc, curr) => acc + (curr.benefice || 0), 0)
-        
-        const panierMoyen = count > 0 ? Math.round(totalCA / count) : 0
-        const margeMoyenne = count > 0 ? Math.round(totalBenef / count) : 0
-        const tauxRentabilite = totalCA > 0 ? Math.round((totalBenef / totalCA) * 100) : 0
-        
-        const hauteMarge = data.filter(o => o.prix_vente > 0 && (o.benefice / o.prix_vente) >= 0.2).length
-        const pctHauteMarge = count > 0 ? Math.round((hauteMarge / count) * 100) : 0
+          setStats({
+            caTotal: totalCA,
+            beneficeTotal: totalBenef,
+            nombreVentes: count,
+            panierMoyen,
+            margeMoyenne,
+            tauxRentabilite,
+            hauteMarge,
+            pctHauteMarge
+          })
+          setAllData(data)
+        },
+        onRemote: (data) => {
+          const count = data.length
+          const totalCA = data.reduce((acc, curr) => acc + (curr.prix_vente || 0), 0)
+          const totalBenef = data.reduce((acc, curr) => acc + (curr.benefice || 0), 0)
+          const panierMoyen = count > 0 ? Math.round(totalCA / count) : 0
+          const margeMoyenne = count > 0 ? Math.round(totalBenef / count) : 0
+          const tauxRentabilite = totalCA > 0 ? Math.round((totalBenef / totalCA) * 100) : 0
+          const hauteMarge = data.filter(o => o.prix_vente > 0 && (o.benefice / o.prix_vente) >= 0.2).length
+          const pctHauteMarge = count > 0 ? Math.round((hauteMarge / count) * 100) : 0
 
-        setStats({
-          caTotal: totalCA,
-          beneficeTotal: totalBenef,
-          nombreVentes: count,
-          panierMoyen,
-          margeMoyenne,
-          tauxRentabilite,
-          hauteMarge,
-          pctHauteMarge
-        })
-        setAllData(data)
-      } else if (error) {
-        console.error("Erreur Supabase:", error.message)
-      }
-      setLoading(false)
+          setStats({
+            caTotal: totalCA,
+            beneficeTotal: totalBenef,
+            nombreVentes: count,
+            panierMoyen,
+            margeMoyenne,
+            tauxRentabilite,
+            hauteMarge,
+            pctHauteMarge
+          })
+          setAllData(data)
+        }
+      })
     }
     chargerDonnees()
   }, [])

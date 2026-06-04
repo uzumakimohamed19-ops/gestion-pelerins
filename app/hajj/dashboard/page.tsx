@@ -2,6 +2,7 @@
 import { useEffect, useState, useMemo, type ElementType } from 'react'
 import { supabase } from '../../../lib/supabase'
 import { useYear } from '@/lib/YearContext'
+import { cacheFirstFetch } from '@/lib/cacheFirst'
 import {
   Users, FileCheck, FileWarning, ArrowRight, Wallet,
   ShieldCheck, Globe, X, TrendingUp, AlertCircle,
@@ -22,6 +23,7 @@ type Pelerin = {
   sur_plateforme_gouv?: boolean
   sur_plateforme_nusuk?: boolean
   total_paye?: number
+  campagne?: string | number | null
 }
 
 type TileCard = {
@@ -479,50 +481,59 @@ export default function Dashboard() {
     })
   }, [])
 
+  async function processStats(data: Pelerin[]) {
+    const filteredData = selectedYear === 'all'
+      ? data
+      : data.filter(p => {
+          if (p.campagne === undefined || p.campagne === null) return false
+          return Number(p.campagne) === selectedYear
+        })
+
+    const total = filteredData.length
+    const avec = filteredData.filter(p => p.document_url).length
+    const totalGouv = filteredData.filter(p => p.sur_plateforme_gouv).length
+    const totalNusuk = filteredData.filter(p => p.sur_plateforme_nusuk).length
+    const avecPaiement = filteredData.filter(p => p.total_paye > 0).length
+    const sansPaiement = total - avecPaiement
+    const totalRecettes = filteredData.reduce((acc, curr) => acc + (curr.total_paye || 0), 0)
+    const pct = (n: number) => total > 0 ? Math.round((n / total) * 100) : 0
+
+    const eligiblesNusuk = filteredData.filter(p => p.sur_plateforme_gouv && p.document_url).length
+
+    setStats({
+      total, avecDoc: avec, sansDoc: total - avec,
+      totalGouv, totalNusuk, avecPaiement, sansPaiement,
+      tauxCompletion: pct(avec),
+      montantMoyen: avecPaiement > 0 ? Math.round(totalRecettes / avecPaiement) : 0,
+      tauxGouv: pct(totalGouv), tauxNusuk: pct(totalNusuk), tauxPaiement: pct(avecPaiement),
+      eligiblesNusuk
+    })
+    setRecettes(totalRecettes)
+    setAllData(filteredData)
+
+    const listAgences = [...new Set(filteredData.map(p => p.agences?.nom_agence).filter(Boolean))].sort()
+    setAgences(listAgences)
+
+    if (filteredData[0]?.agences?.nom_agence) {
+      setNomAgence(filteredData[0].agences.nom_agence)
+    }
+  }
+
   useEffect(() => {
     async function fetchStats() {
-      const { data, error } = await supabase.from('pelerins').select('*, agences(nom_agence)')
-      if (!error && data) {
-        // Filtrer les données selon la campagne sélectionnée
-        const filteredData = selectedYear === 'all'
-          ? data
-          : data.filter(p => {
-              if (p.campagne === undefined || p.campagne === null) return false
-              return Number(p.campagne) === selectedYear
-            })
-        
-        const total = filteredData.length
-        const avec = filteredData.filter(p => p.document_url).length
-        const totalGouv = filteredData.filter(p => p.sur_plateforme_gouv).length
-        const totalNusuk = filteredData.filter(p => p.sur_plateforme_nusuk).length
-        const avecPaiement = filteredData.filter(p => p.total_paye > 0).length
-        const sansPaiement = total - avecPaiement
-        const totalRecettes = filteredData.reduce((acc, curr) => acc + (curr.total_paye || 0), 0)
-        const pct = (n: number) => total > 0 ? Math.round((n / total) * 100) : 0
-        
-        // Calcul des pèlerins éligibles à Nusuk (plateforme gouv + dossier complet)
-        const eligiblesNusuk = filteredData.filter(p => p.sur_plateforme_gouv && p.document_url).length
-        
-        setStats({
-          total, avecDoc: avec, sansDoc: total - avec,
-          totalGouv, totalNusuk, avecPaiement, sansPaiement,
-          tauxCompletion: pct(avec),
-          montantMoyen: avecPaiement > 0 ? Math.round(totalRecettes / avecPaiement) : 0,
-          tauxGouv: pct(totalGouv), tauxNusuk: pct(totalNusuk), tauxPaiement: pct(avecPaiement),
-          eligiblesNusuk
-        })
-        setRecettes(totalRecettes)
-        setAllData(filteredData)
-        
-        const listAgences = [...new Set(filteredData.map(p => p.agences?.nom_agence).filter(Boolean))].sort()
-        setAgences(listAgences)
-
-        if (filteredData[0]?.agences?.nom_agence) {
-          setNomAgence(filteredData[0].agences.nom_agence)
-        }
-      }
-      setLoading(false)
+      await cacheFirstFetch<Pelerin[]>({
+        cacheKey: selectedYear === 'all' ? 'dashboard_stats_all' : `dashboard_stats_${selectedYear}`,
+        setLoading,
+        fetchRemote: async () => {
+          const { data, error } = await supabase.from('pelerins').select('*, agences(nom_agence)')
+          if (error || !data) return undefined
+          return data as Pelerin[]
+        },
+        onCache: processStats,
+        onRemote: processStats,
+      })
     }
+
     fetchStats()
   }, [selectedYear])
 

@@ -1,6 +1,7 @@
 'use client'
 import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
+import { cacheFirstFetch } from '@/lib/cacheFirst'
 import { 
   FileText, Upload, Trash2, FolderPlus, Loader2, 
   CheckCircle, ExternalLink, Building2, X, Search, 
@@ -44,38 +45,76 @@ export default function PageDocuments() {
       .select('*, agences(nom_agence)')
       .eq('id', user.id)
       .single()
-    
-    setUserProfile(profile)
-
-    // Charger les types de documents demandés par l'admin global
-    const { data: secs } = await supabase
-      .from('types_documents')
-      .select('*')
-      .order('created_at', { ascending: true })
-    setSections(secs || [])
-
-    if (profile?.role === 'admin') {
-      const { data: ags } = await supabase.from('agences').select('*').order('nom_agence', { ascending: true })
-      setAgences(ags || [])
-      const { data: allFiles } = await supabase.from('documents_agence_files').select('*, agences(nom_agence)')
-      setAllAgenciesDocs(allFiles || [])
-    } else if (profile?.agence_id) {
-      // Documents officiels envoyés à l'admin
-      const { data: files } = await supabase
-        .from('documents_agence_files')
-        .select('*')
-        .eq('agence_id', profile.agence_id)
-      setUploadedFiles(files || [])
-
-      // NOUVEAU: Charger les documents du coffre-fort interne de l'agence
-      const { data: intFiles } = await supabase
-        .from('documents_internes_agence')
-        .select('*')
-        .eq('agence_id', profile.agence_id)
-        .order('created_at', { ascending: false })
-      setInternalDocs(intFiles || [])
+    if (!profile) {
+      setLoading(false)
+      return
     }
-    setLoading(false)
+
+    const cacheKey = `documents_page_${profile.role}_${profile.agence_id ?? 'none'}`
+
+    await cacheFirstFetch<any>({
+      cacheKey,
+      setLoading,
+      fetchRemote: async () => {
+        const { data: secs, error: secsError } = await supabase
+          .from('types_documents')
+          .select('*')
+          .order('created_at', { ascending: true })
+        if (secsError) return undefined
+
+        const payload: any = {
+          profile,
+          sections: secs || [],
+          agences: [],
+          allAgenciesDocs: [],
+          uploadedFiles: [],
+          internalDocs: [],
+        }
+
+        if (profile.role === 'admin') {
+          const { data: ags, error: agsError } = await supabase.from('agences').select('*').order('nom_agence', { ascending: true })
+          if (agsError) return undefined
+          payload.agences = ags || []
+
+          const { data: allFiles, error: allFilesError } = await supabase.from('documents_agence_files').select('*, agences(nom_agence)')
+          if (allFilesError) return undefined
+          payload.allAgenciesDocs = allFiles || []
+        } else if (profile.agence_id) {
+          const { data: files, error: filesError } = await supabase
+            .from('documents_agence_files')
+            .select('*')
+            .eq('agence_id', profile.agence_id)
+          if (filesError) return undefined
+          payload.uploadedFiles = files || []
+
+          const { data: intFiles, error: intFilesError } = await supabase
+            .from('documents_internes_agence')
+            .select('*')
+            .eq('agence_id', profile.agence_id)
+            .order('created_at', { ascending: false })
+          if (intFilesError) return undefined
+          payload.internalDocs = intFiles || []
+        }
+
+        return payload
+      },
+      onCache: (cache) => {
+        setUserProfile(cache.profile)
+        setSections(cache.sections)
+        setAgences(cache.agences)
+        setAllAgenciesDocs(cache.allAgenciesDocs)
+        setUploadedFiles(cache.uploadedFiles)
+        setInternalDocs(cache.internalDocs)
+      },
+      onRemote: (cache) => {
+        setUserProfile(cache.profile)
+        setSections(cache.sections)
+        setAgences(cache.agences)
+        setAllAgenciesDocs(cache.allAgenciesDocs)
+        setUploadedFiles(cache.uploadedFiles)
+        setInternalDocs(cache.internalDocs)
+      }
+    })
   }
 
   // Fonctions Admin Global

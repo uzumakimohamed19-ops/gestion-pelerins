@@ -1,11 +1,12 @@
 'use client'
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useState } from 'react'
+import { get, set } from 'idb-keyval'
 import { supabase, getUser } from '@/lib/supabase'
 import { useYear } from '@/lib/YearContext'
 import { YearSelector } from '@/components/YearSelector'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { Search, Download, Plus, User, CreditCard, ChevronRight, Loader2, Calendar, Hash, Building2, Phone, X } from 'lucide-react'
+import { Search, Download, Plus, User, ChevronRight, Loader2, Calendar, Hash, Building2, Phone, X } from 'lucide-react'
 import ExcelJS from 'exceljs'
 import { saveAs } from 'file-saver'
 
@@ -19,14 +20,15 @@ interface Pelerin {
   date_naissance?: string
   date_expiration?: string
   created_at?: string 
-  reference?: string // Ajout explicite de la colonne de référence
-  agence_ou_personne_associee?: string // Ajout explicite de la colonne intermédiaire
+  reference?: string 
+  agence_ou_personne_associee?: string 
   total_paye: number        
   prix_package: number      
   sur_plateforme_gouv: boolean
   sur_plateforme_nusuk: boolean
-  date_depart?: string // Ajout pour le filtrage demandé
-  date_retour?: string // Ajout pour le filtrage demandé
+  campagne?: number
+  date_depart?: string 
+  date_retour?: string 
   agences?: {
     nom_agence?: string
   }
@@ -39,16 +41,64 @@ export default function ListePelerins() {
   const [pelerins, setPelerins] = useState<Pelerin[]>([])
   const [searchTerm, setSearchTerm] = useState('')
   const [loading, setLoading] = useState(true)
+  const [backgroundUpdating, setBackgroundUpdating] = useState(false)
   const [updatingId, setUpdatingId] = useState<string | null>(null)
   const [role, setRole] = useState<string>('staff')
   const router = useRouter()
+
+  // Fonction de restauration immédiate du scroll
+  const restoreScrollPosition = () => {
+    const savedScroll = sessionStorage.getItem('liste_pelerins_scroll_y')
+    if (savedScroll) {
+      window.scrollTo({
+        top: parseInt(savedScroll, 10),
+        behavior: 'instant' // Force l'ancrage sans animation pour éviter le flash
+      })
+      sessionStorage.removeItem('liste_pelerins_scroll_y')
+    }
+  }
+
+  const fetchPelerins = useCallback(async ({ cacheKey, hasCache }: { cacheKey: string, hasCache: boolean }) => {
+    // Si on a déjà du cache, on ne montre JAMAIS le gros spinner de chargement au milieu de l'écran
+    if (!hasCache) {
+      setLoading(true)
+    } else {
+      setBackgroundUpdating(true)
+    }
+
+    const { data, error } = await supabase
+      .from('pelerins')
+      .select('*, agences ( nom_agence )')
+      .order('created_at', { ascending: false })
+
+    if (!error) {
+      const filteredData = (data as Pelerin[]) || []
+      const yearFilteredData = selectedYear === 'all'
+        ? filteredData
+        : filteredData.filter(p => {
+            if (p.campagne === undefined || p.campagne === null) return false
+            return Number(p.campagne) === selectedYear
+          })
+
+      setPelerins(yearFilteredData)
+      try {
+        await set(cacheKey, yearFilteredData)
+      } catch (err) {
+        console.error('Erreur sauvegarde cache pelerins', err)
+      }
+    }
+
+    setLoading(false)
+    setBackgroundUpdating(false)
+  }, [selectedYear])
 
   // États pour la gestion des filtres par étape
   const [activeFilterType, setActiveFilterType] = useState<FilterType>(null)
   const [selectedFilterValue, setSelectedFilterValue] = useState<string | null>(null)
 
+  // 1. Vérification du rôle utilisateur au démarrage
   useEffect(() => {
-    const checkUserAndFetch = async () => {
+    const checkUser = async () => {
       try {
         const { data: { user } } = await getUser()
         if (!user) {
@@ -62,34 +112,40 @@ export default function ListePelerins() {
           .single()
 
         if (profile?.role) setRole(profile.role)
-        fetchPelerins()
-      } catch (error) {
+      } catch {
         router.push('/login')
       }
     }
-    checkUserAndFetch()
-  }, [router, selectedYear])
+    checkUser()
+  }, [router])
 
-  async function fetchPelerins() {
-    setLoading(true)
-    const { data, error } = await supabase
-      .from('pelerins')
-      .select('*, agences ( nom_agence )')
-      .order('created_at', { ascending: false })
+  // 2. Logique Cache-First et Background Sync optimisée (Zéro chargement persistant)
+  useEffect(() => {
+    const triggerDataFlow = async () => {
+      const cacheKey = selectedYear === 'all' ? 'pelerins_all' : `pelerins_year_${selectedYear}`
+      const cachedPelerins = await get<Pelerin[]>(cacheKey)
 
-    if (!error) {
-      const filteredData = (data as any[]) || []
-      // Filtrer par année sélectionnée
-      const yearFilteredData = selectedYear === 'all'
-        ? filteredData
-        : filteredData.filter(p => {
-            if (p.campagne === undefined || p.campagne === null) return false
-            return Number(p.campagne) === selectedYear
-          })
-      setPelerins(yearFilteredData)
+      if (cachedPelerins && cachedPelerins.length > 0) {
+        // Injection instantanée du cache (Pas d'écran blanc)
+        setPelerins(cachedPelerins)
+        setLoading(false)
+        
+        // Lancer discrètement la mise à jour Supabase en arrière-plan
+        fetchPelerins({ cacheKey, hasCache: true })
+      } else {
+        // Seulement si le cache local est totalement vide
+        await fetchPelerins({ cacheKey, hasCache: false })
+      }
     }
-    setLoading(false)
-  }
+    triggerDataFlow()
+  }, [selectedYear, fetchPelerins])
+
+  // 3. Sécurité de rendu pour replacer le scroll dès que le tableau est injecté dans le DOM
+  useLayoutEffect(() => {
+    if (pelerins.length > 0) {
+      restoreScrollPosition()
+    }
+  }, [pelerins])
 
   const toggleFastStatus = async (id: string, field: string, currentValue: boolean) => {
     setUpdatingId(id + field);
@@ -164,7 +220,6 @@ export default function ListePelerins() {
     saveAs(new Blob([buffer]), `Liste_Pelerins_Hajj_${new Date().toLocaleDateString('fr-FR')}.xlsx`);
   };
 
-  // CORRIGÉ : Générateur dynamique basé sur les colonnes réelles 'reference' et 'agence_ou_personne_associee'
   const getFilterOptions = (): string[] => {
     if (!activeFilterType) return [];
     const rawOptions = pelerins.map(p => {
@@ -176,9 +231,9 @@ export default function ListePelerins() {
         case 'date_retour':
           return p.date_retour ? new Date(p.date_retour).toLocaleDateString('fr-FR') : 'N/A';
         case 'reference':
-          return p.reference || 'Sans référence'; // Utilisation de la colonne reference
+          return p.reference || 'Sans référence'; 
         case 'agence':
-          return p.agence_ou_personne_associee || 'Non spécifié'; // Utilisation de agence_ou_personne_associee
+          return p.agence_ou_personne_associee || 'Non spécifié'; 
         case 'phone':
           return p.telephone_pelerin || 'Aucun numéro';
         default:
@@ -188,7 +243,6 @@ export default function ListePelerins() {
     return Array.from(new Set(rawOptions.filter(Boolean)));
   };
 
-  // CORRIGÉ : Filtrage global appliqué sur les vraies colonnes 'reference' et 'agence_ou_personne_associee'
   const pelerinsFiltrés = pelerins.filter(p => {
     const matchesSearch = p.nom_complet.toLowerCase().includes(searchTerm.toLowerCase()) ||
       p.num_passeport.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -230,6 +284,11 @@ export default function ListePelerins() {
     }
   };
 
+  // Sauvegarde instantanée de la position de défilement au clic
+  const handlePersistScroll = () => {
+    sessionStorage.setItem('liste_pelerins_scroll_y', window.scrollY.toString())
+  }
+
   return (
     <div className="max-w-6xl mx-auto px-4 py-6 md:py-10">
       
@@ -263,12 +322,12 @@ export default function ListePelerins() {
           placeholder="Nom, passeport, agence..."
           value={searchTerm}
           onChange={(e) => setSearchTerm(e.target.value)}
-          className="w-full pl-12 pr-4 py-4 rounded-[1.5rem] border-2 border-gray-100 bg-white text-gray-900 font-bold focus:border-blue-600 focus:ring-0 outline-none transition-all duration-200 shadow-sm group-hover:border-gray-200 focus:shadow-md"
+          className="w-full pl-12 pr-4 py-4 rounded-3xl border-2 border-gray-100 bg-white text-gray-900 font-bold focus:border-blue-600 focus:ring-0 outline-none transition-all duration-200 shadow-sm group-hover:border-gray-200 focus:shadow-md"
         />
         <Search className="absolute left-4 top-4 text-gray-400 group-focus-within:text-blue-600 transition-colors duration-200" size={24} />
       </div>
 
-      {/* COMPOSANT DE FILTRAGE PAR ÉTAPE (DESKTOP & MOBILE RESPONSIVE) */}
+      {/* COMPOSANT DE FILTRAGE PAR ÉTAPE */}
       <div className="mb-8 space-y-3">
         <div className="flex flex-wrap gap-2 items-center">
           <span className="text-[10px] font-black uppercase text-gray-400 tracking-wider mr-1">Filtrer par :</span>
@@ -326,7 +385,6 @@ export default function ListePelerins() {
           )}
         </div>
 
-        {/* Menu déroulant contenant les données extraites à cliquer */}
         {activeFilterType && (
           <div className="bg-gray-50 rounded-2xl p-4 border border-gray-100 shadow-inner max-h-40 overflow-y-auto transition-all animate-in fade-in slide-in-from-top-2 duration-200">
             <div className="flex justify-between items-center mb-2">
@@ -359,26 +417,32 @@ export default function ListePelerins() {
         )}
       </div>
 
+      {backgroundUpdating && !loading && (
+        <div className="mb-6 rounded-2xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm font-semibold text-blue-800 shadow-sm animate-pulse">
+          Vérification des nouveautés en tâche de fond...
+        </div>
+      )}
+
       {/* LISTE MOBILE / TABLEAU PC */}
       <div className="space-y-4 md:space-y-0">
         {loading ? (
           <div className="py-20 flex flex-col items-center justify-center text-gray-400 font-black uppercase tracking-widest gap-3">
             <Loader2 className="animate-spin text-blue-600" size={28} />
-            Chargement...
+            Chargement initial...
           </div>
         ) : (
           <>
             {/* VUE MOBILE (Cartes) */}
             <div className="md:hidden space-y-4">
               {pelerinsFiltrés.map((p) => (
-                <div key={p.id} className="bg-white p-5 rounded-[2rem] border border-gray-100 shadow-sm hover:shadow-md transition-all duration-200 hover:-translate-y-0.5">
+                <div key={p.id} className="bg-white p-5 rounded-4xl border border-gray-100 shadow-sm hover:shadow-md transition-all duration-200 hover:-translate-y-0.5">
                   <div className="flex justify-between items-start mb-4">
                     <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 rounded-full bg-blue-50 flex items-center justify-center text-blue-600 transition-transform duration-300 group-hover:scale-110">
+                      <div className="w-10 h-10 rounded-full bg-blue-50 flex items-center justify-center text-blue-600">
                         <User size={20} />
                       </div>
                       <div>
-                        <h3 className="font-black text-gray-900 leading-tight">{p.prenom}  {p.nom_complet} </h3>
+                        <h3 className="font-black text-gray-900 leading-tight">{p.prenom} {p.nom_complet}</h3>
                         <p className="text-[10px] font-bold text-gray-400 uppercase tracking-tighter mt-0.5">{p.num_passeport}</p>
                       </div>
                     </div>
@@ -422,7 +486,7 @@ export default function ListePelerins() {
                       <span className="text-blue-600">{Math.round((p.total_paye / p.prix_package) * 100) || 0}%</span>
                     </div>
                     <div className="w-full bg-gray-200 h-1.5 rounded-full overflow-hidden mb-2">
-                      <div className="h-full bg-blue-600 transition-all duration-500 ease-out" style={{ width: `${(p.total_paye / p.prix_package) * 100}%` }}></div>
+                      <div className="h-full bg-blue-600" style={{ width: `${(p.total_paye / p.prix_package) * 100}%` }}></div>
                     </div>
                     <div className="flex justify-between text-[10px] font-bold text-gray-500 bg-white px-2 py-1 rounded-md border border-gray-100">
                       <span>Payé: {p.total_paye.toLocaleString()} F</span>
@@ -433,10 +497,11 @@ export default function ListePelerins() {
                   <div className="flex items-center justify-between">
                     <span className="text-xs font-bold text-gray-400 italic">{p.agences?.nom_agence}</span>
                     <Link 
+                      onClick={handlePersistScroll}
                       href={`/hajj/pelerin/${p.id}`} 
                       className="bg-gray-900 text-white hover:bg-blue-600 px-4 py-2 rounded-xl text-xs font-black flex items-center gap-1 transition-all duration-200 active:scale-95"
                     >
-                      Détails <ChevronRight size={14} className="transition-transform duration-200 group-hover:translate-x-0.5" />
+                      Détails <ChevronRight size={14} />
                     </Link>
                   </div>
                 </div>
@@ -463,7 +528,7 @@ export default function ListePelerins() {
                         <div className="text-sm text-gray-400 font-medium">{p.telephone_pelerin || 'Aucun numéro'}</div>
                       </td>
                       <td className="px-6 py-5">
-                        <span className="bg-gray-100 px-3 py-1.5 rounded-xl font-mono font-black text-gray-700 uppercase text-sm border border-gray-200 transition-colors group-hover:bg-white">
+                        <span className="bg-gray-100 px-3 py-1.5 rounded-xl font-mono font-black text-gray-700 uppercase text-sm border border-gray-200">
                           {p.num_passeport}
                         </span>
                       </td>
@@ -509,7 +574,7 @@ export default function ListePelerins() {
                               <span className="text-blue-600 font-extrabold">{Math.round((p.total_paye / p.prix_package) * 100) || 0}%</span>
                             </div>
                             <div className="w-full bg-gray-100 h-2 rounded-full overflow-hidden mb-1">
-                              <div className="h-full bg-blue-600 transition-all duration-500 ease-out" style={{ width: `${(p.total_paye / p.prix_package) * 100}%` }}></div>
+                              <div className="h-full bg-blue-600" style={{ width: `${(p.total_paye / p.prix_package) * 100}%` }}></div>
                             </div>
                             <div className="flex justify-between text-xs font-bold text-slate-700 mt-1">
                               <span>{p.total_paye.toLocaleString()} F</span>
@@ -520,6 +585,7 @@ export default function ListePelerins() {
                       </td>
                       <td className="px-6 py-5 text-right">
                         <Link 
+                          onClick={handlePersistScroll}
                           href={`/hajj/pelerin/${p.id}`} 
                           className="inline-flex items-center px-5 py-2.5 bg-gray-900 text-white rounded-xl font-black text-xs hover:bg-blue-600 transition-all duration-200 hover:-translate-y-0.5 active:translate-y-0 active:scale-95 shadow-sm hover:shadow-md"
                         >

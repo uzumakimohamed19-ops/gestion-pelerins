@@ -2,6 +2,7 @@
 import { useEffect, useState } from 'react'
 import { useParams } from 'next/navigation' 
 import { supabase } from '@/lib/supabase'
+import { cacheFirstFetch } from '@/lib/cacheFirst'
 import { Search, Globe, ShieldCheck, Eye, CreditCard, AlertCircle, ArrowLeft } from 'lucide-react'
 import Link from 'next/link'
 import { useYear } from '@/lib/YearContext'
@@ -17,29 +18,22 @@ export default function ListeAdminPelerins() {
 
   useEffect(() => {
     async function fetchPelerins() {
-      setLoading(true)
-      setError(null)
-      
-      try {
-        let query = supabase
-          .from('pelerins')
-          .select('*')
+      await cacheFirstFetch<any[]>({
+        cacheKey: id ? `admin_agence_pelerins_${id}` : 'admin_agence_pelerins_all',
+        setLoading,
+        fetchRemote: async () => {
+          let query = supabase
+            .from('pelerins')
+            .select('*')
 
-        if (id) {
-          query = query.eq('agence_id', id) 
-        }
-
-        const { data, error: sbError } = await query.order('nom_complet', { ascending: true })
-        
-        if (sbError) throw sbError
-
-        setPelerins(data || [])
-      } catch (err: any) {
-        console.error("Erreur de récupération:", err.message)
-        setError(err.message)
-      } finally {
-        setLoading(false)
-      }
+          if (id) query = query.eq('agence_id', id)
+          const { data, error } = await query.order('nom_complet', { ascending: true })
+          if (error || !data) return undefined
+          return data
+        },
+        onCache: (data) => setPelerins(data),
+        onRemote: (data) => setPelerins(data),
+      })
     }
 
     fetchPelerins()

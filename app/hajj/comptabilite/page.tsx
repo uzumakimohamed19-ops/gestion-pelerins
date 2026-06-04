@@ -1,6 +1,7 @@
- 'use client'
+'use client'
 import { useEffect, useState } from 'react'
 import { supabase } from '../../../lib/supabase'
+import { cacheFirstFetch } from '@/lib/cacheFirst'
 import { useYear } from '@/lib/YearContext'
 import { YearSelector } from '@/components/YearSelector'
 import {
@@ -74,34 +75,48 @@ export default function ComptabiliteHajj() {
   // État de recherche pour la sélection de pèlerin unique
   const [searchPelerin, setSearchPelerin] = useState<string>('')
 
-  async function fetchAllData() {
-    setLoading(true)
-    const { data: pelerins, error: pErr } = await supabase
-      .from('pelerins')
-      .select('*, agences(nom_agence)')
-    
-    const { data: listDepenses, error: dErr } = await supabase
-      .from('depenses_hajj')
-      .select('*')
-      .order('created_at', { ascending: false })
+  const filterByYear = (raw: any[]) => {
+    return selectedYear === 'all'
+      ? raw
+      : raw.filter(p => {
+          if (p.campagne === undefined || p.campagne === null) return false
+          return Number(p.campagne) === selectedYear
+        })
+  }
 
-    if (!pErr && pelerins) {
-      const raw = pelerins as any[]
-      const filtered = selectedYear === 'all' ? raw : raw.filter(p => {
-        if (p.campagne === undefined || p.campagne === null) return false
-        return Number(p.campagne) === selectedYear
-      })
-      setData(filtered)
-    }
-    if (!dErr && listDepenses) setDepenses(listDepenses)
-    
-    if (pErr || dErr) console.error({ pErr, dErr })
-    setLoading(false)
+  async function loadCacheFirstData() {
+    await cacheFirstFetch<{ pelerins: any[]; depenses: Depense[] }>({
+      cacheKey: 'hajj_comptabilite_all',
+      setLoading,
+      fetchRemote: async () => {
+        const { data: pelerins, error: pErr } = await supabase
+          .from('pelerins')
+          .select('*, agences(nom_agence)')
+        const { data: listDepenses, error: dErr } = await supabase
+          .from('depenses_hajj')
+          .select('*')
+          .order('created_at', { ascending: false })
+
+        if (pErr || dErr || !pelerins || !listDepenses) return undefined
+        return {
+          pelerins: pelerins as any[],
+          depenses: listDepenses as Depense[],
+        }
+      },
+      onCache: (cached) => {
+        setData(filterByYear(cached.pelerins))
+        setDepenses(cached.depenses)
+      },
+      onRemote: (remote) => {
+        setData(filterByYear(remote.pelerins))
+        setDepenses(remote.depenses)
+      }
+    })
   }
 
   useEffect(() => {
-    fetchAllData()
-  }, [])
+    loadCacheFirstData()
+  }, [selectedYear])
 
   // --- EXTRACTEURS POUR LES LISTES DÉROULANTES ---
   const listReferences = Array.from(new Set(data.map(p => p.reference).filter(Boolean))) as string[]
@@ -180,17 +195,18 @@ export default function ComptabiliteHajj() {
       setMontantDepense('')
       setCustomLibelle('')
       setSearchPelerin('')
-      fetchAllData()
+      loadCacheFirstData()
     } else {
       console.error(error)
     }
+    
     setFormLoading(false)
   }
 
   const handleDeleteDepense = async (id: string) => {
     if (!confirm('Voulez-vous supprimer cette ligne de dépense ?')) return
     const { error } = await supabase.from('depenses_hajj').delete().eq('id', id)
-    if (!error) fetchAllData()
+    if (!error) loadCacheFirstData()
   }
 
   const fmt = (n: number) => Math.round(n).toLocaleString('fr-FR')

@@ -2,6 +2,7 @@
 import { useEffect, useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import { supabase, getUser } from '@/lib/supabase'
+import { cacheFirstFetch } from '@/lib/cacheFirst'
 import { 
   User, CreditCard, ArrowLeft, Pencil, Printer, Save, Syringe, 
   BookOpen, Hotel, Plane, Loader2, ShieldCheck, Tag, Building, 
@@ -252,8 +253,18 @@ export default function DetailsPelerin() {
     async function getPelerin() {
       if (!id) return
       const cleanId = Array.isArray(id) ? id[0] : id
-      const { data, error } = await supabase.from('pelerins').select(`*, agences ( nom_agence )`).eq('id', cleanId).single()
-      if (!error) setPelerin(data)
+
+      await cacheFirstFetch<any>({
+        cacheKey: `hajj_pelerin_${cleanId}`,
+        setLoading,
+        fetchRemote: async () => {
+          const { data, error } = await supabase.from('pelerins').select(`*, agences ( nom_agence )`).eq('id', cleanId).single()
+          if (error || !data) return undefined
+          return data
+        },
+        onCache: (data) => setPelerin(data),
+        onRemote: (data) => setPelerin(data),
+      })
 
       try {
         const { data: userData } = await getUser()
@@ -262,7 +273,6 @@ export default function DetailsPelerin() {
           if (profileData?.role) setRole(profileData.role)
         }
       } catch (e) { console.error(e) }
-      finally { setLoading(false) }
     }
     getPelerin()
   }, [id])

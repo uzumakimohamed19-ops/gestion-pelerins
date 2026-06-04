@@ -1,6 +1,7 @@
 'use client'
 import { useEffect, useState, useMemo, type ElementType } from 'react'
 import { supabase } from '@/lib/supabase'
+import { cacheFirstFetch } from '@/lib/cacheFirst'
 import { useYear } from '@/lib/YearContext'
 import {
   Globe, ShieldCheck, FileCheck, FileWarning, Search, X, 
@@ -170,15 +171,27 @@ export default function PageGestionNusuk() {
 
   useEffect(() => {
     async function loadData() {
-      setLoading(true)
-      const { data: res, error } = await supabase.from('pelerins').select('*, agences(nom_agence)')
-      if (!error && res) {
-        const filteredByYear = selectedYear === 'all' ? res : res.filter(p => Number(p.campagne) === selectedYear)
-        setData(filteredByYear)
-        const list = [...new Set(filteredByYear.map(p => p.agences?.nom_agence).filter(Boolean))] as string[]
-        setAgences(list.sort())
-      }
-      setLoading(false)
+      await cacheFirstFetch<any[]>({
+        cacheKey: selectedYear === 'all' ? 'nusuk_data_all' : `nusuk_data_${selectedYear}`,
+        setLoading,
+        fetchRemote: async () => {
+          const { data: res, error } = await supabase.from('pelerins').select('*, agences(nom_agence)')
+          if (error || !res) return undefined
+          return res
+        },
+        onCache: (res) => {
+          const filteredByYear = selectedYear === 'all' ? res : res.filter(p => Number(p.campagne) === selectedYear)
+          setData(filteredByYear)
+          const list = [...new Set(filteredByYear.map(p => p.agences?.nom_agence).filter(Boolean))] as string[]
+          setAgences(list.sort())
+        },
+        onRemote: (res) => {
+          const filteredByYear = selectedYear === 'all' ? res : res.filter(p => Number(p.campagne) === selectedYear)
+          setData(filteredByYear)
+          const list = [...new Set(filteredByYear.map(p => p.agences?.nom_agence).filter(Boolean))] as string[]
+          setAgences(list.sort())
+        }
+      })
     }
     loadData()
     setSelectedIds([])
