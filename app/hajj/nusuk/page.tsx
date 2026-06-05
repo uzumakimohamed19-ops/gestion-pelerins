@@ -1,16 +1,21 @@
 'use client'
-import { useEffect, useState, useMemo, type ElementType } from 'react'
+import { useEffect, useState, useMemo, useRef, useCallback, type ElementType } from 'react'
 import { supabase } from '@/lib/supabase'
 import { cacheFirstFetch } from '@/lib/cacheFirst'
 import { useYear } from '@/lib/YearContext'
 import {
-  Globe, ShieldCheck, FileCheck, FileWarning, Search, X, 
-  Filter, FileSpreadsheet, FileText, ArrowLeft, Building2, 
-  Wallet, CheckCircle2, AlertCircle, ChevronLeft, ChevronRight, 
-  SlidersHorizontal, CheckSquare, Square, Eye, CreditCard
+  Globe, ShieldCheck, FileCheck, FileWarning, Search, X,
+  Filter, FileSpreadsheet, FileText, ArrowLeft, Building2,
+  Wallet, CheckCircle2, AlertCircle, ChevronLeft, ChevronRight,
+  SlidersHorizontal, CheckSquare, Square, Eye, CreditCard,
+  RefreshCw
 } from 'lucide-react'
 import Link from 'next/link'
 import { YearSelector } from '@/components/YearSelector'
+
+// ─── CLÉS SESSION STORAGE ─────────────────────────────────────────────────────
+const SCROLL_KEY = 'nusuk_scroll_pos'
+const FILTERS_KEY = 'nusuk_filters'
 
 type Pelerin = {
   id: string
@@ -27,7 +32,7 @@ type Pelerin = {
   total_paye?: number
 }
 
-// ─── MODAL DE CONFIRMATION EXPORT PDF (MÊME LOGIQUE DASHBOARD) ────────────────
+// ─── MODAL DE CONFIRMATION EXPORT PDF ────────────────────────────────────────
 type PdfConfirmModalProps = {
   isOpen: boolean
   onClose: () => void
@@ -145,9 +150,13 @@ function generateAndPrintPDF(items: Pelerin[], title: string, includeFinance: bo
 export default function PageGestionNusuk() {
   const { selectedYear } = useYear()
   const [data, setData] = useState<Pelerin[]>([])
+  // loading = vrai seulement si aucune donnée cache n'est encore arrivée
   const [loading, setLoading] = useState(true)
+  // indicateur discret de synchronisation en arrière-plan (pas de spinner)
+  const [isBgSyncing, setIsBgSyncing] = useState(false)
+  const [lastSyncTime, setLastSyncTime] = useState<string | null>(null)
   const [agences, setAgences] = useState<string[]>([])
-  
+
   // States de Filtrage Avancé
   const [search, setSearch] = useState('')
   const [selectedAgence, setSelectedAgence] = useState('all')
@@ -162,15 +171,91 @@ export default function PageGestionNusuk() {
   const [selectedIds, setSelectedIds] = useState<string[]>([])
   const [isUpdating, setIsUpdating] = useState(false)
 
-  // Pagination (Pour les volumes à milliers de lignes)
+  // Pagination
   const [currentPage, setCurrentPage] = useState(1)
   const itemsPerPage = 25
 
   // Modals d'exports
   const [pdfConfirmOpen, setPdfConfirmOpen] = useState(false)
 
+  // ─── REF MÉMOIRE SCROLL ───────────────────────────────────────────────────
+  const scrollRestored = useRef(false)
+  const hasHadData = useRef(false)
+
+  // ─── RESTAURATION FILTRES DEPUIS SESSION STORAGE ──────────────────────────
+  // Chargé une seule fois au montage, avant tout rendu de liste
   useEffect(() => {
+    try {
+      const saved = sessionStorage.getItem(FILTERS_KEY)
+      if (saved) {
+        const f = JSON.parse(saved)
+        if (f.search !== undefined) setSearch(f.search)
+        if (f.selectedAgence !== undefined) setSelectedAgence(f.selectedAgence)
+        if (f.filterEligibility !== undefined) setFilterEligibility(f.filterEligibility)
+        if (f.filterGouv !== undefined) setFilterGouv(f.filterGouv)
+        if (f.filterNusuk !== undefined) setFilterNusuk(f.filterNusuk)
+        if (f.filterFinance !== undefined) setFilterFinance(f.filterFinance)
+        if (f.filterDoc !== undefined) setFilterDoc(f.filterDoc)
+      }
+    } catch {}
+  }, [])
+
+  // ─── PERSISTANCE FILTRES EN TEMPS RÉEL ───────────────────────────────────
+  useEffect(() => {
+    try {
+      sessionStorage.setItem(FILTERS_KEY, JSON.stringify({
+        search, selectedAgence, filterEligibility,
+        filterGouv, filterNusuk, filterFinance, filterDoc
+      }))
+    } catch {}
+  }, [search, selectedAgence, filterEligibility, filterGouv, filterNusuk, filterFinance, filterDoc])
+
+  // ─── RESTAURATION SCROLL APRÈS AFFICHAGE DU CACHE ─────────────────────────
+  // Se déclenche dès que data est remplie pour la première fois (= cache prêt)
+  useEffect(() => {
+    if (data.length > 0 && !scrollRestored.current) {
+      scrollRestored.current = true
+      try {
+        const savedY = sessionStorage.getItem(SCROLL_KEY)
+        if (savedY) {
+          const target = parseInt(savedY, 10)
+          // requestAnimationFrame assure que le DOM est peint avant de scroller
+          requestAnimationFrame(() => {
+            window.scrollTo({ top: target, behavior: 'instant' })
+            sessionStorage.removeItem(SCROLL_KEY)
+          })
+        }
+      } catch {}
+    }
+  }, [data])
+
+  // ─── RACCOURCI CLAVIER : ESC vide la recherche ───────────────────────────
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && search) {
+        setSearch('')
+        setCurrentPage(1)
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [search])
+
+  // ─── SAUVEGARDE SCROLL AVANT NAVIGATION ───────────────────────────────────
+  const saveScrollPosition = useCallback(() => {
+    try {
+      sessionStorage.setItem(SCROLL_KEY, String(window.scrollY))
+    } catch {}
+  }, [])
+
+  // ─── CHARGEMENT DONNÉES : ZÉRO ÉCRAN DE CHARGEMENT ───────────────────────
+  useEffect(() => {
+    scrollRestored.current = false
+    hasHadData.current = false
+
     async function loadData() {
+      setIsBgSyncing(true)
+
       await cacheFirstFetch<any[]>({
         cacheKey: selectedYear === 'all' ? 'nusuk_data_all' : `nusuk_data_${selectedYear}`,
         setLoading,
@@ -180,31 +265,47 @@ export default function PageGestionNusuk() {
           return res
         },
         onCache: (res) => {
+          // Cache disponible → affichage immédiat, plus jamais de spinner
           const filteredByYear = selectedYear === 'all' ? res : res.filter(p => Number(p.campagne) === selectedYear)
           setData(filteredByYear)
+          setLoading(false)
           const list = [...new Set(filteredByYear.map(p => p.agences?.nom_agence).filter(Boolean))] as string[]
           setAgences(list.sort())
+          hasHadData.current = true
         },
         onRemote: (res) => {
+          // Données fraîches reçues : mise à jour silencieuse uniquement si changement réel
           const filteredByYear = selectedYear === 'all' ? res : res.filter(p => Number(p.campagne) === selectedYear)
-          setData(filteredByYear)
+
+          setData(prev => {
+            // Comparaison légère par JSON pour éviter les re-renders inutiles
+            if (JSON.stringify(prev) === JSON.stringify(filteredByYear)) return prev
+            return filteredByYear
+          })
+
+          setLoading(false)
           const list = [...new Set(filteredByYear.map(p => p.agences?.nom_agence).filter(Boolean))] as string[]
           setAgences(list.sort())
+          setLastSyncTime(new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }))
+          setIsBgSyncing(false)
         }
       })
+
+      setIsBgSyncing(false)
     }
+
     loadData()
     setSelectedIds([])
     setCurrentPage(1)
   }, [selectedYear])
 
-  // Algorithme de filtrage multicritères combiné
+  // ─── FILTRAGE MULTICRITÈRES ───────────────────────────────────────────────
   const filteredData = useMemo(() => {
     return data.filter(p => {
       const nomComplet = `${p.prenom || ''} ${p.nom_complet || ''}`.toLowerCase()
       const matchesSearch = nomComplet.includes(search.toLowerCase()) || (p.num_passeport && p.num_passeport.toLowerCase().includes(search.toLowerCase()))
       const matchesAgence = selectedAgence === 'all' || p.agences?.nom_agence === selectedAgence
-      
+
       const isDocComplet = !!p.document_url
       const isEligibleBase = p.sur_plateforme_gouv && isDocComplet
 
@@ -223,7 +324,7 @@ export default function PageGestionNusuk() {
     })
   }, [data, search, selectedAgence, filterEligibility, filterGouv, filterNusuk, filterFinance, filterDoc])
 
-  // Pagination logic
+  // ─── PAGINATION ───────────────────────────────────────────────────────────
   const paginatedData = useMemo(() => {
     const start = (currentPage - 1) * itemsPerPage
     return filteredData.slice(start, start + itemsPerPage)
@@ -231,7 +332,7 @@ export default function PageGestionNusuk() {
 
   const totalPages = Math.ceil(filteredData.length / itemsPerPage)
 
-  // Statistiques calculées à la volée
+  // ─── STATISTIQUES ─────────────────────────────────────────────────────────
   const stats = useMemo(() => {
     const total = filteredData.length
     const nusukInscrit = filteredData.filter(p => p.sur_plateforme_nusuk).length
@@ -240,7 +341,31 @@ export default function PageGestionNusuk() {
     return { total, nusukInscrit, gouvInscrit, totalEligibles }
   }, [filteredData])
 
-  // Actions d'activation / bascule de masse
+  // ─── NOMBRE DE FILTRES ACTIFS (badge mobile) ─────────────────────────────
+  const activeFilterCount = useMemo(() => {
+    let count = 0
+    if (selectedAgence !== 'all') count++
+    if (filterEligibility !== 'all') count++
+    if (filterGouv !== 'all') count++
+    if (filterNusuk !== 'all') count++
+    if (filterFinance !== 'all') count++
+    if (filterDoc !== 'all') count++
+    return count
+  }, [selectedAgence, filterEligibility, filterGouv, filterNusuk, filterFinance, filterDoc])
+
+  // ─── RÉINITIALISER TOUS LES FILTRES ──────────────────────────────────────
+  const resetAllFilters = useCallback(() => {
+    setSearch('')
+    setSelectedAgence('all')
+    setFilterEligibility('all')
+    setFilterGouv('all')
+    setFilterNusuk('all')
+    setFilterFinance('all')
+    setFilterDoc('all')
+    setCurrentPage(1)
+  }, [])
+
+  // ─── ACTIONS DE MASSE ─────────────────────────────────────────────────────
   const handleBulkNusukStatus = async (targetValue: boolean) => {
     if (selectedIds.length === 0) return
     setIsUpdating(true)
@@ -264,7 +389,7 @@ export default function PageGestionNusuk() {
     setSelectedIds(prev => prev.includes(id) ? prev.filter(item => item !== id) : [...prev, id])
   }
 
-  // Fonctions d'exports (identiques à la charte du Dashboard)
+  // ─── EXPORTS ──────────────────────────────────────────────────────────────
   const handleExcelExport = () => {
     let csvContent = 'data:text/csv;charset=utf-8,\uFEFF'
     csvContent += 'N°;Prenom et Nom;Agence;Passeport;Dossier;Gouv Mali;Nusuk KSA;Montant Payé\n'
@@ -285,9 +410,12 @@ export default function PageGestionNusuk() {
     setPdfConfirmOpen(false)
   }
 
+  // ─── ÉTAT RÉEL D'AFFICHAGE : vide seulement si aucune donnée du tout ──────
+  const isFirstLoad = loading && data.length === 0
+
   return (
     <div className="bg-[#f8fafc] min-h-screen pb-12">
-      {/* ─── STICKY HEADER AVEC BARRE DE RETOUR ─── */}
+      {/* ─── STICKY HEADER ─── */}
       <div className="bg-white border-b border-slate-200/60 py-5 shadow-sm sticky top-0 z-40 backdrop-blur-md bg-white/95">
         <div className="max-w-7xl mx-auto px-4 md:px-8 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
@@ -299,13 +427,25 @@ export default function PageGestionNusuk() {
             </h1>
           </div>
           <div className="flex items-center gap-3 self-end sm:self-center">
+            {/* ─── INDICATEUR DE SYNC ARRIÈRE-PLAN (discret, pas de spinner) ─── */}
+            {isBgSyncing && (
+              <span className="flex items-center gap-1.5 text-[10px] font-bold text-slate-400">
+                <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-pulse inline-block" />
+                Actualisation…
+              </span>
+            )}
+            {!isBgSyncing && lastSyncTime && (
+              <span className="text-[10px] font-bold text-slate-300 hidden sm:block">
+                Sync {lastSyncTime}
+              </span>
+            )}
             <YearSelector />
           </div>
         </div>
       </div>
 
       <div className="max-w-7xl mx-auto px-4 md:px-8 mt-6">
-        {/* ─── BLOC KPI ANALYTIQUE DÉDIÉ NUSUK ─── */}
+        {/* ─── KPI ─── */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-5 mb-6">
           <div className="bg-white border border-slate-200/60 rounded-xl p-4 shadow-sm">
             <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Cible active filtrée</p>
@@ -325,63 +465,90 @@ export default function PageGestionNusuk() {
           </div>
         </div>
 
-        {/* ─── BARRE DE FILTRES DESKTOP (HAUTE PERFORMANCE) ─── */}
-        <div className="hidden lg:grid grid-cols-4 xl:grid-cols-7 gap-3 bg-white p-4 rounded-2xl border border-slate-200/60 shadow-sm mb-6">
+        {/* ─── BARRE DE FILTRES DESKTOP ─── */}
+        <div className="hidden lg:grid grid-cols-4 xl:grid-cols-7 gap-3 bg-white p-4 rounded-2xl border border-slate-200/60 shadow-sm mb-3">
           <div className="relative col-span-1 xl:col-span-2">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={15} />
-            <input 
-              type="text" placeholder="Nom ou Passeport..." value={search} onChange={e => {setSearch(e.target.value); setCurrentPage(1);}}
+            <input
+              type="text" placeholder="Nom ou Passeport… (Échap pour vider)" value={search}
+              onChange={e => { setSearch(e.target.value); setCurrentPage(1) }}
               className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 text-xs font-bold rounded-xl outline-none focus:border-indigo-500 focus:bg-white"
             />
+            {search && (
+              <button onClick={() => { setSearch(''); setCurrentPage(1) }} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700">
+                <X size={13} />
+              </button>
+            )}
           </div>
 
-          <select value={selectedAgence} onChange={e => {setSelectedAgence(e.target.value); setCurrentPage(1);}} className="bg-slate-50 border border-slate-200 text-xs font-bold rounded-xl px-3 py-2 outline-none">
+          <select value={selectedAgence} onChange={e => { setSelectedAgence(e.target.value); setCurrentPage(1) }} className="bg-slate-50 border border-slate-200 text-xs font-bold rounded-xl px-3 py-2 outline-none">
             <option value="all">Toutes les agences</option>
             {agences.map(ag => <option key={ag} value={ag}>{ag}</option>)}
           </select>
 
-          <select value={filterEligibility} onChange={e => {setFilterEligibility(e.target.value as any); setCurrentPage(1);}} className="bg-slate-50 border border-slate-200 text-xs font-bold rounded-xl px-3 py-2 outline-none">
+          <select value={filterEligibility} onChange={e => { setFilterEligibility(e.target.value as any); setCurrentPage(1) }} className="bg-slate-50 border border-slate-200 text-xs font-bold rounded-xl px-3 py-2 outline-none">
             <option value="all">Éligibilité (Tous)</option>
             <option value="eligible">Éligibles Nusuk uniquement</option>
             <option value="non-eligible">Non éligibles</option>
           </select>
 
-          <select value={filterGouv} onChange={e => {setFilterGouv(e.target.value as any); setCurrentPage(1);}} className="bg-slate-50 border border-slate-200 text-xs font-bold rounded-xl px-3 py-2 outline-none">
+          <select value={filterGouv} onChange={e => { setFilterGouv(e.target.value as any); setCurrentPage(1) }} className="bg-slate-50 border border-slate-200 text-xs font-bold rounded-xl px-3 py-2 outline-none">
             <option value="all">Plateforme Gouv (Tous)</option>
             <option value="true">Inscrits Gouv</option>
             <option value="false">Non inscrits Gouv</option>
           </select>
 
-          <select value={filterNusuk} onChange={e => {setFilterNusuk(e.target.value as any); setCurrentPage(1);}} className="bg-slate-50 border border-slate-200 text-xs font-bold rounded-xl px-3 py-2 outline-none">
+          <select value={filterNusuk} onChange={e => { setFilterNusuk(e.target.value as any); setCurrentPage(1) }} className="bg-slate-50 border border-slate-200 text-xs font-bold rounded-xl px-3 py-2 outline-none">
             <option value="all">Portail Nusuk (Tous)</option>
             <option value="true">Inscrits Nusuk</option>
             <option value="false">Non inscrits Nusuk</option>
           </select>
 
-          <select value={filterFinance} onChange={e => {setFilterFinance(e.target.value as any); setCurrentPage(1);}} className="bg-slate-50 border border-slate-200 text-xs font-bold rounded-xl px-3 py-2 outline-none">
+          <select value={filterFinance} onChange={e => { setFilterFinance(e.target.value as any); setCurrentPage(1) }} className="bg-slate-50 border border-slate-200 text-xs font-bold rounded-xl px-3 py-2 outline-none">
             <option value="all">Filtre Financier (Tous)</option>
-            <option value="full">Paiement Total (&ge; 3M)</option>
+            <option value="full">Paiement Total (≥ 3M)</option>
             <option value="partial">Paiement Partiel</option>
             <option value="none">Aucun paiement</option>
           </select>
         </div>
 
-        {/* ─── ACTION BAR MOBILE & RECHERCHE RAPIDE ─── */}
+        {/* ─── CHIPS FILTRES ACTIFS + RESET (Desktop) ──────────────────────── */}
+        {activeFilterCount > 0 && (
+          <div className="hidden lg:flex items-center gap-2 mb-4 flex-wrap">
+            <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider">{activeFilterCount} filtre(s) actif(s)</span>
+            <button onClick={resetAllFilters} className="flex items-center gap-1 text-[10px] font-black text-rose-500 hover:text-rose-700 bg-rose-50 border border-rose-100 px-2.5 py-1 rounded-lg transition-colors">
+              <X size={10} /> Tout effacer
+            </button>
+          </div>
+        )}
+
+        {/* ─── ACTION BAR MOBILE ─── */}
         <div className="flex lg:hidden gap-2 mb-4">
           <div className="relative flex-1">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={15} />
-            <input 
-              type="text" placeholder="Rechercher nom, passeport..." value={search} onChange={e => {setSearch(e.target.value); setCurrentPage(1);}}
-              className="w-full pl-9 pr-3 py-2.5 bg-white border border-slate-200 text-xs font-bold rounded-xl outline-none"
+            <input
+              type="text" placeholder="Rechercher nom, passeport..." value={search}
+              onChange={e => { setSearch(e.target.value); setCurrentPage(1) }}
+              className="w-full pl-9 pr-8 py-2.5 bg-white border border-slate-200 text-xs font-bold rounded-xl outline-none"
             />
+            {search && (
+              <button onClick={() => { setSearch(''); setCurrentPage(1) }} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400">
+                <X size={13} />
+              </button>
+            )}
           </div>
-          <button onClick={() => setMobileFilterOpen(true)} className="px-3 bg-white border border-slate-200 rounded-xl text-slate-600 flex items-center gap-1.5 text-xs font-bold shadow-sm">
+          <button onClick={() => setMobileFilterOpen(true)} className="relative px-3 bg-white border border-slate-200 rounded-xl text-slate-600 flex items-center gap-1.5 text-xs font-bold shadow-sm">
             <SlidersHorizontal size={16} className="text-indigo-600" />
             Filtres
+            {activeFilterCount > 0 && (
+              <span className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-indigo-600 text-white text-[9px] font-black rounded-full flex items-center justify-center">
+                {activeFilterCount}
+              </span>
+            )}
           </button>
         </div>
 
-        {/* ─── ZONE ACTIONS DE MASSE (BULK ACTIONS COMPATIBLE MILLIERS DE LIGNES) ─── */}
+        {/* ─── ZONE ACTIONS DE MASSE ─── */}
         {selectedIds.length > 0 && (
           <div className="bg-indigo-900 text-white px-4 py-3 rounded-xl flex items-center justify-between shadow-lg animate-fade-in mb-4">
             <span className="text-xs font-bold">{selectedIds.length} ligne(s) sélectionnée(s)</span>
@@ -396,12 +563,17 @@ export default function PageGestionNusuk() {
           </div>
         )}
 
-        {/* VERSION MOBILE : LISTING NATIVE APP UX */}
+        {/* ─── VERSION MOBILE : LISTING ─── */}
         <div className="block lg:hidden space-y-3">
-          {loading ? (
+          {isFirstLoad ? (
             <div className="p-12 text-center font-black text-slate-300 animate-pulse uppercase text-xs tracking-widest">Chargement du registre...</div>
           ) : paginatedData.length === 0 ? (
-            <div className="bg-white rounded-xl p-8 border border-slate-100 text-center shadow-sm">Aucun résultat trouvé</div>
+            <div className="bg-white rounded-xl p-8 border border-slate-100 text-center shadow-sm">
+              <p className="text-slate-400 font-bold text-sm mb-2">Aucun résultat trouvé</p>
+              {activeFilterCount > 0 && (
+                <button onClick={resetAllFilters} className="text-xs text-indigo-600 font-bold underline underline-offset-2">Réinitialiser les filtres</button>
+              )}
+            </div>
           ) : (
             paginatedData.map(p => {
               const isEligible = p.sur_plateforme_gouv && p.document_url
@@ -442,7 +614,12 @@ export default function PageGestionNusuk() {
                       <span className={`text-[9px] font-bold px-2 py-1 rounded-lg flex items-center gap-1 ${p.sur_plateforme_gouv ? 'bg-teal-50 text-teal-700' : 'bg-slate-100 text-slate-400'}`}>Gouv</span>
                       <span className={`text-[9px] font-bold px-2 py-1 rounded-lg flex items-center gap-1 ${p.sur_plateforme_nusuk ? 'bg-purple-50 text-purple-700' : 'bg-slate-100 text-slate-400'}`}>Nusuk</span>
                     </div>
-                    <Link href={`/hajj/pelerin/${p.id}`} className="p-1.5 bg-slate-100 text-slate-600 rounded-lg">
+                    {/* ─── SAUVEGARDE SCROLL AVANT NAVIGATION ─── */}
+                    <Link
+                      href={`/hajj/pelerin/${p.id}`}
+                      onClick={saveScrollPosition}
+                      className="p-1.5 bg-slate-100 text-slate-600 rounded-lg"
+                    >
                       <Eye size={14} />
                     </Link>
                   </div>
@@ -452,7 +629,7 @@ export default function PageGestionNusuk() {
           )}
         </div>
 
-        {/* VERSION DESKTOP : TABLEAU HIGH-DENSITY POUR REGISTRES LOURDS */}
+        {/* ─── VERSION DESKTOP : TABLEAU ─── */}
         <div className="hidden lg:block bg-white rounded-2xl border border-slate-200/60 shadow-sm overflow-hidden">
           <table className="w-full text-left border-collapse">
             <thead>
@@ -473,10 +650,17 @@ export default function PageGestionNusuk() {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {loading ? (
-                <tr><td colSpan={9} className="px-6 py-16 text-center font-bold text-slate-300 animate-pulse">CHARGEMENT DES MILLIERS DE REGISTRES...</td></tr>
+              {isFirstLoad ? (
+                <tr><td colSpan={9} className="px-6 py-16 text-center font-bold text-slate-300 animate-pulse">CHARGEMENT DES REGISTRES...</td></tr>
               ) : paginatedData.length === 0 ? (
-                <tr><td colSpan={9} className="px-6 py-16 text-center text-slate-400">Aucun dossier ne correspond à vos filtres complexes.</td></tr>
+                <tr>
+                  <td colSpan={9} className="px-6 py-16 text-center">
+                    <p className="text-slate-400 font-bold mb-2">Aucun dossier ne correspond à vos filtres.</p>
+                    {activeFilterCount > 0 && (
+                      <button onClick={resetAllFilters} className="text-xs text-indigo-600 font-black underline underline-offset-2">Réinitialiser tous les filtres</button>
+                    )}
+                  </td>
+                </tr>
               ) : (
                 paginatedData.map(p => {
                   const isEligible = p.sur_plateforme_gouv && p.document_url
@@ -512,7 +696,12 @@ export default function PageGestionNusuk() {
                         {(p.total_paye || 0).toLocaleString('fr-FR')} CFA
                       </td>
                       <td className="px-6 py-3.5 text-right">
-                        <Link href={`/hajj/pelerin/${p.id}`} className="w-7 h-7 inline-flex items-center justify-center bg-slate-50 border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-900 hover:text-white transition-all">
+                        {/* ─── SAUVEGARDE SCROLL AVANT NAVIGATION ─── */}
+                        <Link
+                          href={`/hajj/pelerin/${p.id}`}
+                          onClick={saveScrollPosition}
+                          className="w-7 h-7 inline-flex items-center justify-center bg-slate-50 border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-900 hover:text-white transition-all"
+                        >
                           <Eye size={13} />
                         </Link>
                       </td>
@@ -524,7 +713,7 @@ export default function PageGestionNusuk() {
           </table>
         </div>
 
-        {/* ─── BLOC PAGINATION LOGIQUE (DÉDIÉ GRANDS VOLUMES) ─── */}
+        {/* ─── PAGINATION ─── */}
         {totalPages > 1 && (
           <div className="mt-5 flex justify-between items-center bg-white p-3 rounded-xl border border-slate-200/60 shadow-sm">
             <span className="text-xs font-bold text-slate-400">Page {currentPage} sur {totalPages} ({filteredData.length} lignes)</span>
@@ -539,7 +728,7 @@ export default function PageGestionNusuk() {
           </div>
         )}
 
-        {/* ─── CONTROLEUR GLOBAL D'EXPORT EXCEL & PDF PAR LA BASE COMPLET ─── */}
+        {/* ─── EXPORTS ─── */}
         <div className="mt-5 flex justify-end gap-2">
           <button onClick={handleExcelExport} className="px-4 py-2.5 border border-slate-200 bg-white text-slate-700 font-bold rounded-xl text-xs flex items-center gap-2 shadow-sm hover:bg-slate-50 active:scale-95 transition-all">
             <FileSpreadsheet size={15} className="text-emerald-600" /> Exporter Excel
@@ -550,13 +739,20 @@ export default function PageGestionNusuk() {
         </div>
       </div>
 
-      {/* ─── TIROIR DE FILTRES MOBILE (Z-INDEX SÉCURISÉ POUR PASSER AU-DESSUS DE TOUT) ─── */}
+      {/* ─── TIROIR FILTRES MOBILE ─── */}
       {mobileFilterOpen && (
         <div className="fixed inset-0 z-[1200] bg-slate-900/60 backdrop-blur-sm flex items-end justify-center animate-fade-in" onClick={() => setMobileFilterOpen(false)}>
           <div className="bg-white w-full rounded-t-[2rem] p-6 space-y-4 max-h-[85vh] overflow-y-auto shadow-2xl animate-slide-up pb-safe-bottom" onClick={e => e.stopPropagation()}>
             <div className="flex justify-between items-center border-b border-slate-100 pb-3">
               <h3 className="font-black text-slate-800 text-sm uppercase tracking-wide">Filtres du Registre</h3>
-              <button onClick={() => setMobileFilterOpen(false)} className="p-1.5 bg-slate-100 rounded-xl text-slate-400"><X size={18} /></button>
+              <div className="flex items-center gap-2">
+                {activeFilterCount > 0 && (
+                  <button onClick={resetAllFilters} className="text-[10px] font-black text-rose-500 bg-rose-50 px-2.5 py-1 rounded-lg border border-rose-100">
+                    Tout effacer
+                  </button>
+                )}
+                <button onClick={() => setMobileFilterOpen(false)} className="p-1.5 bg-slate-100 rounded-xl text-slate-400"><X size={18} /></button>
+              </div>
             </div>
 
             <div className="space-y-3.5">
@@ -574,6 +770,24 @@ export default function PageGestionNusuk() {
                   <option value="all">Tous</option>
                   <option value="eligible">Prêts / Éligibles</option>
                   <option value="non-eligible">Incomplets</option>
+                </select>
+              </div>
+
+              <div className="flex flex-col gap-1">
+                <label className="text-[10px] font-black text-slate-400 uppercase">Plateforme Gouv</label>
+                <select value={filterGouv} onChange={e => setFilterGouv(e.target.value as any)} className="w-full bg-slate-50 border border-slate-200 p-2.5 rounded-xl text-xs font-bold">
+                  <option value="all">Tous</option>
+                  <option value="true">Inscrits Gouv</option>
+                  <option value="false">Non inscrits</option>
+                </select>
+              </div>
+
+              <div className="flex flex-col gap-1">
+                <label className="text-[10px] font-black text-slate-400 uppercase">Portail Nusuk</label>
+                <select value={filterNusuk} onChange={e => setFilterNusuk(e.target.value as any)} className="w-full bg-slate-50 border border-slate-200 p-2.5 rounded-xl text-xs font-bold">
+                  <option value="all">Tous</option>
+                  <option value="true">Inscrits Nusuk</option>
+                  <option value="false">Non inscrits</option>
                 </select>
               </div>
 

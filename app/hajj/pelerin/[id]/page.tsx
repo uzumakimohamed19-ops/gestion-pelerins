@@ -1,3 +1,4 @@
+/* eslint-disable @next/next/no-img-element */
 'use client'
 import { useEffect, useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
@@ -10,7 +11,7 @@ import {
   UserCheck, UserRound, Globe, CheckCircle2, HelpCircle, Eye
 } from 'lucide-react'
 import Link from 'next/link'
-import { YearSelector } from '@/components/YearSelector'
+
 import { useUI } from '@/lib/UIContext'
 
 // ─── AVATARS PÈLERINS AFRICAINS DYNAMIQUES (SVG) ─────────────────────────────
@@ -240,7 +241,9 @@ export default function DetailsPelerin() {
         date_depart: p.date_depart || null,
         date_retour: p.date_retour || null,
         visa_obtenu: p.visa_obtenu,
-        document_url: p.document_url || null
+        document_url: p.document_url || p.scan_passeport || null,
+        scan_passeport: p.document_url || p.scan_passeport || null,
+      
       })
       .eq('id', p.id)
 
@@ -289,6 +292,7 @@ export default function DetailsPelerin() {
       <div className="p-10 text-center font-black text-red-400 bg-white rounded-3xl shadow-xl border border-red-100">PÈLERIN INTROUVABLE.</div>
     </div>
   )
+   const scanUrl = p.document_url ? `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/passeports/${p.document_url}` : p.scan_passeport || null
 
   // --- LOGIQUE MÉTIER & CALCULS INTELLIGENTS ---
   const totalDue = p.prix_package || 0
@@ -433,7 +437,7 @@ export default function DetailsPelerin() {
                   </div>
                 </div>
                 <div className="sm:hidden w-full mt-3">
-                  <YearSelector />
+              
                 </div>
                 <div className="flex items-center gap-4 text-xs font-bold text-slate-400 mt-3">
                   <p className="flex items-center gap-1 bg-slate-50 px-2.5 py-1 rounded-md border border-slate-100">
@@ -447,7 +451,7 @@ export default function DetailsPelerin() {
             
             <div className="grid grid-cols-2 md:flex gap-3 items-end flex-wrap">
               <div className="hidden md:block mr-2">
-                <YearSelector />
+               
               </div>
               {/* BOUTON VOIR LE SCAN AJOUTÉ À CÔTÉ DU NOM & WHATSAPP */}
               <button 
@@ -718,29 +722,38 @@ export default function DetailsPelerin() {
 
             {/* Content / Viewer */}
             <div className="p-6 overflow-y-auto flex-1 flex flex-col items-center justify-center bg-slate-50 min-h-[350px]">
-              {p.document_url ? (
+              {scanUrl ? (
                 <div className="w-full h-full flex flex-col items-center gap-4">
                   <div className="border border-slate-200 rounded-2xl overflow-hidden shadow-inner max-h-[50vh] w-full flex items-center justify-center bg-white p-2">
                     <img 
-                      src={p.document_url} 
+                      src={scanUrl} 
                       alt={`Scan Passeport - ${p.nom_complet}`} 
                       className="max-h-[45vh] w-auto max-w-full rounded-lg object-contain transition-transform duration-300 hover:scale-[1.02]"
                     />
                   </div>
-                  <div className="flex gap-2">
+                  <div className="flex gap-2 flex-wrap justify-center">
                     <button 
                       onClick={() => {
                         const win = window.open();
                         if (win) {
-                          win.document.write(`<iframe src="${p.document_url}" frameborder="0" style="border:0; top:0px; left:0px; bottom:0px; right:0px; width:100%; height:100%;" allowfullscreen></iframe>`);
+                          win.document.write(`<iframe src="${scanUrl}" frameborder="0" style="border:0; top:0px; left:0px; bottom:0px; right:0px; width:100%; height:100%;" allowfullscreen></iframe>`);
                         }
                       }}
                       className="bg-slate-200 text-slate-700 px-4 py-2 rounded-xl text-xs font-black uppercase hover:bg-slate-300 transition-all flex items-center gap-1.5 cursor-pointer"
                     >
                       <Eye size={14} /> Ouvrir en plein écran
                     </button>
+                    <a
+                      href={scanUrl ?? undefined}
+                      download={`passeport_${p.nom_complet?.replace(/\s+/g, '_') || 'pelerin'}.jpg`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="bg-indigo-50 text-indigo-700 border border-indigo-200 px-4 py-2 rounded-xl text-xs font-black uppercase hover:bg-indigo-100 transition-all flex items-center gap-1.5 cursor-pointer"
+                    >
+                      ⬇ Télécharger
+                    </a>
                     <button 
-                      onClick={() => handleChange('document_url', '')}
+                      onClick={() => { handleChange('document_url', ''); handleChange('scan_passeport', ''); }}
                       className="bg-red-50 text-red-600 border border-red-100 px-4 py-2 rounded-xl text-xs font-black uppercase hover:bg-red-100 transition-all flex items-center gap-1.5 cursor-pointer"
                     >
                       ✕ Supprimer le scan

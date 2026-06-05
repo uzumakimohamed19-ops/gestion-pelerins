@@ -3,6 +3,7 @@ import { useEffect, useState, useMemo, type ElementType } from 'react'
 import { supabase } from '../../../lib/supabase'
 import { useYear } from '@/lib/YearContext'
 import { cacheFirstFetch } from '@/lib/cacheFirst'
+import Header from '@/components/Header'
 import {
   Users, FileCheck, FileWarning, ArrowRight, Wallet,
   ShieldCheck, Globe, X, TrendingUp, AlertCircle,
@@ -183,6 +184,10 @@ function generateAndPrintPDF(
       </tr>
     `
   }).join('')
+
+
+
+
 
   const thStyle = `padding:10px 12px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;color:#475569;background:#f1f5f9;border-bottom:2px solid #e2e8f0;`
   const kpiBox = `flex:1;min-width:140px;padding:14px 16px;border-radius:12px;border:1px solid;`
@@ -708,7 +713,13 @@ export default function Dashboard() {
       progress: stats.total > 0 ? Math.round((stats.eligiblesNusuk / stats.total) * 100) : 0, progressColor: 'bg-indigo-500', tag: 'Nusuk'
     },
   ]
-
+{/* 1. HEADER DYNAMIQUE ET IMMERSIF : 
+          Se colle tout en haut, glisse derrière la Dynamic Island et adapte sa couleur */}
+      <Header 
+        title="TravelOS — Dashboard" 
+        subtitle="Suivi global de la campagne" 
+        bgColor="bg-blue-600" // Tu peux changer dynamiquement la couleur selon tes besoins !
+      />
   return (
     <div className="w-full min-h-screen bg-slate-50/40 select-none">
 
