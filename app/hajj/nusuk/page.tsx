@@ -8,7 +8,7 @@ import {
   Filter, FileSpreadsheet, FileText, ArrowLeft, Building2,
   Wallet, CheckCircle2, AlertCircle, ChevronLeft, ChevronRight,
   SlidersHorizontal, CheckSquare, Square, Eye, CreditCard,
-  RefreshCw
+  RefreshCw, UserCheck, Download
 } from 'lucide-react'
 import Link from 'next/link'
 import { YearSelector } from '@/components/YearSelector'
@@ -156,20 +156,80 @@ export default function PageGestionNusuk() {
   const [isBgSyncing, setIsBgSyncing] = useState(false)
   const [lastSyncTime, setLastSyncTime] = useState<string | null>(null)
   const [agences, setAgences] = useState<string[]>([])
+  
+  // Simuler/Vérifier si l'utilisateur est admin (A adapter selon votre logique d'auth globale)
+  const [isAdmin, setIsAdmin] = useState<boolean>(true)
 
-  // States de Filtrage Avancé
-  const [search, setSearch] = useState('')
-  const [selectedAgence, setSelectedAgence] = useState('all')
-  const [filterEligibility, setFilterEligibility] = useState<'all' | 'eligible' | 'non-eligible'>('all')
-  const [filterGouv, setFilterGouv] = useState<'all' | 'true' | 'false'>('all')
-  const [filterNusuk, setFilterNusuk] = useState<'all' | 'true' | 'false'>('all')
-  const [filterFinance, setFilterFinance] = useState<'all' | 'full' | 'partial' | 'none'>('all')
-  const [filterDoc, setFilterDoc] = useState<'all' | 'complet' | 'incomplet'>('all')
+  // States de Filtrage Avancé initialisés à partir du SessionStorage s'ils existent
+  const [search, setSearch] = useState(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const saved = sessionStorage.getItem(FILTERS_KEY)
+        if (saved) return JSON.parse(saved).search || ''
+      } catch {}
+    }
+    return ''
+  })
+  const [selectedAgence, setSelectedAgence] = useState(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const saved = sessionStorage.getItem(FILTERS_KEY)
+        if (saved) return JSON.parse(saved).selectedAgence || 'all'
+      } catch {}
+    }
+    return 'all'
+  })
+  const [filterEligibility, setFilterEligibility] = useState<'all' | 'eligible' | 'non-eligible'>(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const saved = sessionStorage.getItem(FILTERS_KEY)
+        if (saved) return JSON.parse(saved).filterEligibility || 'all'
+      } catch {}
+    }
+    return 'all'
+  })
+  const [filterGouv, setFilterGouv] = useState<'all' | 'true' | 'false'>(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const saved = sessionStorage.getItem(FILTERS_KEY)
+        if (saved) return JSON.parse(saved).filterGouv || 'all'
+      } catch {}
+    }
+    return 'all'
+  })
+  const [filterNusuk, setFilterNusuk] = useState<'all' | 'true' | 'false'>(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const saved = sessionStorage.getItem(FILTERS_KEY)
+        if (saved) return JSON.parse(saved).filterNusuk || 'all'
+      } catch {}
+    }
+    return 'all'
+  })
+  const [filterFinance, setFilterFinance] = useState<'all' | 'full' | 'partial' | 'none'>(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const saved = sessionStorage.getItem(FILTERS_KEY)
+        if (saved) return JSON.parse(saved).filterFinance || 'all'
+      } catch {}
+    }
+    return 'all'
+  })
+  const [filterDoc, setFilterDoc] = useState<'all' | 'complet' | 'incomplet'>(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const saved = sessionStorage.getItem(FILTERS_KEY)
+        if (saved) return JSON.parse(saved).filterDoc || 'all'
+      } catch {}
+    }
+    return 'all'
+  })
 
   // UI States
   const [mobileFilterOpen, setMobileFilterOpen] = useState(false)
   const [selectedIds, setSelectedIds] = useState<string[]>([])
   const [isUpdating, setIsUpdating] = useState(false)
+  const [actionInProgressId, setActionInProgressId] = useState<string | null>(null)
 
   // Pagination
   const [currentPage, setCurrentPage] = useState(1)
@@ -182,24 +242,6 @@ export default function PageGestionNusuk() {
   const scrollRestored = useRef(false)
   const hasHadData = useRef(false)
 
-  // ─── RESTAURATION FILTRES DEPUIS SESSION STORAGE ──────────────────────────
-  // Chargé une seule fois au montage, avant tout rendu de liste
-  useEffect(() => {
-    try {
-      const saved = sessionStorage.getItem(FILTERS_KEY)
-      if (saved) {
-        const f = JSON.parse(saved)
-        if (f.search !== undefined) setSearch(f.search)
-        if (f.selectedAgence !== undefined) setSelectedAgence(f.selectedAgence)
-        if (f.filterEligibility !== undefined) setFilterEligibility(f.filterEligibility)
-        if (f.filterGouv !== undefined) setFilterGouv(f.filterGouv)
-        if (f.filterNusuk !== undefined) setFilterNusuk(f.filterNusuk)
-        if (f.filterFinance !== undefined) setFilterFinance(f.filterFinance)
-        if (f.filterDoc !== undefined) setFilterDoc(f.filterDoc)
-      }
-    } catch {}
-  }, [])
-
   // ─── PERSISTANCE FILTRES EN TEMPS RÉEL ───────────────────────────────────
   useEffect(() => {
     try {
@@ -211,7 +253,6 @@ export default function PageGestionNusuk() {
   }, [search, selectedAgence, filterEligibility, filterGouv, filterNusuk, filterFinance, filterDoc])
 
   // ─── RESTAURATION SCROLL APRÈS AFFICHAGE DU CACHE ─────────────────────────
-  // Se déclenche dès que data est remplie pour la première fois (= cache prêt)
   useEffect(() => {
     if (data.length > 0 && !scrollRestored.current) {
       scrollRestored.current = true
@@ -219,7 +260,6 @@ export default function PageGestionNusuk() {
         const savedY = sessionStorage.getItem(SCROLL_KEY)
         if (savedY) {
           const target = parseInt(savedY, 10)
-          // requestAnimationFrame assure que le DOM est peint avant de scroller
           requestAnimationFrame(() => {
             window.scrollTo({ top: target, behavior: 'instant' })
             sessionStorage.removeItem(SCROLL_KEY)
@@ -248,7 +288,18 @@ export default function PageGestionNusuk() {
     } catch {}
   }, [])
 
-  // ─── CHARGEMENT DONNÉES : ZÉRO ÉCRAN DE CHARGEMENT ───────────────────────
+  // ─── ACTION UNIQUE : VALIDATION NUSUK DEPUIS LA LISTE ──────────────────────
+  const toggleNusukStatus = async (id: string, currentStatus: boolean) => {
+    setActionInProgressId(id)
+    const targetValue = !currentStatus
+    const { error } = await supabase.from('pelerins').update({ sur_plateforme_nusuk: targetValue }).eq('id', id)
+    if (!error) {
+      setData(prev => prev.map(p => p.id === id ? { ...p, sur_plateforme_nusuk: targetValue } : p))
+    }
+    setActionInProgressId(null)
+  }
+
+  // ─── CHARGEMENT DONNÉES ──────────────────────────────────────────────────
   useEffect(() => {
     scrollRestored.current = false
     hasHadData.current = false
@@ -258,14 +309,13 @@ export default function PageGestionNusuk() {
 
       await cacheFirstFetch<any[]>({
         cacheKey: selectedYear === 'all' ? 'nusuk_data_all' : `nusuk_data_${selectedYear}`,
-        setLoading,
+        setLoading: data.length === 0 ? setLoading : () => {}, // Modifié pour ne JAMAIS re-bloquer l'interface si le cache possède déjà des lignes
         fetchRemote: async () => {
           const { data: res, error } = await supabase.from('pelerins').select('*, agences(nom_agence)')
           if (error || !res) return undefined
           return res
         },
         onCache: (res) => {
-          // Cache disponible → affichage immédiat, plus jamais de spinner
           const filteredByYear = selectedYear === 'all' ? res : res.filter(p => Number(p.campagne) === selectedYear)
           setData(filteredByYear)
           setLoading(false)
@@ -274,11 +324,9 @@ export default function PageGestionNusuk() {
           hasHadData.current = true
         },
         onRemote: (res) => {
-          // Données fraîches reçues : mise à jour silencieuse uniquement si changement réel
           const filteredByYear = selectedYear === 'all' ? res : res.filter(p => Number(p.campagne) === selectedYear)
 
           setData(prev => {
-            // Comparaison légère par JSON pour éviter les re-renders inutiles
             if (JSON.stringify(prev) === JSON.stringify(filteredByYear)) return prev
             return filteredByYear
           })
@@ -341,7 +389,7 @@ export default function PageGestionNusuk() {
     return { total, nusukInscrit, gouvInscrit, totalEligibles }
   }, [filteredData])
 
-  // ─── NOMBRE DE FILTRES ACTIFS (badge mobile) ─────────────────────────────
+  // ─── NOMBRE DE FILTRES ACTIFS ─────────────────────────────────────────────
   const activeFilterCount = useMemo(() => {
     let count = 0
     if (selectedAgence !== 'all') count++
@@ -392,9 +440,9 @@ export default function PageGestionNusuk() {
   // ─── EXPORTS ──────────────────────────────────────────────────────────────
   const handleExcelExport = () => {
     let csvContent = 'data:text/csv;charset=utf-8,\uFEFF'
-    csvContent += 'N°;Prenom et Nom;Agence;Passeport;Dossier;Gouv Mali;Nusuk KSA;Montant Payé\n'
+    csvContent += `N°;Prenom et Nom;Agence;Passeport;Dossier;Gouv Mali;Nusuk KSA${!isAdmin ? ';Montant Payé' : ''}\n`
     filteredData.forEach((p, idx) => {
-      csvContent += `${idx + 1};${p.prenom || ''} ${p.nom_complet || ''};${p.agences?.nom_agence || '—'};${p.num_passeport || '—'};${p.document_url ? 'Complet' : 'Incomplet'};${p.sur_plateforme_gouv ? 'Validé' : 'Non'};${p.sur_plateforme_nusuk ? 'Inscrit' : 'Non'};${p.total_paye || 0}\n`
+      csvContent += `${idx + 1};${p.prenom || ''} ${p.nom_complet || ''};${p.agences?.nom_agence || '—'};${p.num_passeport || '—'};${p.document_url ? 'Complet' : 'Incomplet'};${p.sur_plateforme_gouv ? 'Validé' : 'Non'};${p.sur_plateforme_nusuk ? 'Inscrit' : 'Non'}${!isAdmin ? `;${p.total_paye || 0}` : ''}\n`
     })
     const encodedUri = encodeURI(csvContent)
     const link = document.createElement('a')
@@ -406,37 +454,39 @@ export default function PageGestionNusuk() {
   }
 
   const handlePdfConfirm = (includeFinance: boolean) => {
-    generateAndPrintPDF(filteredData, "Registre Général d'Enregistrement Nusuk", includeFinance, selectedYear)
+    generateAndPrintPDF(filteredData, "Registre Général d'Enregistrement Nusuk", isAdmin ? false : includeFinance, selectedYear)
     setPdfConfirmOpen(false)
   }
 
-  // ─── ÉTAT RÉEL D'AFFICHAGE : vide seulement si aucune donnée du tout ──────
   const isFirstLoad = loading && data.length === 0
 
   return (
     <div className="bg-[#f8fafc] min-h-screen pb-12">
-      {/* ─── STICKY HEADER ─── */}
-      <div className="bg-white border-b border-slate-200/60 py-5 shadow-sm sticky top-0 z-40 backdrop-blur-md bg-white/95">
-        <div className="max-w-7xl mx-auto px-4 md:px-8 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <div>
-            <Link href="/hajj/admin" className="inline-flex items-center gap-1.5 text-[10px] font-black text-slate-400 uppercase tracking-widest hover:text-indigo-600 transition-colors mb-1">
-              <ArrowLeft size={12} /> Retour au réseau
+      {/* ─── STICKY HEADER COMPACT ET MODERNE (PC & MOBILE COHÉRENT) ─── */}
+      <div className="bg-white border-b border-slate-200/60 shadow-sm sticky top-0 z-40 backdrop-blur-md bg-white/95 transition-all">
+        <div className="max-w-7xl mx-auto px-4 md:px-8 py-3.5 md:py-5 flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2.5 md:gap-4 min-w-0">
+            <Link href="/hajj/admin" className="p-2 bg-slate-50 border border-slate-200/70 hover:border-slate-300 rounded-xl text-slate-500 hover:text-indigo-600 transition-colors shrink-0">
+              <ArrowLeft size={16} />
             </Link>
-            <h1 className="text-xl md:text-2xl font-black text-slate-900 tracking-tight uppercase flex items-center gap-2">
-              <Globe size={22} className="text-indigo-600 animate-spin-slow" /> Espace Central Nusuk
-            </h1>
+            <div className="min-w-0">
+              <span className="hidden md:inline-block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-0.5">Espace Administrateur</span>
+              <h1 className="text-base md:text-2xl font-black text-slate-900 tracking-tight uppercase truncate flex items-center gap-2">
+                <Globe size={18} className="text-indigo-600 shrink-0" /> <span className="truncate">Nusuk Central</span>
+              </h1>
+            </div>
           </div>
-          <div className="flex items-center gap-3 self-end sm:self-center">
-            {/* ─── INDICATEUR DE SYNC ARRIÈRE-PLAN (discret, pas de spinner) ─── */}
+          
+          <div className="flex items-center gap-2 md:gap-3 shrink-0">
             {isBgSyncing && (
-              <span className="flex items-center gap-1.5 text-[10px] font-bold text-slate-400">
-                <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-pulse inline-block" />
-                Actualisation…
+              <span className="flex items-center gap-1 text-[10px] font-bold text-indigo-600 bg-indigo-50/80 px-2 py-1 rounded-lg border border-indigo-100">
+                <RefreshCw size={11} className="animate-spin" />
+                <span className="hidden xs:inline">Sync...</span>
               </span>
             )}
             {!isBgSyncing && lastSyncTime && (
-              <span className="text-[10px] font-bold text-slate-300 hidden sm:block">
-                Sync {lastSyncTime}
+              <span className="text-[10px] font-bold text-slate-400 bg-slate-50 px-2 py-1 rounded-lg border border-slate-100 hidden sm:block">
+                À jour : {lastSyncTime}
               </span>
             )}
             <YearSelector />
@@ -444,24 +494,24 @@ export default function PageGestionNusuk() {
         </div>
       </div>
 
-      <div className="max-w-7xl mx-auto px-4 md:px-8 mt-6">
-        {/* ─── KPI ─── */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-5 mb-6">
-          <div className="bg-white border border-slate-200/60 rounded-xl p-4 shadow-sm">
-            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Cible active filtrée</p>
-            <p className="text-2xl font-black text-slate-900 mt-1 tabular-nums">{filteredData.length}</p>
+      <div className="max-w-7xl mx-auto px-4 md:px-8 mt-4 md:mt-6">
+        {/* ─── KPI COMPACTS ET RESPONSIVES ─── */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-2.5 md:gap-5 mb-4 md:mb-6">
+          <div className="bg-white border border-slate-200/60 rounded-xl p-3 md:p-4 shadow-sm">
+            <p className="text-[9px] md:text-[10px] font-bold text-slate-400 uppercase tracking-wider truncate">Cible active filtrée</p>
+            <p className="text-lg md:text-2xl font-black text-slate-900 mt-0.5 md:mt-1 tabular-nums">{filteredData.length}</p>
           </div>
-          <div className="bg-white border border-slate-200/60 rounded-xl p-4 shadow-sm border-l-indigo-500 border-l-2">
-            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Éligibles Nusuk</p>
-            <p className="text-2xl font-black text-indigo-600 mt-1 tabular-nums">{stats.totalEligibles}</p>
+          <div className="bg-white border border-slate-200/60 rounded-xl p-3 md:p-4 shadow-sm border-l-indigo-500 border-l-2">
+            <p className="text-[9px] md:text-[10px] font-bold text-slate-400 uppercase tracking-wider truncate">Éligibles Nusuk</p>
+            <p className="text-lg md:text-2xl font-black text-indigo-600 mt-0.5 md:mt-1 tabular-nums">{stats.totalEligibles}</p>
           </div>
-          <div className="bg-white border border-slate-200/60 rounded-xl p-4 shadow-sm border-l-teal-500 border-l-2">
-            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Inscrits Gouv</p>
-            <p className="text-2xl font-black text-teal-600 mt-1 tabular-nums">{stats.gouvInscrit}</p>
+          <div className="bg-white border border-slate-200/60 rounded-xl p-3 md:p-4 shadow-sm border-l-teal-500 border-l-2">
+            <p className="text-[9px] md:text-[10px] font-bold text-slate-400 uppercase tracking-wider truncate">Inscrits Gouv</p>
+            <p className="text-lg md:text-2xl font-black text-teal-600 mt-0.5 md:mt-1 tabular-nums">{stats.gouvInscrit}</p>
           </div>
-          <div className="bg-white border border-slate-200/60 rounded-xl p-4 shadow-sm border-l-purple-500 border-l-2">
-            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Inscrits Nusuk KSA</p>
-            <p className="text-2xl font-black text-purple-600 mt-1 tabular-nums">{stats.nusukInscrit}</p>
+          <div className="bg-white border border-slate-200/60 rounded-xl p-3 md:p-4 shadow-sm border-l-purple-500 border-l-2">
+            <p className="text-[9px] md:text-[10px] font-bold text-slate-400 uppercase tracking-wider truncate">Inscrits Nusuk KSA</p>
+            <p className="text-lg md:text-2xl font-black text-purple-600 mt-0.5 md:mt-1 tabular-nums">{stats.nusukInscrit}</p>
           </div>
         </div>
 
@@ -504,15 +554,17 @@ export default function PageGestionNusuk() {
             <option value="false">Non inscrits Nusuk</option>
           </select>
 
-          <select value={filterFinance} onChange={e => { setFilterFinance(e.target.value as any); setCurrentPage(1) }} className="bg-slate-50 border border-slate-200 text-xs font-bold rounded-xl px-3 py-2 outline-none">
-            <option value="all">Filtre Financier (Tous)</option>
-            <option value="full">Paiement Total (≥ 3M)</option>
-            <option value="partial">Paiement Partiel</option>
-            <option value="none">Aucun paiement</option>
-          </select>
+          {!isAdmin && (
+            <select value={filterFinance} onChange={e => { setFilterFinance(e.target.value as any); setCurrentPage(1) }} className="bg-slate-50 border border-slate-200 text-xs font-bold rounded-xl px-3 py-2 outline-none">
+              <option value="all">Filtre Financier (Tous)</option>
+              <option value="full">Paiement Total (≥ 3M)</option>
+              <option value="partial">Paiement Partiel</option>
+              <option value="none">Aucun paiement</option>
+            </select>
+          )}
         </div>
 
-        {/* ─── CHIPS FILTRES ACTIFS + RESET (Desktop) ──────────────────────── */}
+        {/* ─── CHIPS FILTRES ACTIFS + RESET (Desktop) ─── */}
         {activeFilterCount > 0 && (
           <div className="hidden lg:flex items-center gap-2 mb-4 flex-wrap">
             <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider">{activeFilterCount} filtre(s) actif(s)</span>
@@ -522,14 +574,14 @@ export default function PageGestionNusuk() {
           </div>
         )}
 
-        {/* ─── ACTION BAR MOBILE ─── */}
-        <div className="flex lg:hidden gap-2 mb-4">
-          <div className="relative flex-1">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={15} />
+        {/* ─── ACTION BAR MOBILE OPTIMISÉE, MODERNE AVEC BOUTON EXPORT PLACÉ À DROITE DE NOUVEAU/FILTRES ─── */}
+        <div className="flex lg:hidden flex-col gap-2.5 mb-4 bg-white p-3 rounded-2xl border border-slate-200/70 shadow-sm">
+          <div className="relative w-full">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={14} />
             <input
               type="text" placeholder="Rechercher nom, passeport..." value={search}
               onChange={e => { setSearch(e.target.value); setCurrentPage(1) }}
-              className="w-full pl-9 pr-8 py-2.5 bg-white border border-slate-200 text-xs font-bold rounded-xl outline-none"
+              className="w-full pl-9 pr-8 py-2 bg-slate-50 border border-slate-200 text-xs font-bold rounded-xl outline-none focus:border-indigo-500 focus:bg-white transition-all"
             />
             {search && (
               <button onClick={() => { setSearch(''); setCurrentPage(1) }} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400">
@@ -537,15 +589,26 @@ export default function PageGestionNusuk() {
               </button>
             )}
           </div>
-          <button onClick={() => setMobileFilterOpen(true)} className="relative px-3 bg-white border border-slate-200 rounded-xl text-slate-600 flex items-center gap-1.5 text-xs font-bold shadow-sm">
-            <SlidersHorizontal size={16} className="text-indigo-600" />
-            Filtres
-            {activeFilterCount > 0 && (
-              <span className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-indigo-600 text-white text-[9px] font-black rounded-full flex items-center justify-center">
-                {activeFilterCount}
-              </span>
-            )}
-          </button>
+          <div className="flex gap-2 w-full">
+            <button onClick={() => setMobileFilterOpen(true)} className="relative flex-1 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-700 flex items-center justify-center gap-1.5 text-xs font-black transition-all active:scale-95">
+              <SlidersHorizontal size={14} className="text-indigo-600" />
+              <span>Filtres</span>
+              {activeFilterCount > 0 && (
+                <span className="w-4 h-4 bg-indigo-600 text-white text-[9px] font-black rounded-full flex items-center justify-center">
+                  {activeFilterCount}
+                </span>
+              )}
+            </button>
+
+            {/* Bouton Export Moderne positionné directement à côté du bouton de gestion principal sur mobile */}
+            <button 
+              onClick={() => setPdfConfirmOpen(true)} 
+              className="flex-1 py-2 bg-indigo-600 text-white font-black rounded-xl text-xs flex items-center justify-center gap-1.5 shadow-sm active:scale-95 transition-all"
+            >
+              <Download size={14} />
+              <span>Exporter</span>
+            </button>
+          </div>
         </div>
 
         {/* ─── ZONE ACTIONS DE MASSE ─── */}
@@ -563,8 +626,8 @@ export default function PageGestionNusuk() {
           </div>
         )}
 
-        {/* ─── VERSION MOBILE : LISTING ─── */}
-        <div className="block lg:hidden space-y-3">
+        {/* ─── VERSION MOBILE : LISTING UI/UX ENTIÈREMENT REVU ─── */}
+        <div className="block lg:hidden space-y-2.5">
           {isFirstLoad ? (
             <div className="p-12 text-center font-black text-slate-300 animate-pulse uppercase text-xs tracking-widest">Chargement du registre...</div>
           ) : paginatedData.length === 0 ? (
@@ -578,15 +641,17 @@ export default function PageGestionNusuk() {
             paginatedData.map(p => {
               const isEligible = p.sur_plateforme_gouv && p.document_url
               return (
-                <div key={p.id} className="bg-white border border-slate-200/70 rounded-2xl p-4 shadow-sm flex flex-col justify-between relative">
+                <div key={p.id} className="bg-white border border-slate-200/70 rounded-xl p-3.5 shadow-sm flex flex-col justify-between relative transition-all hover:border-slate-300">
                   <div className="flex items-start justify-between gap-3">
-                    <div className="flex items-center gap-3 min-w-0">
+                    <div className="flex items-center gap-2.5 min-w-0">
                       <button onClick={() => toggleSelectRow(p.id)} className="text-slate-400 shrink-0">
                         {selectedIds.includes(p.id) ? <CheckSquare size={18} className="text-indigo-600" /> : <Square size={18} />}
                       </button>
                       <div className="min-w-0">
-                        <p className="font-black text-slate-800 uppercase text-xs truncate">{p.prenom} {p.nom_complet}</p>
-                        <p className="text-[10px] text-slate-400 font-medium truncate mt-0.5">{p.agences?.nom_agence || 'Aucune agence'}</p>
+                        <p className="font-black text-slate-900 uppercase text-xs truncate">{p.prenom} {p.nom_complet}</p>
+                        <p className="text-[10px] text-slate-400 font-bold truncate mt-0.5 flex items-center gap-1">
+                          <Building2 size={10} className="text-slate-400 shrink-0" /> {p.agences?.nom_agence || 'Aucune agence'}
+                        </p>
                       </div>
                     </div>
                     <span className={`text-[9px] font-black px-2 py-0.5 rounded-md uppercase tracking-wider shrink-0 ${isEligible ? 'bg-emerald-50 text-emerald-600 border border-emerald-100' : 'bg-slate-50 text-slate-400'}`}>
@@ -594,31 +659,50 @@ export default function PageGestionNusuk() {
                     </span>
                   </div>
 
-                  <div className="grid grid-cols-2 gap-2 my-3 bg-slate-50 p-2.5 rounded-xl border border-slate-100">
+                  <div className="grid grid-cols-2 gap-2 my-2.5 bg-slate-50 p-2 rounded-xl border border-slate-100">
                     <div>
-                      <p className="text-[9px] text-slate-400 font-bold uppercase">Passeport</p>
+                      <p className="text-[8px] text-slate-400 font-bold uppercase tracking-wider">Passeport</p>
                       <p className="text-xs font-mono font-bold text-slate-700 flex items-center gap-1 mt-0.5">
                         <CreditCard size={11} className="text-slate-400" /> {p.num_passeport || '—'}
                       </p>
                     </div>
-                    <div className="text-right">
-                      <p className="text-[9px] text-slate-400 font-bold uppercase">Situation Finance</p>
-                      <p className="text-xs font-black text-slate-700 mt-0.5">
-                        {(p.total_paye || 0) > 0 ? `${(p.total_paye || 0).toLocaleString('fr-FR')} F` : '0 F'}
-                      </p>
-                    </div>
+                    {!isAdmin ? (
+                      <div className="text-right">
+                        <p className="text-[8px] text-slate-400 font-bold uppercase tracking-wider">Situation Finance</p>
+                        <p className="text-xs font-black text-slate-700 mt-0.5">
+                          {(p.total_paye || 0) > 0 ? `${(p.total_paye || 0).toLocaleString('fr-FR')} F` : '0 F'}
+                        </p>
+                      </div>
+                    ) : (
+                      <div className="text-right">
+                        <p className="text-[8px] text-slate-400 font-bold uppercase tracking-wider">Mali Gouv Status</p>
+                        <p className={`text-[10px] font-black mt-0.5 ${p.sur_plateforme_gouv ? 'text-teal-600' : 'text-slate-400'}`}>
+                          {p.sur_plateforme_gouv ? '✓ Validé' : '— En attente'}
+                        </p>
+                      </div>
+                    )}
                   </div>
 
-                  <div className="flex justify-between items-center pt-2 border-t border-slate-100">
-                    <div className="flex gap-2">
-                      <span className={`text-[9px] font-bold px-2 py-1 rounded-lg flex items-center gap-1 ${p.sur_plateforme_gouv ? 'bg-teal-50 text-teal-700' : 'bg-slate-100 text-slate-400'}`}>Gouv</span>
-                      <span className={`text-[9px] font-bold px-2 py-1 rounded-lg flex items-center gap-1 ${p.sur_plateforme_nusuk ? 'bg-purple-50 text-purple-700' : 'bg-slate-100 text-slate-400'}`}>Nusuk</span>
-                    </div>
-                    {/* ─── SAUVEGARDE SCROLL AVANT NAVIGATION ─── */}
+                  <div className="flex justify-between items-center pt-2.5 border-t border-slate-100 gap-2">
+                    {/* BOUTON DE VALIDATION NUSUK INLINE DIRECTPUIS LA LISTE MOBILE */}
+                    <button 
+                      disabled={actionInProgressId === p.id}
+                      onClick={() => toggleNusukStatus(p.id, !!p.sur_plateforme_nusuk)}
+                      className={`flex items-center gap-1 text-[9px] font-black uppercase px-2.5 py-1.5 rounded-lg border transition-all ${
+                        p.sur_plateforme_nusuk 
+                          ? 'bg-purple-50 text-purple-700 border-purple-200 hover:bg-purple-100' 
+                          : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-indigo-50 hover:text-indigo-600'
+                      }`}
+                    >
+                      <UserCheck size={12} className={actionInProgressId === p.id ? 'animate-spin' : ''} />
+                      <span>{p.sur_plateforme_nusuk ? 'Nusuk Valide ✓' : 'Valider Nusuk'}</span>
+                    </button>
+
+                    {/* Navigation Instantanée SANS blocage de rafraîchissement */}
                     <Link
                       href={`/hajj/pelerin/${p.id}`}
                       onClick={saveScrollPosition}
-                      className="p-1.5 bg-slate-100 text-slate-600 rounded-lg"
+                      className="p-1.5 bg-slate-100 text-slate-700 hover:bg-indigo-600 hover:text-white rounded-lg transition-colors shrink-0"
                     >
                       <Eye size={14} />
                     </Link>
@@ -629,7 +713,7 @@ export default function PageGestionNusuk() {
           )}
         </div>
 
-        {/* ─── VERSION DESKTOP : TABLEAU ─── */}
+        {/* ─── VERSION DESKTOP : TABLEAU COMPLET ─── */}
         <div className="hidden lg:block bg-white rounded-2xl border border-slate-200/60 shadow-sm overflow-hidden">
           <table className="w-full text-left border-collapse">
             <thead>
@@ -645,16 +729,16 @@ export default function PageGestionNusuk() {
                 <th className="px-4 py-4 text-[10px] font-black text-slate-400 uppercase tracking-wider text-center">Dossier</th>
                 <th className="px-4 py-4 text-[10px] font-black text-slate-400 uppercase tracking-wider text-center">Gouv. Mali</th>
                 <th className="px-4 py-4 text-[10px] font-black text-slate-400 uppercase tracking-wider text-center">Nusuk KSA</th>
-                <th className="px-4 py-4 text-[10px] font-black text-slate-400 uppercase tracking-wider text-right">Montant Versé</th>
+                {!isAdmin && <th className="px-4 py-4 text-[10px] font-black text-slate-400 uppercase tracking-wider text-right">Montant Versé</th>}
                 <th className="px-6 py-4 w-12 text-right">Fiche</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {isFirstLoad ? (
-                <tr><td colSpan={9} className="px-6 py-16 text-center font-bold text-slate-300 animate-pulse">CHARGEMENT DES REGISTRES...</td></tr>
+                <tr><td colSpan={isAdmin ? 8 : 9} className="px-6 py-16 text-center font-bold text-slate-300 animate-pulse">CHARGEMENT DES REGISTRES...</td></tr>
               ) : paginatedData.length === 0 ? (
                 <tr>
-                  <td colSpan={9} className="px-6 py-16 text-center">
+                  <td colSpan={isAdmin ? 8 : 9} className="px-6 py-16 text-center">
                     <p className="text-slate-400 font-bold mb-2">Aucun dossier ne correspond à vos filtres.</p>
                     {activeFilterCount > 0 && (
                       <button onClick={resetAllFilters} className="text-xs text-indigo-600 font-black underline underline-offset-2">Réinitialiser tous les filtres</button>
@@ -688,15 +772,22 @@ export default function PageGestionNusuk() {
                         </span>
                       </td>
                       <td className="px-4 py-3.5 text-center">
-                        <span className={`mx-auto text-[10px] font-black uppercase px-2 py-0.5 rounded-md ${p.sur_plateforme_nusuk ? 'bg-purple-100 text-purple-700' : 'bg-slate-100 text-slate-400'}`}>
-                          {p.sur_plateforme_nusuk ? 'Inscrit' : 'À faire'}
-                        </span>
+                        <button 
+                          disabled={actionInProgressId === p.id}
+                          onClick={() => toggleNusukStatus(p.id, !!p.sur_plateforme_nusuk)}
+                          className={`mx-auto text-[10px] font-black uppercase px-2.5 py-0.5 rounded-md border flex items-center gap-1 transition-all ${
+                            p.sur_plateforme_nusuk ? 'bg-purple-100 text-purple-700 border-purple-200' : 'bg-slate-50 text-slate-400 border-slate-200 hover:border-indigo-300 hover:text-indigo-600'
+                          }`}
+                        >
+                          {p.sur_plateforme_nusuk ? 'Inscrit' : 'Valider'}
+                        </button>
                       </td>
-                      <td className="px-4 py-3.5 text-right font-black text-xs tabular-nums text-slate-800">
-                        {(p.total_paye || 0).toLocaleString('fr-FR')} CFA
-                      </td>
+                      {!isAdmin && (
+                        <td className="px-4 py-3.5 text-right font-black text-xs tabular-nums text-slate-800">
+                          {(p.total_paye || 0).toLocaleString('fr-FR')} CFA
+                        </td>
+                      )}
                       <td className="px-6 py-3.5 text-right">
-                        {/* ─── SAUVEGARDE SCROLL AVANT NAVIGATION ─── */}
                         <Link
                           href={`/hajj/pelerin/${p.id}`}
                           onClick={saveScrollPosition}
@@ -728,18 +819,18 @@ export default function PageGestionNusuk() {
           </div>
         )}
 
-        {/* ─── EXPORTS ─── */}
-        <div className="mt-5 flex justify-end gap-2">
-          <button onClick={handleExcelExport} className="px-4 py-2.5 border border-slate-200 bg-white text-slate-700 font-bold rounded-xl text-xs flex items-center gap-2 shadow-sm hover:bg-slate-50 active:scale-95 transition-all">
+        {/* ─── BLOC EXPORTS DESKTOP HAUT DE GAMME ─── */}
+        <div className="hidden lg:flex mt-5 justify-end gap-2.5">
+          <button onClick={handleExcelExport} className="px-4 py-2.5 border border-slate-200 bg-white text-slate-700 font-black rounded-xl text-xs flex items-center gap-2 shadow-sm hover:bg-slate-50 active:scale-95 transition-all">
             <FileSpreadsheet size={15} className="text-emerald-600" /> Exporter Excel
           </button>
-          <button onClick={() => setPdfConfirmOpen(true)} className="px-4 py-2.5 bg-indigo-600 text-white font-bold rounded-xl text-xs flex items-center gap-2 shadow-sm hover:bg-indigo-700 active:scale-95 transition-all">
+          <button onClick={() => setPdfConfirmOpen(true)} className="px-4 py-2.5 bg-indigo-600 text-white font-black rounded-xl text-xs flex items-center gap-2 shadow-sm hover:bg-indigo-700 active:scale-95 transition-all">
             <FileText size={15} /> Générer Rapport PDF
           </button>
         </div>
       </div>
 
-      {/* ─── TIROIR FILTRES MOBILE ─── */}
+      {/* ─── TIROIR FILTRES MOBILE PERSISTANTS ─── */}
       {mobileFilterOpen && (
         <div className="fixed inset-0 z-[1200] bg-slate-900/60 backdrop-blur-sm flex items-end justify-center animate-fade-in" onClick={() => setMobileFilterOpen(false)}>
           <div className="bg-white w-full rounded-t-[2rem] p-6 space-y-4 max-h-[85vh] overflow-y-auto shadow-2xl animate-slide-up pb-safe-bottom" onClick={e => e.stopPropagation()}>
@@ -791,15 +882,17 @@ export default function PageGestionNusuk() {
                 </select>
               </div>
 
-              <div className="flex flex-col gap-1">
-                <label className="text-[10px] font-black text-slate-400 uppercase">Finances (Seuil 3M)</label>
-                <select value={filterFinance} onChange={e => setFilterFinance(e.target.value as any)} className="w-full bg-slate-50 border border-slate-200 p-2.5 rounded-xl text-xs font-bold">
-                  <option value="all">Tous</option>
-                  <option value="full">Réglé Totalité</option>
-                  <option value="partial">Versement Partiel</option>
-                  <option value="none">Aucun paiement</option>
-                </select>
-              </div>
+              {!isAdmin && (
+                <div className="flex flex-col gap-1">
+                  <label className="text-[10px] font-black text-slate-400 uppercase">Finances (Seuil 3M)</label>
+                  <select value={filterFinance} onChange={e => setFilterFinance(e.target.value as any)} className="w-full bg-slate-50 border border-slate-200 p-2.5 rounded-xl text-xs font-bold">
+                    <option value="all">Tous</option>
+                    <option value="full">Réglé Totalité</option>
+                    <option value="partial">Versement Partiel</option>
+                    <option value="none">Aucun paiement</option>
+                  </select>
+                </div>
+              )}
             </div>
 
             <button onClick={() => setMobileFilterOpen(false)} className="w-full py-3.5 bg-indigo-600 text-white font-black uppercase text-xs tracking-wider rounded-xl shadow-md mt-2">

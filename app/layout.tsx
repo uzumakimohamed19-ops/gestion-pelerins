@@ -2,22 +2,21 @@ import './globals.css'
 import PwaInstaller from '@/components/PwaInstaller'
 import { YearProvider } from '@/lib/YearContext'
 import { UIProvider } from '@/lib/UIContext'
+import TopBarContainer from '@/components/TopBarContainer'
 
-// 1. Configuration des métadonnées (Standard et Apple) gérées proprement par Next.js
 export const metadata = {
   manifest: '/manifest.json',
   appleWebApp: {
     capable: true,
-    statusBarStyle: 'black-translucent', // Permet l'immersion (le site monte tout en haut)
+    statusBarStyle: 'black-translucent', 
   },
 }
 
-// 2. Configuration du Viewport séparée (OBLIGATOIRE sur Next.js pour valider le viewport-fit=cover)
 export const viewport = {
   width: 'device-width',
   initialScale: 1,
-  viewportFit: 'cover', // CASSE LA BANDE BLANCHE : Demande à iOS d'occuper tout l'écran
-  themeColor: '#2563eb', // Couleur pour Android
+  viewportFit: 'cover', 
+  themeColor: '#2563eb', 
 }
 
 export default function RootLayout({
@@ -27,11 +26,17 @@ export default function RootLayout({
 }) {
   return (
     <html lang="fr">
-      {/* On a ENLEVÉ le <head> manuel qui provoquait le bug de conflit avec Next.js */}
-      <body className="min-h-screen antialiased text-slate-900 bg-transparent">
+      {/* On force le html et le body à occuper tout l'écran, sans aucune marge */}
+      <body className="min-h-screen m-0 p-0 antialiased text-slate-900 bg-transparent flex flex-col">
         <UIProvider>
           <YearProvider>
-            <main>
+            
+            <TopBarContainer />
+
+            {/* En enlevant le padding-top, ton en-tête bleu (ou noir, ou rouge) 
+                va monter DIRECTEMENT et naturellement sous le Dynamic Island. 
+                C'est la couleur de ton composant qui va faire le fond ! */}
+            <main className="flex-1 flex flex-col min-h-screen">
               {children}
             </main>
 

@@ -41,7 +41,7 @@ type FilterType = 'date' | 'reference' | 'agence' | 'phone' | 'date_depart' | 'd
 
 type PaiementStatut = 'all' | 'complet' | 'partiel' | 'non_paye'
 
-// ─── helpers ────────────────────────────────────────────────────────────────
+const FILTERS_STORAGE_KEY = 'liste_pelerins_filters'
 
 const getPaiementStatut = (p: Pelerin): PaiementStatut => {
   const pct = p.prix_package > 0 ? (p.total_paye / p.prix_package) * 100 : 0
@@ -65,19 +65,15 @@ const getCompletion = (p: Pelerin): number => {
   return Math.round((checks.filter(Boolean).length / checks.length) * 100)
 }
 
-// ─── PDF Export ─────────────────────────────────────────────────────────────
-
 const exporterPDF = async (pelerins: Pelerin[], showPrix: boolean, showAgence: boolean) => {
   const { jsPDF } = await import('jspdf')
   const autoTable = (await import('jspdf-autotable')).default
 
   const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' })
 
-  // Header gradient bar
-  doc.setFillColor(15, 23, 42) // slate-900
+  doc.setFillColor(15, 23, 42)
   doc.rect(0, 0, 297, 22, 'F')
-
-  doc.setFillColor(37, 99, 235) // blue-600
+  doc.setFillColor(37, 99, 235)
   doc.rect(0, 18, 297, 4, 'F')
 
   doc.setTextColor(255, 255, 255)
@@ -91,7 +87,6 @@ const exporterPDF = async (pelerins: Pelerin[], showPrix: boolean, showAgence: b
   const now = new Date().toLocaleDateString('fr-FR', { day: '2-digit', month: 'long', year: 'numeric' })
   doc.text(`Généré le ${now}  •  ${pelerins.length} pèlerins`, 14, 19)
 
-  // Stats summary bar
   const totalPackage = pelerins.reduce((s, p) => s + (p.prix_package || 0), 0)
   const totalPaye = pelerins.reduce((s, p) => s + (p.total_paye || 0), 0)
   const nbComplets = pelerins.filter(p => getPaiementStatut(p) === 'complet').length
@@ -128,7 +123,6 @@ const exporterPDF = async (pelerins: Pelerin[], showPrix: boolean, showAgence: b
     doc.text(s.label.toUpperCase(), x, 41)
   })
 
-  // Table columns
   const columns: any[] = [
     { header: '#', dataKey: 'num' },
     { header: 'NOM COMPLET', dataKey: 'nom' },
@@ -202,12 +196,7 @@ const exporterPDF = async (pelerins: Pelerin[], showPrix: boolean, showAgence: b
         else if (statut === 'partiel') data.cell.styles.textColor = [217, 119, 6]
         else data.cell.styles.textColor = [220, 38, 38]
       }
-      if (data.column.dataKey === 'reste' && data.section === 'body' && showPrix) {
-        const reste = (rows[data.row.index]?.prix_package || 0) - (rows[data.row.index]?.total_paye || 0)
-        if (reste > 0) data.cell.styles.textColor = [220, 38, 38]
-      }
     },
-    // Footer with page numbers
     didDrawPage(data: any) {
       const pageCount = doc.getNumberOfPages()
       doc.setFontSize(7)
@@ -225,8 +214,6 @@ const exporterPDF = async (pelerins: Pelerin[], showPrix: boolean, showAgence: b
   doc.save(`Pelerins_Hajj_${new Date().toLocaleDateString('fr-FR').replace(/\//g, '-')}.pdf`)
 }
 
-// ─── Main Component ──────────────────────────────────────────────────────────
-
 export default function ListePelerins() {
   const { selectedYear } = useYear()
   const [pelerins, setPelerins] = useState<Pelerin[]>([])
@@ -237,12 +224,14 @@ export default function ListePelerins() {
   const [role, setRole] = useState<string>('staff')
   const router = useRouter()
 
-  // Filters — persistent (never auto-cleared)
+  // Filters — persistants via sessionStorage
   const [activeFilterType, setActiveFilterType] = useState<FilterType>(null)
   const [selectedFilterValue, setSelectedFilterValue] = useState<string | null>(null)
   const [statutPaiementFilter, setStatutPaiementFilter] = useState<PaiementStatut>('all')
   const [plateformeFilter, setPlateformeFilter] = useState<'all' | 'gouv' | 'nusuk' | 'both' | 'neither'>('all')
   const [showFilterPanel, setShowFilterPanel] = useState(false)
+  // Ref pour éviter d'écraser les filtres restaurés avant que le useEffect de restauration tourne
+  const filtersRestoredRef = useRef(false)
 
   // PDF export modal
   const [showPdfModal, setShowPdfModal] = useState(false)
@@ -258,7 +247,38 @@ export default function ListePelerins() {
   const [showExportMenu, setShowExportMenu] = useState(false)
   const exportRef = useRef<HTMLDivElement>(null)
 
-  // Scroll restoration
+  // ── FIX 2: Restaurer les filtres depuis sessionStorage au montage
+  useEffect(() => {
+    if (filtersRestoredRef.current) return
+    filtersRestoredRef.current = true
+    try {
+      const saved = sessionStorage.getItem(FILTERS_STORAGE_KEY)
+      if (saved) {
+        const parsed = JSON.parse(saved)
+        if (parsed.activeFilterType !== undefined) setActiveFilterType(parsed.activeFilterType)
+        if (parsed.selectedFilterValue !== undefined) setSelectedFilterValue(parsed.selectedFilterValue)
+        if (parsed.statutPaiementFilter !== undefined) setStatutPaiementFilter(parsed.statutPaiementFilter)
+        if (parsed.plateformeFilter !== undefined) setPlateformeFilter(parsed.plateformeFilter)
+        if (parsed.searchTerm !== undefined) setSearchTerm(parsed.searchTerm)
+        if (parsed.showFilterPanel !== undefined) setShowFilterPanel(parsed.showFilterPanel)
+      }
+    } catch { /* ignore */ }
+  }, [])
+
+  // ── FIX 2: Persister les filtres à chaque changement
+  useEffect(() => {
+    try {
+      sessionStorage.setItem(FILTERS_STORAGE_KEY, JSON.stringify({
+        activeFilterType,
+        selectedFilterValue,
+        statutPaiementFilter,
+        plateformeFilter,
+        searchTerm,
+        showFilterPanel,
+      }))
+    } catch { /* ignore */ }
+  }, [activeFilterType, selectedFilterValue, statutPaiementFilter, plateformeFilter, searchTerm, showFilterPanel])
+
   const restoreScrollPosition = () => {
     const savedScroll = sessionStorage.getItem('liste_pelerins_scroll_y')
     if (savedScroll) {
@@ -267,6 +287,7 @@ export default function ListePelerins() {
     }
   }
 
+  // ── FIX 1: fetchPelerins ne bloque JAMAIS la navigation quand il y a un cache
   const fetchPelerins = useCallback(async ({ cacheKey, hasCache }: { cacheKey: string; hasCache: boolean }) => {
     if (!hasCache) setLoading(true)
     else setBackgroundUpdating(true)
@@ -296,8 +317,10 @@ export default function ListePelerins() {
       const cacheKey = selectedYear === 'all' ? 'pelerins_all' : `pelerins_year_${selectedYear}`
       const cachedPelerins = await get<Pelerin[]>(cacheKey)
       if (cachedPelerins && cachedPelerins.length > 0) {
+        // ── FIX 1: Données du cache affichées IMMÉDIATEMENT — liens cliquables tout de suite
         setPelerins(cachedPelerins)
         setLoading(false)
+        // La mise à jour en background ne bloque pas la navigation
         fetchPelerins({ cacheKey, hasCache: true })
       } else {
         await fetchPelerins({ cacheKey, hasCache: false })
@@ -322,7 +345,6 @@ export default function ListePelerins() {
     if (pelerins.length > 0) restoreScrollPosition()
   }, [pelerins])
 
-  // Close export menu on outside click
   useEffect(() => {
     const handler = (e: MouseEvent) => {
       if (exportRef.current && !exportRef.current.contains(e.target as Node)) setShowExportMenu(false)
@@ -385,7 +407,6 @@ export default function ListePelerins() {
     saveAs(new Blob([buffer]), `Liste_Pelerins_Hajj_${new Date().toLocaleDateString('fr-FR')}.xlsx`)
   }
 
-  // ── Filter options helper ────────────────────────────────────────────────
   const getFilterOptions = (): string[] => {
     if (!activeFilterType) return []
     const rawOptions = pelerins.map(p => {
@@ -402,7 +423,6 @@ export default function ListePelerins() {
     return Array.from(new Set(rawOptions.filter(Boolean)))
   }
 
-  // ── Filtered list ────────────────────────────────────────────────────────
   const pelerinsFiltrés = pelerins.filter(p => {
     const q = searchTerm.toLowerCase()
     const matchesSearch = !q ||
@@ -414,17 +434,12 @@ export default function ListePelerins() {
       (p.prenom || '').toLowerCase().includes(q)
 
     if (!matchesSearch) return false
-
-    // Statut paiement filter
     if (statutPaiementFilter !== 'all' && getPaiementStatut(p) !== statutPaiementFilter) return false
-
-    // Plateforme filter
     if (plateformeFilter === 'gouv' && !p.sur_plateforme_gouv) return false
     if (plateformeFilter === 'nusuk' && !p.sur_plateforme_nusuk) return false
     if (plateformeFilter === 'both' && !(p.sur_plateforme_gouv && p.sur_plateforme_nusuk)) return false
     if (plateformeFilter === 'neither' && (p.sur_plateforme_gouv || p.sur_plateforme_nusuk)) return false
 
-    // Step filter
     if (selectedFilterValue) {
       switch (activeFilterType) {
         case 'date': return (p.created_at ? new Date(p.created_at).toLocaleDateString('fr-FR') : 'N/A') === selectedFilterValue
@@ -439,13 +454,18 @@ export default function ListePelerins() {
     return true
   })
 
-  // Stats
   const totalPackage = pelerinsFiltrés.reduce((s, p) => s + (p.prix_package || 0), 0)
   const totalPaye = pelerinsFiltrés.reduce((s, p) => s + (p.total_paye || 0), 0)
   const nbComplets = pelerinsFiltrés.filter(p => getPaiementStatut(p) === 'complet').length
   const nbGouv = pelerinsFiltrés.filter(p => p.sur_plateforme_gouv).length
 
-  const hasActiveFilters = !!selectedFilterValue || statutPaiementFilter !== 'all' || plateformeFilter !== 'all'
+  const hasActiveFilters = !!selectedFilterValue || statutPaiementFilter !== 'all' || plateformeFilter !== 'all' || !!searchTerm
+
+  const activeFilterCount = [
+    selectedFilterValue ? 1 : 0,
+    statutPaiementFilter !== 'all' ? 1 : 0,
+    plateformeFilter !== 'all' ? 1 : 0,
+  ].reduce((a, b) => a + b, 0)
 
   const handleFilterTypeClick = (type: FilterType) => {
     if (activeFilterType === type) {
@@ -480,7 +500,6 @@ export default function ListePelerins() {
     setSearchTerm('')
   }
 
-  // ── PDF Modal ────────────────────────────────────────────────────────────
   const handleGeneratePDF = async () => {
     setPdfGenerating(true)
     try {
@@ -494,7 +513,6 @@ export default function ListePelerins() {
     }
   }
 
-  // ── Render ───────────────────────────────────────────────────────────────
   return (
     <div className="max-w-6xl mx-auto px-4 py-6 md:py-10">
 
@@ -503,7 +521,6 @@ export default function ListePelerins() {
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={() => setShowPdfModal(false)} />
           <div className="relative bg-white rounded-3xl shadow-2xl w-full max-w-md overflow-hidden">
-            {/* Modal header */}
             <div className="bg-gradient-to-r from-slate-900 to-blue-900 px-6 py-5">
               <div className="flex items-center gap-3 mb-1">
                 <div className="w-9 h-9 bg-white/10 rounded-xl flex items-center justify-center">
@@ -519,13 +536,12 @@ export default function ListePelerins() {
             </div>
 
             <div className="p-6 space-y-4">
-              {/* Options */}
               <div>
                 <p className="text-xs font-black uppercase text-gray-400 tracking-wider mb-3">Options du document</p>
                 <div className="space-y-2">
                   {[
                     { key: 'prix', label: 'Inclure les informations de paiement', sublabel: 'Package, montant payé, solde restant', value: pdfShowPrix, set: setPdfShowPrix, icon: <BarChart3 size={16} className="text-blue-500" /> },
-                    { key: 'agence', label: 'Afficher le nom de l\'agence', sublabel: 'Colonne agence d\'enregistrement', value: pdfShowAgence, set: setPdfShowAgence, icon: <Building2 size={16} className="text-violet-500" /> },
+                    { key: 'agence', label: "Afficher le nom de l'agence", sublabel: "Colonne agence d'enregistrement", value: pdfShowAgence, set: setPdfShowAgence, icon: <Building2 size={16} className="text-violet-500" /> },
                   ].map(opt => (
                     <button
                       key={opt.key}
@@ -547,7 +563,6 @@ export default function ListePelerins() {
                 </div>
               </div>
 
-              {/* Preview info */}
               <div className="bg-gray-50 rounded-2xl p-4 border border-gray-100">
                 <p className="text-[10px] font-black uppercase text-gray-400 tracking-wider mb-2">Aperçu du document</p>
                 <div className="grid grid-cols-2 gap-2 text-xs">
@@ -562,7 +577,6 @@ export default function ListePelerins() {
                 </div>
               </div>
 
-              {/* Actions */}
               <div className="flex gap-3">
                 <button
                   onClick={() => setShowPdfModal(false)}
@@ -601,10 +615,15 @@ export default function ListePelerins() {
           </div>
         </div>
 
+        {/*
+          Layout mobile : flex-wrap
+          Ordre des éléments : YearSelector | Sélect. | [ml-auto →] Export | Nouveau
+          Le ml-auto sur le groupe Export+Nouveau les pousse à droite sur mobile
+          Sur desktop (sm:flex-nowrap) tout est aligné normalement
+        */}
         <div className="flex flex-wrap gap-2 items-center">
           <YearSelector />
 
-          {/* Select mode toggle */}
           <button
             onClick={() => { setSelectMode(!selectMode); setSelectedIds(new Set()) }}
             className={`flex items-center gap-1.5 px-4 py-3.5 rounded-2xl font-black text-sm border transition-all duration-200 hover:-translate-y-0.5 active:scale-95 ${selectMode ? 'bg-violet-600 text-white border-violet-600 shadow-lg shadow-violet-100' : 'bg-violet-50 text-violet-700 border-violet-100 hover:bg-violet-100'}`}
@@ -613,55 +632,115 @@ export default function ListePelerins() {
             <span className="hidden sm:inline">{selectMode ? `${selectedIds.size} sél.` : 'Sélect.'}</span>
           </button>
 
-          {/* Export button with dropdown */}
-          <div className="relative" ref={exportRef}>
-            <button
-              onClick={() => setShowExportMenu(!showExportMenu)}
-              className="flex items-center gap-2 bg-emerald-50 text-emerald-700 hover:bg-emerald-100/80 px-4 py-3.5 rounded-2xl font-black text-sm border border-emerald-100 transition-all duration-200 hover:-translate-y-0.5 active:scale-95"
-            >
-              <Download size={16} />
-              <span className="hidden sm:inline">Export</span>
-              <ChevronDown size={14} className={`transition-transform ${showExportMenu ? 'rotate-180' : ''}`} />
-            </button>
+          {/* ── FIX 3: ml-auto pousse ce groupe à droite sur mobile ── */}
+          <div className="ml-auto flex items-center gap-2 sm:ml-0">
 
-            {showExportMenu && (
-              <div className="absolute right-0 top-full mt-2 w-52 bg-white rounded-2xl shadow-xl border border-gray-100 overflow-hidden z-20 animate-in fade-in slide-in-from-top-2 duration-150">
-                <div className="p-1.5">
-                  <button
-                    onClick={() => { exporterExcel(); setShowExportMenu(false) }}
-                    className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-gray-50 transition-colors text-left group"
-                  >
-                    <div className="w-8 h-8 bg-emerald-100 rounded-lg flex items-center justify-center">
-                      <Download size={15} className="text-emerald-600" />
+            {/* ── FIX 4: Export dropdown moderne ── */}
+            <div className="relative" ref={exportRef}>
+              <button
+                onClick={() => setShowExportMenu(!showExportMenu)}
+                className={`flex items-center gap-2 px-4 py-3.5 rounded-2xl font-black text-sm border transition-all duration-200 hover:-translate-y-0.5 active:scale-95 ${showExportMenu ? 'bg-gray-900 text-white border-gray-900 shadow-lg' : 'bg-gray-100 text-gray-700 border-gray-200 hover:bg-gray-200'}`}
+              >
+                <Download size={16} />
+                <span className="hidden sm:inline">Exporter</span>
+                <ChevronDown size={13} className={`transition-transform duration-200 ${showExportMenu ? 'rotate-180' : ''}`} />
+              </button>
+
+              {showExportMenu && (
+                <div
+                  className="absolute right-0 top-full mt-2.5 w-72 bg-white rounded-3xl overflow-hidden z-20"
+                  style={{ boxShadow: '0 8px 40px -8px rgba(0,0,0,0.20), 0 2px 12px -4px rgba(0,0,0,0.10)', border: '1px solid rgba(0,0,0,0.06)' }}
+                >
+                  {/* Header avec gradient */}
+                  <div className="px-5 pt-4 pb-3.5 bg-gradient-to-b from-gray-50/80 to-white border-b border-gray-100">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-xs font-black text-gray-800 tracking-tight">Exporter la liste</p>
+                        <p className="text-[10px] text-gray-400 font-medium mt-0.5">
+                          {selectedIds.size > 0
+                            ? `${selectedIds.size} sélectionné(s)`
+                            : `${pelerinsFiltrés.length} pèlerin${pelerinsFiltrés.length > 1 ? 's' : ''}`
+                          }
+                          {hasActiveFilters && ' · filtres actifs'}
+                        </p>
+                      </div>
+                      {hasActiveFilters && (
+                        <span className="bg-blue-100 text-blue-700 text-[9px] font-black px-2 py-1 rounded-lg border border-blue-200">
+                          Filtré
+                        </span>
+                      )}
                     </div>
-                    <div>
-                      <p className="font-black text-gray-900 text-sm">Excel (.xlsx)</p>
-                      <p className="text-[10px] text-gray-400 font-medium">Format tableur</p>
-                    </div>
-                  </button>
-                  <button
-                    onClick={() => { setShowPdfModal(true); setShowExportMenu(false) }}
-                    className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-gray-50 transition-colors text-left"
-                  >
-                    <div className="w-8 h-8 bg-red-100 rounded-lg flex items-center justify-center">
-                      <FileText size={15} className="text-red-600" />
-                    </div>
-                    <div>
-                      <p className="font-black text-gray-900 text-sm">PDF (.pdf)</p>
-                      <p className="text-[10px] text-gray-400 font-medium">Document imprimable</p>
-                    </div>
-                  </button>
+                  </div>
+
+                  <div className="p-2.5 space-y-1">
+                    {/* Option Excel */}
+                    <button
+                      onClick={() => { exporterExcel(); setShowExportMenu(false) }}
+                      className="w-full flex items-center gap-3.5 px-3.5 py-3.5 rounded-2xl hover:bg-emerald-50/80 transition-all duration-150 text-left group active:scale-[0.98]"
+                    >
+                      <div className="w-11 h-11 bg-gradient-to-br from-emerald-400 to-emerald-600 rounded-2xl flex items-center justify-center shrink-0 shadow-md shadow-emerald-200/60 group-hover:shadow-lg group-hover:shadow-emerald-200 group-hover:-translate-y-0.5 transition-all duration-200">
+                        <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+                          <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8l-6-6z" fill="white" fillOpacity="0.2"/>
+                          <path d="M14 2v6h6" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                          <path d="M8 13l2 2 4-4" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                          <path d="M8 17h8" stroke="white" strokeWidth="1.5" strokeLinecap="round" opacity="0.7"/>
+                        </svg>
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 mb-0.5">
+                          <p className="font-black text-gray-900 text-sm">Tableur Excel</p>
+                          <span className="text-[9px] font-black bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded-md border border-emerald-200">.xlsx</span>
+                        </div>
+                        <p className="text-[11px] text-gray-400 font-medium leading-tight">Modifiable · compatible Google Sheets</p>
+                      </div>
+                      <div className="w-7 h-7 rounded-xl bg-gray-100 flex items-center justify-center group-hover:bg-emerald-100 transition-colors shrink-0">
+                        <ChevronRight size={13} className="text-gray-400 group-hover:text-emerald-600 transition-colors" />
+                      </div>
+                    </button>
+
+                    {/* Option PDF */}
+                    <button
+                      onClick={() => { setShowPdfModal(true); setShowExportMenu(false) }}
+                      className="w-full flex items-center gap-3.5 px-3.5 py-3.5 rounded-2xl hover:bg-rose-50/80 transition-all duration-150 text-left group active:scale-[0.98]"
+                    >
+                      <div className="w-11 h-11 bg-gradient-to-br from-rose-400 to-red-600 rounded-2xl flex items-center justify-center shrink-0 shadow-md shadow-rose-200/60 group-hover:shadow-lg group-hover:shadow-rose-200 group-hover:-translate-y-0.5 transition-all duration-200">
+                        <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+                          <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8l-6-6z" fill="white" fillOpacity="0.2"/>
+                          <path d="M14 2v6h6" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                          <path d="M9 13h6M9 16.5h4" stroke="white" strokeWidth="1.5" strokeLinecap="round"/>
+                        </svg>
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 mb-0.5">
+                          <p className="font-black text-gray-900 text-sm">Document PDF</p>
+                          <span className="text-[9px] font-black bg-rose-100 text-rose-700 px-1.5 py-0.5 rounded-md border border-rose-200">.pdf</span>
+                        </div>
+                        <p className="text-[11px] text-gray-400 font-medium leading-tight">Imprimable · options avancées</p>
+                      </div>
+                      <div className="w-7 h-7 rounded-xl bg-gray-100 flex items-center justify-center group-hover:bg-rose-100 transition-colors shrink-0">
+                        <ChevronRight size={13} className="text-gray-400 group-hover:text-rose-600 transition-colors" />
+                      </div>
+                    </button>
+                  </div>
+
+                  {/* Footer */}
+                  <div className="mx-3 mb-3 px-3.5 py-2.5 bg-gray-50 rounded-2xl border border-gray-100">
+                    <p className="text-[10px] text-gray-400 font-medium text-center leading-tight">
+                      Les filtres actifs s'appliquent à l'export
+                    </p>
+                  </div>
                 </div>
-              </div>
-            )}
-          </div>
+              )}
+            </div>
 
-          <Link
-            href="/hajj/ajouter-pelerin"
-            className="flex items-center gap-2 bg-blue-600 text-white hover:bg-blue-700 px-4 py-3.5 rounded-2xl font-black text-sm shadow-lg shadow-blue-200 hover:shadow-xl transition-all duration-200 hover:-translate-y-0.5 active:scale-95"
-          >
-            <Plus size={16} /> Nouveau
-          </Link>
+            {/* Nouveau pèlerin */}
+            <Link
+              href="/hajj/ajouter-pelerin"
+              className="flex items-center gap-2 bg-blue-600 text-white hover:bg-blue-700 px-4 py-3.5 rounded-2xl font-black text-sm shadow-lg shadow-blue-200 hover:shadow-xl transition-all duration-200 hover:-translate-y-0.5 active:scale-95"
+            >
+              <Plus size={16} /> Nouveau
+            </Link>
+          </div>
         </div>
       </div>
 
@@ -747,14 +826,13 @@ export default function ListePelerins() {
         >
           <SlidersHorizontal size={13} />
           Filtres avancés
-          {hasActiveFilters && (
+          {activeFilterCount > 0 && (
             <span className="bg-white/20 rounded-full w-4 h-4 flex items-center justify-center text-[9px] font-black">
-              {[selectedFilterValue ? 1 : 0, statutPaiementFilter !== 'all' ? 1 : 0, plateformeFilter !== 'all' ? 1 : 0].reduce((a, b) => a + b, 0)}
+              {activeFilterCount}
             </span>
           )}
         </button>
 
-        {/* Quick statut filters */}
         {(['all', 'complet', 'partiel', 'non_paye'] as PaiementStatut[]).map(s => {
           const labels = { all: 'Tous', complet: '✓ Complets', partiel: '◑ Partiels', non_paye: '✗ Non payés' }
           return (
@@ -781,8 +859,6 @@ export default function ListePelerins() {
       {/* ── ADVANCED FILTER PANEL ── */}
       {showFilterPanel && (
         <div className="mb-6 bg-white rounded-3xl border border-gray-100 shadow-sm p-5 space-y-4 animate-in fade-in slide-in-from-top-2 duration-200">
-
-          {/* Plateforme filters */}
           <div>
             <p className="text-[10px] font-black uppercase text-gray-400 tracking-wider mb-2">Plateforme d'inscription</p>
             <div className="flex flex-wrap gap-2">
@@ -804,7 +880,6 @@ export default function ListePelerins() {
             </div>
           </div>
 
-          {/* Step filters */}
           <div>
             <p className="text-[10px] font-black uppercase text-gray-400 tracking-wider mb-2">Filtrer par champ</p>
             <div className="flex flex-wrap gap-2">
@@ -827,7 +902,6 @@ export default function ListePelerins() {
             </div>
           </div>
 
-          {/* Sub-options when a filter type is active */}
           {activeFilterType && (
             <div className="bg-gray-50 rounded-2xl p-4 border border-gray-100 max-h-44 overflow-y-auto">
               <div className="flex justify-between items-center mb-2">
@@ -880,6 +954,7 @@ export default function ListePelerins() {
         </div>
       )}
 
+      {/* Synchro arrière-plan — non bloquante */}
       {backgroundUpdating && !loading && (
         <div className="mb-5 rounded-2xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm font-semibold text-blue-800 shadow-sm flex items-center gap-2">
           <Sparkles size={14} className="animate-pulse" />
@@ -920,7 +995,6 @@ export default function ListePelerins() {
                     key={p.id}
                     className={`bg-white rounded-3xl border-2 shadow-sm transition-all duration-200 overflow-hidden ${isSelected ? 'border-violet-400 shadow-violet-100' : 'border-gray-100 hover:border-gray-200 hover:shadow-md'}`}
                   >
-                    {/* Card top row */}
                     <div className="px-4 pt-4 pb-3">
                       <div className="flex items-start gap-3">
                         {selectMode && (
@@ -928,7 +1002,6 @@ export default function ListePelerins() {
                             {isSelected ? <CheckSquare size={20} className="text-violet-600" /> : <Square size={20} className="text-gray-300" />}
                           </button>
                         )}
-                        {/* Avatar circle */}
                         <div className={`w-11 h-11 rounded-2xl flex items-center justify-center font-black text-sm shrink-0 ${statut === 'complet' ? 'bg-emerald-100 text-emerald-700' : statut === 'partiel' ? 'bg-amber-100 text-amber-700' : 'bg-red-100 text-red-600'}`}>
                           {(p.prenom || p.nom_complet).charAt(0).toUpperCase()}
                         </div>
@@ -941,15 +1014,12 @@ export default function ListePelerins() {
                             )}
                           </div>
                         </div>
-
-                        {/* Status badge */}
                         <span className={`text-[9px] font-black px-2 py-1 rounded-lg border shrink-0 ${colors.light}`}>
                           {statut === 'complet' ? '✓ COMPLET' : statut === 'partiel' ? '◑ PARTIEL' : '✗ NON PAYÉ'}
                         </span>
                       </div>
                     </div>
 
-                    {/* Payment bar */}
                     <div className="px-4 pb-3">
                       <div className="bg-gray-50 rounded-2xl p-3 border border-gray-100">
                         <div className="flex justify-between text-[10px] font-black uppercase mb-1.5">
@@ -966,10 +1036,8 @@ export default function ListePelerins() {
                       </div>
                     </div>
 
-                    {/* Footer */}
                     <div className="border-t border-gray-50 px-4 py-3 flex items-center justify-between gap-3">
                       <div className="flex items-center gap-3">
-                        {/* Plateforme indicators */}
                         <div className="flex gap-2">
                           <button
                             onClick={() => toggleFastStatus(p.id, 'sur_plateforme_gouv', p.sur_plateforme_gouv)}
@@ -989,7 +1057,6 @@ export default function ListePelerins() {
                           </button>
                         </div>
 
-                        {/* Completion ring */}
                         <div className="flex items-center gap-1">
                           <div className="relative w-7 h-7">
                             <svg className="w-7 h-7 -rotate-90" viewBox="0 0 28 28">
@@ -998,7 +1065,6 @@ export default function ListePelerins() {
                             </svg>
                             <span className="absolute inset-0 flex items-center justify-center text-[7px] font-black text-gray-600">{completion}%</span>
                           </div>
-                          <span className="text-[9px] text-gray-400 font-bold hidden xs:block">Dossier</span>
                         </div>
                       </div>
 
@@ -1006,6 +1072,7 @@ export default function ListePelerins() {
                         {p.agences?.nom_agence && (
                           <span className="text-[10px] text-gray-400 font-medium hidden sm:block max-w-[100px] truncate">{p.agences.nom_agence}</span>
                         )}
+                        {/* ── FIX 1: Link TOUJOURS cliquable, aucun garde backgroundUpdating ── */}
                         <Link
                           onClick={handlePersistScroll}
                           href={`/hajj/pelerin/${p.id}`}
@@ -1132,6 +1199,7 @@ export default function ListePelerins() {
                         </td>
 
                         <td className="px-6 py-5 text-right">
+                          {/* ── FIX 1: Link TOUJOURS actif — plus de pointer-events-none ni de garde ── */}
                           <Link
                             onClick={handlePersistScroll}
                             href={`/hajj/pelerin/${p.id}`}

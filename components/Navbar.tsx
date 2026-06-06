@@ -112,14 +112,22 @@ export default function Navbar() {
     { name: 'Quitter', href: '/', icon: SquareArrowRight },
   ]
 
-  // Liste filtrée excluant la page sur laquelle on se trouve actuellement
-  const remainingItems = useMemo(() => {
-    return navItems.filter(item => pathname !== item.href)
-  }, [pathname, navItems])
+  // Les deux premiers blocs restent fixes à gauche quoi qu'il arrive
+  const leftItems = useMemo(() => {
+    return [
+      { name: 'Tableau de bord', href: '/hajj/dashboard', icon: LayoutDashboard },
+      { name: 'Pèlerins', href: '/hajj/liste-pelerins', icon: Users }
+    ]
+  }, [])
 
-  // Séparation pour entourer le gros bouton central (2 à gauche, 2 à droite) comme sur ton modèle
-  const leftItems = useMemo(() => remainingItems.slice(0, 2), [remainingItems])
-  const rightItems = useMemo(() => remainingItems.slice(2, 4), [remainingItems])
+  // Les blocs de droite filtrent dynamiquement les pages restantes sans dupliquer la page active ni les blocs fixes de gauche
+  const rightItems = useMemo(() => {
+    return navItems.filter(item => 
+      item.href !== '/hajj/dashboard' && 
+      item.href !== '/hajj/liste-pelerins' && 
+      pathname !== item.href
+    ).slice(0, 2)
+  }, [pathname])
 
   if (pathname === '/login') return null
 
@@ -223,18 +231,21 @@ export default function Navbar() {
         <div 
           className="fixed bottom-0 left-0 right-0 h-20 bg-white/80 backdrop-blur-md border-t border-slate-100 rounded-t-[2.2rem] shadow-[0_-10px_30px_rgba(0,0,0,0.04)] z-[90] flex items-center justify-between px-4 pb-2"
         >
-          {/* Éléments de gauche (Boutons 1 & 2) */}
+          {/* Éléments de gauche (Boutons 1 & 2 - FIXES) */}
           <div className="flex flex-1 justify-around items-center">
-            {leftItems.map((item) => (
-              <Link
-                key={item.name}
-                href={item.href}
-                className="flex flex-col items-center justify-center gap-1 w-14 h-14 text-slate-400 active:scale-90 transition-transform duration-150"
-              >
-                <item.icon size={22} className="text-slate-400" />
-                <span className="text-[10px] font-medium text-slate-400 truncate max-w-[65px]">{item.name.split(' ')[0]}</span>
-              </Link>
-            ))}
+            {leftItems.map((item) => {
+              const isActive = pathname === item.href
+              return (
+                <Link
+                  key={item.name}
+                  href={item.href}
+                  className={`flex flex-col items-center justify-center gap-1 w-14 h-14 active:scale-90 transition-transform duration-150 ${isActive ? 'text-blue-600' : 'text-slate-400'}`}
+                >
+                  <item.icon size={22} className={isActive ? 'text-blue-600' : 'text-slate-400'} />
+                  <span className={`text-[10px] font-medium truncate max-w-[65px] ${isActive ? 'text-blue-600 font-bold' : 'text-slate-400'}`}>{item.name.split(' ')[0]}</span>
+                </Link>
+              )
+            })}
           </div>
 
           {/* 3ÈME BOUTON CENTRAL : LE GRAND BOUTON ROND SURÉLEVÉ (+ / X) */}
@@ -250,7 +261,7 @@ export default function Navbar() {
             </button>
           </div>
 
-          {/* Éléments de droite (Boutons 3 & 4) */}
+          {/* Éléments de droite (Boutons 3 & 4 - ROUTANTS) */}
           <div className="flex flex-1 justify-around items-center">
             {rightItems.map((item) => (
               <Link
