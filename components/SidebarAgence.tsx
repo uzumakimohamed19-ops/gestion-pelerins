@@ -17,7 +17,7 @@ import {
   Menu,
   X,
   Plus,
-  Contact // Ajout de l'icône Contact
+  Contact 
 } from 'lucide-react'
 
 export default function NavbarAgence() {
@@ -67,16 +67,14 @@ export default function NavbarAgence() {
     { name: 'Vendre', href: '/agence/nouvelle-operation', icon: PlusCircle },
     { name: 'Journal', href: '/agence/journal', icon: ClipboardList },
     { name: 'Comptabilité', href: '/agence/compta', icon: PieChart },
-    { name: 'Contact', href: '/agence/contact', icon: Contact }, // Ajout du bouton Contact
+    { name: 'Contact', href: '/agence/contact', icon: Contact }, 
     { name: 'Quitter', href: '/', icon: SquareArrowRight },
   ]
 
-  // Liste filtrée excluant la page active pour la barre du bas
   const remainingItems = useMemo(() => {
     return menuItems.filter(item => pathname !== item.href)
   }, [pathname, menuItems])
 
-  // Séparation équilibrée autour du bouton central (2 à gauche, 2 à droite)
   const leftItems = useMemo(() => remainingItems.slice(0, 2), [remainingItems])
   const rightItems = useMemo(() => remainingItems.slice(2, 4), [remainingItems])
 
@@ -84,7 +82,7 @@ export default function NavbarAgence() {
 
   return (
     <>
-      {/* 🧬 INJECTION CSS LOCALISÉE (Dégagement parfait en bas uniquement sur mobile, haut intact) */}
+      {/* 🧬 INJECTION CSS LOCALISÉE */}
       <style jsx global>{`
         @media (max-width: 767px) {
           body {
@@ -93,60 +91,68 @@ export default function NavbarAgence() {
         }
       `}</style>
 
-      {/* --- 💻 DESKTOP NAVBAR (Strictement intacte visuellement) --- */}
-      <nav className="hidden md:block bg-white/80 backdrop-blur-md border-b border-gray-100 fixed top-0 left-0 right-0 z-50 shadow-sm print:hidden">
-        <div className="max-w-7xl mx-auto px-8">
-          <div className="flex justify-between items-center h-20">
-            <Link href="/" className="flex items-center gap-3">
-              <div className="w-10 h-10 bg-emerald-500 rounded-xl flex items-center justify-center shadow-lg shadow-emerald-500/20">
-                <Building2 className="text-white w-5 h-5" />
-              </div>
-              <div className="flex flex-col">
-                <span className="text-base font-black text-gray-900 tracking-tight leading-none uppercase">{nomAgence}</span>
-                <span className="text-[9px] font-bold text-emerald-600 tracking-[0.15em] uppercase">Gestion Agence</span>
-              </div>
-            </Link>
-
-            <div className="flex items-center gap-2">
-              {role === 'admin' && (
-                <Link href="/agence/admin" className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-black transition-all bg-amber-50 text-amber-700 hover:bg-amber-100 border border-amber-100/50 mr-2">
-                  <ShieldCheck size={16} />
-                  <span>Admin</span>
-                </Link>
-              )}
-
-              {menuItems.map((item) => {
-                const isActive = pathname === item.href
-                return (
-                  <Link 
-                    key={item.name} 
-                    href={item.href} 
-                    className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-black transition-all ${
-                      isActive 
-                        ? 'bg-emerald-50 text-emerald-700' 
-                        : 'text-gray-500 hover:bg-gray-50 hover:text-gray-900'
-                    }`}
-                  >
-                    <item.icon size={16} className={isActive ? 'text-emerald-500' : 'text-gray-400'} />
-                    <span>{item.name}</span>
-                  </Link>
-                )
-              })}
+      {/* --- 💻 DESKTOP SIDEBAR (Transformée de Topbar à Sidebar) --- */}
+      <nav className="hidden md:flex flex-col justify-between w-64 bg-white/80 backdrop-blur-md border-r border-gray-100 fixed top-0 bottom-0 left-0 z-50 shadow-sm p-6 print:hidden">
+        
+        {/* Section Haut : Logo & Agence */}
+        <div className="flex flex-col gap-8">
+          <Link href="/" className="flex items-center gap-3">
+            <div className="w-10 h-10 bg-emerald-500 rounded-xl flex items-center justify-center shadow-lg shadow-emerald-500/20 shrink-0">
+              <Building2 className="text-white w-5 h-5" />
             </div>
+            <div className="flex flex-col min-w-0">
+              <span className="text-base font-black text-gray-900 tracking-tight leading-none uppercase truncate">{nomAgence}</span>
+              <span className="text-[9px] font-bold text-emerald-600 tracking-[0.15em] uppercase mt-1">Gestion Agence</span>
+            </div>
+          </Link>
 
-            <div className="flex items-center gap-3">
-              <div className="w-8 h-8 rounded-full bg-gray-100 border border-gray-200 shadow-sm overflow-hidden">
-                <Image src={`https://ui-avatars.com/api/?name=${userName || nomAgence}&background=f0fdf4&color=047857`} alt="Avatar" width={32} height={32} />
-              </div>
-              <button onClick={handleLogout} className="p-2 text-gray-400 hover:text-red-600 transition-colors">
-                <LogOut size={18} />
-              </button>
+          {/* Section Milieu : Liens de navigation */}
+          <div className="flex flex-col gap-1.5">
+            {role === 'admin' && (
+              <Link href="/agence/admin" className="flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-black transition-all bg-amber-50 text-amber-700 hover:bg-amber-100 border border-amber-100/50 mb-2">
+                <ShieldCheck size={18} />
+                <span>Admin</span>
+              </Link>
+            )}
+
+            {menuItems.map((item) => {
+              const isActive = pathname === item.href
+              return (
+                <Link 
+                  key={item.name} 
+                  href={item.href} 
+                  className={`flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-black transition-all ${
+                    isActive 
+                      ? 'bg-emerald-50 text-emerald-700' 
+                      : 'text-gray-500 hover:bg-gray-50 hover:text-gray-900'
+                  }`}
+                >
+                  <item.icon size={18} className={isActive ? 'text-emerald-500' : 'text-gray-400'} />
+                  <span>{item.name}</span>
+                </Link>
+              )
+            })}
+          </div>
+        </div>
+
+        {/* Section Bas : Profil & Déconnexion */}
+        <div className="pt-4 border-t border-gray-100 flex items-center justify-between">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="w-9 h-9 rounded-full bg-gray-100 border border-gray-200 shadow-sm overflow-hidden shrink-0">
+              <Image src={`https://ui-avatars.com/api/?name=${userName || nomAgence}&background=f0fdf4&color=047857`} alt="Avatar" width={36} height={36} />
+            </div>
+            <div className="flex flex-col min-w-0">
+              <span className="text-xs font-bold text-gray-700 truncate">{userName || 'Utilisateur'}</span>
+              <span className="text-[10px] text-gray-400 capitalize">{role}</span>
             </div>
           </div>
+          <button onClick={handleLogout} className="p-2 text-gray-400 hover:text-red-600 transition-colors shrink-0" title="Déconnexion">
+            <LogOut size={18} />
+          </button>
         </div>
       </nav>
 
-      {/* --- 📱 MOBILE NAV PREMIUM --- */}
+      {/* --- 📱 MOBILE NAV PREMIUM (Strictement intacte) --- */}
       <div className="md:hidden">
         
         {/* BARRE DE NAVIGATION FIXE EN BAS */}
@@ -266,11 +272,7 @@ export default function NavbarAgence() {
             </button>
           </div>
         </div>
-
       </div>
-
-      {/* Remplisseur d'espace en haut exclusif au Desktop */}
-      <div className="hidden md:block h-20" aria-hidden="true" />
     </>
   )
 }

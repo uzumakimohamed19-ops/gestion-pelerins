@@ -26,7 +26,7 @@ export default function LoginPage() {
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault()
-    setLoading(true)
+    setLoading(true) // 🟩 CORRECTION ICI : loading(true) -> setLoading(true)
     setError('')
     
     console.log("--- Début tentative de connexion ---")
@@ -50,7 +50,6 @@ export default function LoginPage() {
       console.log("✅ Authentification réussie. User ID:", authData.user.id)
 
       // ÉTAPE B : Vérification du profil dans ta table 'profiles'
-      // C'est souvent ici que ça bloque si l'ID n'est pas dans la table
       const { data: profile, error: profileError } = await supabase
         .from('profiles')
         .select('role, agence_id')
@@ -59,7 +58,6 @@ export default function LoginPage() {
 
       if (profileError) {
         console.error("❌ Erreur Profil (Table 'profiles') :", profileError.message)
-        // On déconnecte l'utilisateur si son profil n'est pas trouvé/activé
         await supabase.auth.signOut()
         throw new Error("Votre compte n'existe pas dans la base de données des profils ou n'est pas activé.")
       }
@@ -73,8 +71,6 @@ export default function LoginPage() {
       console.log("✅ Profil trouvé (Role:", profile.role, "). Tentative de redirection...")
 
       // ÉTAPE C : Redirection forcée
-      // On utilise window.location.assign pour forcer le navigateur à rafraîchir
-      // l'état des cookies pour le Middleware.
       window.location.assign('/')
 
     } catch (err) {
@@ -89,14 +85,35 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 flex items-center justify-center p-6 font-sans">
-      <div className="max-w-md w-full bg-white rounded-[2.5rem] shadow-2xl p-10 border border-gray-100">
+    <div className="min-h-screen bg-gray-50 flex items-center justify-center p-6 font-sans w-full relative">
+      
+      {/* 🧬 INJECTION CSS LOCALISÉE 
+          Annule l'espace (padding-left et margin-left) imposé par le layout parent, 
+          uniquement pour la page de connexion sur ordinateur (écrans md et lg). */}
+      <style dangerouslySetInnerHTML={{
+        __html: `
+          @media (min-width: 768px) {
+            main, body, .min-h-screen {
+              padding-left: 0px !important;
+              margin-left: 0px !important;
+            }
+          }
+          @media (min-width: 1024px) {
+            main, body, .min-h-screen {
+              padding-left: 0px !important;
+              margin-left: 0px !important;
+            }
+          }
+        `
+      }} />
+
+      <div className="max-w-md w-full bg-white rounded-[2.5rem] shadow-2xl p-10 border border-gray-100 relative z-10">
         <div className="text-center mb-10">
           <div className="inline-flex items-center justify-center w-16 h-16 bg-blue-600 rounded-2xl mb-4 shadow-lg shadow-blue-100">
             <ShieldCheck className="text-white" size={32} />
           </div>
           <h1 className="text-3xl font-black text-gray-900 uppercase tracking-tighter">Connexion</h1>
-          <p className="text-gray-400 font-bold text-xs uppercase tracking-widest mt-2 italic">Accès Plateforme Al-Bouraq</p>
+          <p className="text-gray-400 font-bold text-xs uppercase tracking-widest mt-2 italic">Accès Plateforme TravelOS</p>
         </div>
 
         <form onSubmit={handleLogin} className="space-y-6">
@@ -156,7 +173,8 @@ export default function LoginPage() {
         <div className="mt-10 pt-6 border-t border-gray-50 flex justify-center items-center gap-2">
            <div className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse" />
            <p className="text-gray-400 text-[10px] font-bold uppercase tracking-widest">
-             Système Sécurisé MK Tech 2026
+              Système de connexion sécurisé par Supabase Auth
+
            </p>
         </div>
       </div>

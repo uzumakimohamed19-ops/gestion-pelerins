@@ -31,12 +31,16 @@ export default function RootLayout({
         <UIProvider>
           <YearProvider>
             
-            <TopBarContainer />
+            {/* CORRECTION ICI : On enveloppe la TopBar pour la masquer sur PC (lg:hidden) 
+                car la barre est maintenant verticale sur le côté. Le mobile la garde intacte. */}
+            <div className="lg:hidden">
+              <TopBarContainer />
+            </div>
 
-            {/* En enlevant le padding-top, ton en-tête bleu (ou noir, ou rouge) 
-                va monter DIRECTEMENT et naturellement sous le Dynamic Island. 
-                C'est la couleur de ton composant qui va faire le fond ! */}
-            <main className="flex-1 flex flex-col min-h-screen">
+            {/* CHANGEMENT md:pl-64 en lg:pl-64 : 
+                On s'aligne sur le breakpoint 'lg' (1024px) utilisé par la Navbar pour éviter 
+                un décalage bizarre sur les tablettes et écrans intermédiaires. */}
+            <main className="flex-1 flex flex-col min-h-screen lg:pl-64 transition-all duration-300">
               {children}
             </main>
 

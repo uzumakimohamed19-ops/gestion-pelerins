@@ -62,7 +62,7 @@ function Tile({ card, loading, onClick }: { card: TileCard; loading: boolean; on
     <button
       onClick={onClick}
       disabled={loading}
-      className={`group text-left bg-white border ${card.borderColor} rounded-2xl p-5 hover:shadow-md hover:-translate-y-0.5 active:scale-[0.99] transition-all duration-300 flex flex-col justify-between w-full relative overflow-hidden shadow-sm`}
+      className={`group text-left bg-white border ${card.borderColor} rounded-2xl p-5 hover:shadow-md hover:-translate-y-0.5 active:scale-[0.99] transition-all duration-300 flex flex-col justify-between w-full relative overflow-hidden shadow-sm h-full`}
     >
       <div className="flex items-center justify-between w-full mb-4">
         <div className={`p-2.5 rounded-xl ${card.light} border border-white shadow-sm transition-transform group-hover:scale-105`}>
@@ -79,7 +79,7 @@ function Tile({ card, loading, onClick }: { card: TileCard; loading: boolean; on
         {loading ? (
           <div className="h-8 w-24 bg-slate-100 rounded-lg animate-pulse mb-2" />
         ) : (
-          <p className="text-2xl md:text-3xl font-black text-slate-900 leading-none tabular-nums tracking-tight mb-1.5 truncate">
+          <p className="text-xl md:text-2xl font-black text-slate-900 leading-tight tabular-nums tracking-tight mb-1.5 break-words">
             {card.value}
           </p>
         )}
@@ -87,7 +87,7 @@ function Tile({ card, loading, onClick }: { card: TileCard; loading: boolean; on
       </div>
 
       {card.subtext && !loading && (
-        <p className={`text-xs font-bold mt-2 ${card.textColor} bg-slate-50/50 px-2 py-1 rounded-lg border border-slate-100 inline-block w-max max-w-full truncate`}>
+        <p className={`text-xs font-bold mt-3 ${card.textColor} bg-slate-50/50 px-2.5 py-1.5 rounded-lg border border-slate-100 inline-block w-max max-w-full truncate`}>
           {card.subtext}
         </p>
       )}
@@ -138,25 +138,25 @@ export default function DashboardAgence() {
   const [activeTab, setActiveTab] = useState('all')
 
   const [showAmount, setShowAmount] = useState<boolean>(true)
+  const [mounted, setMounted] = useState(false)
 
   useEffect(() => {
+    setMounted(true)
     if (typeof window === 'undefined') return
-    let mounted = true
     ;(async () => {
       try {
         const saved: any = await get('agence_show_amount')
-        if (!mounted) return
         setShowAmount(saved !== undefined && saved !== null ? Boolean(saved) : true)
       } catch (e) {
         setShowAmount(true)
       }
     })()
-    return () => { mounted = false }
   }, [])
 
   useEffect(() => {
+    if (!mounted) return
     try { set('agence_show_amount', showAmount) } catch (e) { /* ignore */ }
-  }, [showAmount])
+  }, [showAmount, mounted])
 
   const dateDuJour = useMemo(() => {
     return new Date().toLocaleDateString('fr-FR', {
@@ -296,12 +296,12 @@ export default function DashboardAgence() {
 
   const mainCards: TileCard[] = [
     {
-      label: "Chiffre d'Affaires", value: `${stats.caTotal.toLocaleString('fr-FR')} CFA`, icon: Wallet,
+      label: "Chiffre d'Affaires", value: `${showAmount ? stats.caTotal.toLocaleString('fr-FR') : '••••••'} CFA`, icon: Wallet,
       light: 'bg-blue-50', textColor: 'text-blue-600', borderColor: 'border-blue-100',
       bgMobile: 'bg-white border-slate-100 text-slate-900', progress: 100, progressColor: 'bg-blue-500', tag: 'Finance'
     },
     {
-      label: 'Bénéfice Net Total', value: `${stats.beneficeTotal.toLocaleString('fr-FR')} CFA`, icon: TrendingUp,
+      label: 'Bénéfice Net Total', value: `${showAmount ? stats.beneficeTotal.toLocaleString('fr-FR') : '••••••'} CFA`, icon: TrendingUp,
       light: 'bg-emerald-50', textColor: 'text-emerald-600', borderColor: 'border-emerald-100',
       bgMobile: 'bg-emerald-600 border-emerald-500 text-white', subtext: `${stats.tauxRentabilite}% Rentabilité`,
       progress: stats.tauxRentabilite, progressColor: 'bg-emerald-400'
@@ -313,12 +313,12 @@ export default function DashboardAgence() {
       progress: 100, progressColor: 'bg-purple-500'
     },
     {
-      label: 'Panier Moyen', value: `${stats.panierMoyen.toLocaleString('fr-FR')} CFA`, icon: Globe,
+      label: 'Panier Moyen', value: `${showAmount ? stats.panierMoyen.toLocaleString('fr-FR') : '••••••'} CFA`, icon: Globe,
       light: 'bg-cyan-50', textColor: 'text-cyan-600', borderColor: 'border-cyan-100',
       bgMobile: 'bg-white border-slate-100 text-slate-900', subtext: 'Par transaction'
     },
     {
-      label: 'Marge Moyenne', value: `${stats.margeMoyenne.toLocaleString('fr-FR')} CFA`, icon: Clock,
+      label: 'Marge Moyenne', value: `${showAmount ? stats.margeMoyenne.toLocaleString('fr-FR') : '••••••'} CFA`, icon: Clock,
       light: 'bg-amber-50', textColor: 'text-amber-500', borderColor: 'border-amber-100',
       bgMobile: 'bg-white border-slate-100 text-slate-900', subtext: 'Par opération'
     },
@@ -356,156 +356,116 @@ export default function DashboardAgence() {
               <div className="w-10 h-10 rounded-full bg-white/20 border border-white/30 flex items-center justify-center font-black text-sm text-white backdrop-blur-md shrink-0">
                 A
               </div>
-              <div className="min-w-0">
-                <div className="flex items-center gap-1.5">
-                  <span className="inline-block w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping" />
-                  <p className="text-[10px] text-slate-200 font-bold tracking-widest uppercase truncate max-w-[150px]">
-                    Mon Agence
-                  </p>
-                </div>
-                <h2 className="text-sm font-black tracking-tight text-white mt-0.5">
-                  Tableau de Suivi Général
-                </h2>
+              <div>
+                <p className="text-[10px] font-bold text-white/50 uppercase tracking-[0.2em]">Tableau de bord</p>
+                <h1 className="text-lg font-black tracking-tight">Agence 2026</h1>
               </div>
             </div>
-            <Link
-              href="/agence/nouvelle-operation"
-              className="bg-white text-slate-900 px-3 py-1.5 rounded-full font-bold text-[11px] flex items-center gap-1 shadow-sm active:scale-95 transition-transform shrink-0"
+            <button 
+              onClick={() => setShowAmount(!showAmount)}
+              className="w-10 h-10 rounded-full bg-white/10 border border-white/20 flex items-center justify-center backdrop-blur-md active:scale-90 transition-all"
             >
-              <Plus size={12} /> Nouvelle Vente
-            </Link>
+              {showAmount ? <Eye size={18} /> : <EyeOff size={18} />}
+            </button>
           </div>
 
-          <div className="flex justify-between items-end mt-7 relative z-10">
-            <div>
-              <p className="text-xs text-slate-200 font-semibold tracking-wide uppercase opacity-90">Chiffre d'Affaires</p>
-              <div className="flex items-center gap-2 mt-0.5">
-                <div className="flex items-baseline gap-1">
-                  <span className="text-3xl font-black tracking-tight tabular-nums">
-                    {showAmount ? stats.caTotal.toLocaleString('fr-FR') : '•••••••'}
-                  </span>
-                  <span className="text-sm font-bold text-slate-300">CFA</span>
-                </div>
-                <button 
-                  onClick={() => setShowAmount(!showAmount)} 
-                  className="p-1 rounded-lg bg-white/10 border border-white/10 active:scale-90 transition-transform flex items-center justify-center"
-                >
-                  {showAmount ? <EyeOff size={14} className="text-slate-200" /> : <Eye size={14} className="text-slate-200" />}
-                </button>
-              </div>
+          <div className="relative z-10 bg-white/10 backdrop-blur-xl border border-white/20 rounded-3xl p-6 shadow-2xl">
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-xs font-bold text-white/60 uppercase tracking-widest">Chiffre d'Affaires Global</p>
+              <div className="px-2 py-0.5 rounded-md bg-emerald-500/20 border border-emerald-500/30 text-[10px] font-black text-emerald-400 uppercase">Live</div>
+            </div>
+            <div className="flex items-baseline gap-2">
+              <h2 className="text-3xl font-black tracking-tighter tabular-nums">
+                {showAmount ? stats.caTotal.toLocaleString('fr-FR') : '••••••'}
+              </h2>
+              <span className="text-sm font-bold text-white/40">CFA</span>
             </div>
             
-            <div className="text-right">
-              <p className="text-[10px] text-slate-300 font-bold uppercase tracking-wider">Date du jour</p>
-              <p className="text-xs font-black text-white capitalize mt-0.5">{dateDuJour}</p>
+            <div className="mt-6 pt-5 border-t border-white/10 flex justify-between items-center">
+              <div>
+                <p className="text-[10px] font-bold text-white/40 uppercase mb-1">Profit Net</p>
+                <p className="text-sm font-black text-emerald-400">
+                  {showAmount ? `+${stats.beneficeTotal.toLocaleString('fr-FR')}` : '••••••'} <span className="text-[10px]">CFA</span>
+                </p>
+              </div>
+              <div className="text-right">
+                <p className="text-[10px] font-bold text-white/40 uppercase mb-1">Rentabilité</p>
+                <p className="text-sm font-black text-white">{stats.tauxRentabilite}%</p>
+              </div>
             </div>
           </div>
         </div>
 
-        {/* Contenu Mobile Remontant */}
-        <div className="px-4 mt-6 space-y-6">
+        {/* Grille de Stats Mobile */}
+        <div className="px-5 -mt-8 relative z-20 grid grid-cols-2 gap-3">
+          {mainCards.slice(2).map((card, i) => (
+            <button
+              key={i}
+              onClick={() => openModal(card.label)}
+              className={`p-4 rounded-3xl border shadow-sm text-left active:scale-[0.97] transition-all ${card.bgMobile || 'bg-white border-slate-100 text-slate-900'}`}
+            >
+              <div className={`w-8 h-8 rounded-xl flex items-center justify-center mb-3 ${card.bgMobile?.includes('bg-white') ? card.light : 'bg-white/20'}`}>
+                <card.icon size={16} className={card.bgMobile?.includes('bg-white') ? card.textColor : 'text-white'} />
+              </div>
+              <p className={`text-[10px] font-bold uppercase tracking-wider mb-1 ${card.bgMobile?.includes('bg-white') ? 'text-slate-400' : 'text-white/60'}`}>
+                {card.label}
+              </p>
+              <p className="text-lg font-black tabular-nums tracking-tight">
+                {card.value}
+              </p>
+            </button>
+          ))}
+        </div>
 
-          <div className="space-y-2">
-            <p className="text-[11px] font-bold text-slate-400 uppercase tracking-wider px-1">Indicateurs clés</p>
-            <div className="flex overflow-x-auto gap-3 pb-3 pt-1 px-1 scrollbar-none snap-x snap-mandatory">
-              {mainCards.map((card, i) => (
-                <div key={i} className="w-[155px] shrink-0 snap-start">
-                  <button
-                    onClick={() => openModal(card.label)}
-                    className={`w-full text-left border rounded-2xl p-4 shadow-sm active:scale-[0.97] transition-transform flex flex-col justify-between h-[125px] ${card.bgMobile}`}
-                  >
-                    <div className="flex items-center justify-between w-full">
-                      <div className="p-2 rounded-xl bg-slate-50/80 border border-slate-100 shadow-sm">
-                        <card.icon size={16} className={card.textColor} />
-                      </div>
+        {/* Liste Activité Mobile */}
+        <div className="px-5 mt-8">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-sm font-black text-slate-800 uppercase tracking-widest">Dernières Ventes</h3>
+            <span className="text-[10px] font-bold text-slate-400 bg-slate-100 px-2 py-1 rounded-lg uppercase">{dateDuJour}</span>
+          </div>
+
+          {dernieresVentes.length > 0 ? (
+            <div className="space-y-3">
+              {dernieresVentes.map((v) => (
+                <div key={v.id} className="bg-white border border-slate-100 p-4 rounded-2xl flex items-center justify-between gap-4 shadow-sm">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className="w-10 h-10 rounded-xl bg-slate-50 border border-slate-100 flex items-center justify-center text-slate-400 shrink-0">
+                      <Plane size={18} />
                     </div>
-                    <div className="mt-2 w-full min-w-0">
-                      <p className="text-lg font-black tracking-tight leading-none truncate tabular-nums">
-                        {card.value}
-                      </p>
-                      <p className="text-[9px] opacity-70 font-bold uppercase tracking-wide truncate mt-1">
-                        {card.label}
-                      </p>
+                    <div className="min-w-0">
+                      <p className="text-sm font-bold text-slate-800 truncate">{v.client_nom}</p>
+                      <p className="text-[10px] font-bold text-slate-400 uppercase tracking-tighter truncate">{v.type_activite || 'Prestation'}</p>
                     </div>
-                  </button>
+                  </div>
+                  <div className="text-right shrink-0">
+                    <p className="text-sm font-black text-slate-900 tabular-nums">
+                      {showAmount ? `${v.prix_vente.toLocaleString('fr-FR')}` : '•••'}
+                    </p>
+                    <p className="text-[10px] font-bold text-emerald-500 tabular-nums">
+                      {showAmount ? `+${v.benefice.toLocaleString('fr-FR')}` : '•••'}
+                    </p>
+                  </div>
                 </div>
               ))}
             </div>
-          </div>
-
-          {alerts.length > 0 && (
-            <div className="space-y-2">
-              <div className="flex overflow-x-auto gap-2 pb-2 px-1 scrollbar-none snap-x">
-                {alerts.map((a, i) => (
-                  <div key={i} className="w-[290px] shrink-0 snap-start">
-                    <button
-                      onClick={() => openModal(a.filter)}
-                      className="w-full text-left flex items-center gap-3 p-3.5 bg-rose-50 border border-rose-100 rounded-2xl shadow-sm"
-                    >
-                      <span className="w-2 h-2 rounded-full bg-rose-500 shrink-0 animate-pulse" />
-                      <p className="text-xs text-rose-900 font-semibold leading-snug flex-1 truncate">{a.msg}</p>
-                      <ChevronRight size={14} className="text-rose-400 shrink-0" />
-                    </button>
-                  </div>
-                ))}
-              </div>
+          ) : (
+            <div className="bg-slate-100/50 border-2 border-dashed border-slate-200 rounded-3xl p-10 text-center">
+              <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">Aucune donnée</p>
             </div>
           )}
 
-          <div className="bg-white border border-slate-100 rounded-2xl p-4 shadow-sm space-y-4">
-            <div>
-              <h3 className="text-xs font-black text-slate-800 tracking-tight uppercase">Analyses Métiers</h3>
-              <p className="text-[10px] text-slate-400 font-medium">Répartition & performances financières</p>
-            </div>
-            
-            <div className="space-y-3.5">
-              {[
-                { label: 'Volume Rentabilité Haute Marge', pct: stats.pctHauteMarge, color: 'bg-teal-500' },
-                { label: 'Taux Moyen d\'Efficacité Marge', pct: stats.tauxRentabilite, color: 'bg-emerald-500' },
-              ].map((r, i) => (
-                <div key={i} className="space-y-1">
-                  <div className="flex justify-between items-center text-[11px]">
-                    <span className="text-slate-600 font-medium">{r.label}</span>
-                    <span className="font-black text-slate-900">{r.pct}%</span>
-                  </div>
-                  <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
-                    <div className={`h-full rounded-full ${r.color} transition-all duration-1000`} style={{ width: `${r.pct}%` }} />
-                  </div>
-                </div>
+          {alerts.length > 0 && (
+            <div className="mt-8 space-y-2">
+              <p className="text-[10px] font-black text-rose-500 uppercase tracking-[0.2em] mb-3 ml-1">Alertes Attention</p>
+              {alerts.map((a, i) => (
+                <AlertPill key={i} alert={a} onClick={() => openModal(a.filter)} />
               ))}
-            </div>
-          </div>
-
-          {dernieresVentes.length > 0 && (
-            <div className="bg-white border border-slate-100 rounded-2xl overflow-hidden shadow-sm">
-              <div className="px-4 py-3 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
-                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Dernières ventes</p>
-              </div>
-              <ul className="divide-y divide-slate-50">
-                {dernieresVentes.slice(0, 3).map((v) => (
-                  <li key={v.id} className="p-4 flex items-center justify-between gap-3">
-                    <div className="flex items-center gap-3 min-w-0 flex-1">
-                      <div className="w-8 h-8 rounded-xl bg-slate-100 border border-slate-200 text-slate-700 flex items-center justify-center text-xs font-bold shrink-0">
-                        <Briefcase size={14} />
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <p className="text-xs font-bold text-slate-800 truncate">{v.client_nom}</p>
-                        <p className="text-[10px] text-slate-400 truncate">{v.type_activite || 'VENTE'}</p>
-                      </div>
-                    </div>
-                    <div className="shrink-0 text-right">
-                      <p className="text-[11px] font-black text-slate-900">{v.prix_vente.toLocaleString('fr-FR')} F</p>
-                      <p className="text-[9px] font-bold text-emerald-600">+{v.benefice.toLocaleString('fr-FR')}</p>
-                    </div>
-                  </li>
-                ))}
-              </ul>
             </div>
           )}
 
           <button
             onClick={() => allData && exportToExcel(allData, 'Rapport_Operations_Agence')}
-            className="w-full flex items-center justify-center gap-2 p-3.5 bg-slate-900 text-white rounded-2xl text-xs font-bold shadow-md active:bg-slate-800 transition-colors"
+            className="w-full mt-8 flex items-center justify-center gap-2 p-3.5 bg-slate-900 text-white rounded-2xl text-xs font-bold shadow-md active:bg-slate-800 transition-colors"
           >
             <FileSpreadsheet size={16} className="text-emerald-400" />
             Exporter les données (.XLSX)
@@ -523,6 +483,13 @@ export default function DashboardAgence() {
             <h1 className="text-2xl md:text-3xl font-black text-slate-900 tracking-tight mt-2">Tableau de gestion & de suivi</h1>
           </div>
           <div className="flex items-center flex-wrap gap-3">
+            <button
+              onClick={() => setShowAmount(!showAmount)}
+              className="inline-flex items-center gap-2 bg-slate-100 text-slate-700 text-xs font-bold px-4 py-2.5 rounded-xl hover:bg-slate-200 active:scale-95 transition-all shadow-sm border border-slate-200"
+            >
+              {showAmount ? <Eye size={15} /> : <EyeOff size={15} />}
+              {showAmount ? 'Masquer' : 'Afficher'}
+            </button>
             <span className="text-xs font-semibold text-slate-600 bg-white border border-slate-200/80 px-4 py-2.5 rounded-xl shadow-sm flex items-center gap-2">
               <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
               <b className="text-slate-900">{stats.nombreVentes}</b> opérations enregistrées
@@ -538,7 +505,7 @@ export default function DashboardAgence() {
 
         <div className="flex flex-col lg:flex-row gap-8 items-start w-full">
           <div className="flex-1 min-w-0 w-full flex flex-col gap-6">
-            <div className="grid grid-cols-2 xl:grid-cols-3 gap-4">
+            <div className="grid grid-cols-2 xl:grid-cols-3 gap-6">
               {mainCards.map((card, i) => (
                 <Tile key={i} card={card} loading={loading} onClick={() => openModal(card.label)} />
               ))}
@@ -546,19 +513,19 @@ export default function DashboardAgence() {
 
             {dernieresVentes.length > 0 && (
               <div className="bg-white border border-slate-100 rounded-2xl overflow-hidden shadow-sm">
-                <div className="px-5 py-4 border-b border-slate-100 flex justify-between items-center bg-slate-50/30">
+                <div className="px-6 py-5 border-b border-slate-100 flex justify-between items-center bg-slate-50/30">
                   <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">Flux des dernières ventes</p>
                 </div>
                 <ul className="divide-y divide-slate-100">
                   {dernieresVentes.map((v) => (
-                    <li key={v.id} className="px-5 py-4 flex items-center justify-between gap-4 hover:bg-slate-50/30 transition-colors">
-                      <div className="flex items-center gap-3.5 min-w-0 flex-1">
-                        <div className="w-9 h-9 rounded-xl bg-slate-100 border border-slate-200/50 flex items-center justify-center text-xs font-bold text-slate-700 shrink-0">
-                          <Plane size={16} />
+                    <li key={v.id} className="px-6 py-5 flex items-center justify-between gap-4 hover:bg-slate-50/30 transition-colors">
+                      <div className="flex items-center gap-4 min-w-0 flex-1">
+                        <div className="w-10 h-10 rounded-xl bg-slate-100 border border-slate-200/50 flex items-center justify-center text-xs font-bold text-slate-700 shrink-0">
+                          <Plane size={18} />
                         </div>
                         <div className="min-w-0 flex-1">
-                          <p className="text-sm font-bold text-slate-800 truncate">{v.client_nom}</p>
-                          <div className="flex gap-1.5 mt-1.5 flex-wrap items-center">
+                          <p className="text-base font-bold text-slate-800 truncate">{v.client_nom}</p>
+                          <div className="flex gap-2 mt-1.5 flex-wrap items-center">
                             <span className="text-[10px] text-slate-600 bg-slate-50 border border-slate-100 px-2 py-0.5 rounded-md font-semibold">
                               {v.type_activite || 'VENTE'}
                             </span>
@@ -569,8 +536,12 @@ export default function DashboardAgence() {
                         </div>
                       </div>
                       <div className="text-right shrink-0">
-                        <p className="text-sm font-black text-slate-900">{v.prix_vente.toLocaleString('fr-FR')} CFA</p>
-                        <p className="text-xs font-black text-emerald-600 mt-0.5">+{v.benefice.toLocaleString('fr-FR')} CFA</p>
+                        <p className="text-base font-black text-slate-900 tabular-nums">
+                          {showAmount ? v.prix_vente.toLocaleString('fr-FR') : '•••••'} <span className="text-xs text-slate-400">CFA</span>
+                        </p>
+                        <p className="text-sm font-black text-emerald-600 mt-0.5">
+                          {showAmount ? `+${v.benefice.toLocaleString('fr-FR')}` : '•••••'} <span className="text-[10px] opacity-70">CFA</span>
+                        </p>
                       </div>
                     </li>
                   ))}
@@ -594,14 +565,14 @@ export default function DashboardAgence() {
               </div>
             )}
 
-            <div className="bg-white border border-slate-100 rounded-2xl p-5 shadow-sm w-full">
-              <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-4">Processus Métiers</p>
+            <div className="bg-white border border-slate-100 rounded-2xl p-6 shadow-sm w-full">
+              <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-5">Processus Métiers</p>
               {[
                 { label: 'Volume Rentabilité Haute Marge', pct: stats.pctHauteMarge, color: 'bg-teal-500' },
                 { label: 'Taux Moyen d\'Efficacité Marge', pct: stats.tauxRentabilite, color: 'bg-emerald-500' },
               ].map((r, i) => (
-                <div key={i} className="mb-4 last:mb-0">
-                  <div className="flex justify-between items-center mb-1.5">
+                <div key={i} className="mb-5 last:mb-0">
+                  <div className="flex justify-between items-center mb-2">
                     <span className="text-xs text-slate-600 font-medium">{r.label}</span>
                     <span className="text-xs font-black text-slate-800">{r.pct}%</span>
                   </div>
@@ -613,7 +584,7 @@ export default function DashboardAgence() {
               
               <button
                 onClick={() => allData && exportToExcel(allData, 'Global_Agence_Operations')}
-                className="mt-5 w-full flex items-center justify-center gap-2 py-2.5 border border-slate-200 text-slate-700 bg-slate-50 rounded-xl text-xs font-bold hover:bg-slate-100 transition-colors"
+                className="mt-6 w-full flex items-center justify-center gap-2 py-3 border border-slate-200 text-slate-700 bg-slate-50 rounded-xl text-xs font-bold hover:bg-slate-100 transition-colors"
               >
                 <FileSpreadsheet size={14} className="text-emerald-600" /> Export Excel Global
               </button>
@@ -659,9 +630,9 @@ export default function DashboardAgence() {
                       <p className="text-xs text-slate-400 uppercase font-semibold">{o.type_activite || 'VENTE INDÉFINIE'}</p>
                     </div>
                     <div className="shrink-0 text-right">
-                      <p className="text-xs font-black text-slate-900">{o.prix_vente.toLocaleString('fr-FR')} CFA</p>
+                      <p className="text-xs font-black text-slate-900">{showAmount ? o.prix_vente.toLocaleString('fr-FR') : '•••••'} CFA</p>
                       <span className={`text-[10px] font-black px-1.5 py-0.5 rounded-md ${o.benefice > 0 ? 'text-emerald-700 bg-emerald-50' : 'text-rose-600 bg-rose-50'}`}>
-                        +{o.benefice.toLocaleString('fr-FR')} Marge
+                        {showAmount ? `+${o.benefice.toLocaleString('fr-FR')}` : '•••••'} Marge
                       </span>
                     </div>
                   </li>

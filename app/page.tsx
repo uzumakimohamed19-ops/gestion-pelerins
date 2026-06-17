@@ -1,16 +1,76 @@
 ﻿'use client'
-import React from 'react'
+
+import React, { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { Plane, Moon, BarChart3, Settings } from 'lucide-react'
+import { supabase, getUser } from '@/lib/supabase'
 
 export default function PageSelectionModule() {
+  const [nomAgence, setNomAgence] = useState<string>('Chargement...')
+  const [salutation, setSalutation] = useState<string>('Bienvenue')
+
+  useEffect(() => {
+    // 1. Détermination de la salutation selon le moment de la journée
+    const hour = new Date().getHours()
+    if (hour >= 5 && hour < 18) {
+      setSalutation('Bonjour')
+    } else {
+      setSalutation('Bonsoir')
+    }
+
+    // 2. Récupération du nom de l'agence connectée
+    async function fetchAgenceName() {
+      try {
+        const { data: userData } = await getUser()
+        const user = userData?.user
+        if (!user) return
+
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select(`agences ( nom_agence )`)
+          .eq('id', user.id)
+          .single()
+
+        if (profile?.agences) {
+          const agencyName = (profile.agences as any)?.nom_agence
+          if (agencyName) setNomAgence(agencyName)
+        }
+      } catch (err) {
+        console.error("Erreur lors de la récupération de l'agence:", err)
+        setNomAgence('Mon Agence')
+      }
+    }
+
+    fetchAgenceName()
+  }, [])
+
   return (
-    <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center p-4 py-8 sm:p-6">
+    <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center p-4 py-8 sm:p-6 w-full relative">
       
+      {/* 🧬 INJECTION CSS LOCALISÉE 
+          Annule de force l'espace (padding-left) de la sidebar appliqué par le layout parent, 
+          uniquement sur cette page de sélection. */}
+      <style dangerouslySetInnerHTML={{
+        __html: `
+          @media (min-width: 768px) {
+            main, body, .min-h-screen {
+              padding-left: 0px !important;
+              margin-left: 0px !important;
+            }
+          }
+          @media (min-width: 1024px) {
+            main, body, .min-h-screen {
+              padding-left: 0px !important;
+              margin-left: 0px !important;
+            }
+          }
+        `
+      }} />
+
       {/* Header de bienvenue */}
       <div className="text-center mb-8 sm:mb-12 px-2">
         <h1 className="text-2xl sm:text-4xl font-black text-gray-900 mb-2 tracking-tight uppercase">
-          Al Bouraq Gestion
+          {salutation}, {nomAgence}
         </h1>
         <p className="text-sm sm:text-base text-gray-500 font-medium max-w-sm sm:max-w-none mx-auto">
           Sélectionnez le module de travail pour continuer
@@ -39,7 +99,7 @@ export default function PageSelectionModule() {
               </svg>
             </div>
           </div>
-          {/* Décoration en arrière-plan - Masquée sur mobile pour épurer la lecture */}
+          {/* Décoration en arrière-plan */}
           <div className="absolute -right-10 -bottom-10 opacity-5 group-hover:opacity-10 transition-opacity hidden sm:block">
             <Moon size={200} className="text-blue-900" />
           </div>
@@ -64,7 +124,7 @@ export default function PageSelectionModule() {
               </svg>
             </div>
           </div>
-          {/* Décoration en arrière-plan - Masquée sur mobile */}
+          {/* Décoration en arrière-plan */}
           <div className="absolute -right-10 -bottom-10 opacity-5 group-hover:opacity-10 transition-opacity hidden sm:block">
             <Plane size={200} className="text-emerald-900" />
           </div>
