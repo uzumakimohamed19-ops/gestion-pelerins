@@ -1159,7 +1159,7 @@ export default function NouvelleOperation() {
   )
 
   return (
-    <div className="min-h-screen bg-gray-50 pb-28 lg:pb-8">
+    <div className="min-h-screen bg-gray-50 pb-8">
 
       {/* ─── TOP BAR ─── */}
       <div className="sticky top-0 z-30 bg-white/95 backdrop-blur-md border-b border-gray-100 px-4 lg:px-8 py-3.5 lg:py-4">
@@ -1222,30 +1222,11 @@ export default function NouvelleOperation() {
             )}
             {BlockFinances}
             {BlockReglement}
+            {BlockSubmit}
           </div>
 
         </div>
       </form>
-
-      {/* ─── BARRE FLOTTANTE MOBILE UNIQUEMENT ─── */}
-      <div className="fixed bottom-0 left-0 right-0 lg:hidden bg-white/95 backdrop-blur-md border-t border-gray-100 shadow-[0_-4px_24px_rgba(0,0,0,0.07)] z-40 px-4 py-3 safe-area-pb">
-        <div className="flex gap-3 items-center">
-          <div className={`flex-shrink-0 rounded-2xl px-4 py-2.5 flex flex-col justify-center min-w-[110px] ${beneficePrevu >= 0 ? 'bg-emerald-50' : 'bg-red-50'}`}>
-            <span className="text-[8px] font-black uppercase tracking-widest text-gray-400 block">Marge nette</span>
-            <span className={`text-base font-black leading-tight ${beneficePrevu >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>
-              {beneficePrevu.toLocaleString('fr-FR')} F
-            </span>
-          </div>
-          <button
-            type="button"
-            disabled={loading}
-            onClick={handleSubmit}
-            className="flex-1 bg-gray-900 active:bg-black text-white py-3.5 rounded-2xl font-black text-sm uppercase tracking-widest flex items-center justify-center gap-2 transition-all disabled:opacity-50"
-          >
-            {loading ? <><span className="animate-spin inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full"></span> Enregistrement...</> : <><Save size={16} /> Valider l&apos;opération</>}
-          </button>
-        </div>
-      </div>
 
       {/* ─── MODAL REÇU ───
           FIX 2 : on passe l'objet "agence" complet (récupéré de Supabase)

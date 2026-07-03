@@ -52,6 +52,7 @@ type AlertItem = {
 type ModalState = {
   items: Pelerin[]
   title: string
+  card?: TileCard
 } | null
 
 // ─── Modal de confirmation export PDF ─────────────────────────────────────────
@@ -355,7 +356,7 @@ function Tile({ card, loading, onClick }: { card: TileCard; loading: boolean; on
     <button
       onClick={onClick}
       disabled={loading}
-      className={`group text-left bg-white border ${card.borderColor} rounded-2xl p-5 hover:shadow-md hover:-translate-y-0.5 active:scale-[0.99] transition-all duration-300 flex flex-col justify-between w-full relative overflow-hidden shadow-sm`}
+      className={`group text-left bg-white border ${card.borderColor} rounded-2xl p-4 hover:shadow-md hover:-translate-y-0.5 active:scale-[0.99] transition-all duration-300 flex flex-col justify-between w-full min-h-[118px] relative overflow-hidden shadow-sm`}
     >
       <div className="flex items-center justify-between w-full mb-4">
         <div className={`p-2.5 rounded-xl ${card.light} border border-white shadow-sm transition-transform group-hover:scale-105`}>
@@ -556,7 +557,7 @@ export default function Dashboard() {
     return list
   }, [stats, allData])
 
-  function openModal(label: string) {
+  function openModal(label: string, card?: TileCard) {
     const map: Record<string, { items: Pelerin[]; title: string }> = {
       'Total inscrits':     { items: allData, title: 'Tous les pèlerins' },
       'Dossiers complets':  { items: allData.filter(p => p.document_url), title: 'Dossiers complets' },
@@ -570,7 +571,8 @@ export default function Dashboard() {
       'En Attente':         { items: allData.filter(p => (p.total_paye ?? 0) === 0), title: 'En attente de paiement' },
       'Éligibles Nusuk':    { items: allData.filter(p => p.sur_plateforme_gouv && p.document_url), title: 'Pèlerins éligibles à l\'inscription Nusuk' },
     }
-    setModal(map[label] || { items: allData, title: label })
+    const state = map[label] || { items: allData, title: label }
+    setModal({ ...state, card })
     setSearchQuery(''); setAgenceFilter('all'); setActiveTab('all'); setNusukPaymentFilter('all')
   }
 
@@ -971,13 +973,11 @@ export default function Dashboard() {
 
         <div className="flex flex-col lg:flex-row gap-8 items-start w-full">
           <div className="flex-1 min-w-0 w-full flex flex-col gap-6">
-            <div className="grid grid-cols-2 xl:grid-cols-4 gap-4">
+            <div className="grid grid-cols-2 xl:grid-cols-3 gap-4">
               {mainCards.map((card, i) => (
-                <Tile key={i} card={card} loading={loading} onClick={() => !loading && openModal(card.label)} />
+                <Tile key={i} card={card} loading={loading} onClick={() => !loading && openModal(card.label, card)} />
               ))}
             </div>
-
-            {/* ─── NOUVEAU BLOC : PÈLERINS ÉLIGIBLES À L'INSCRIPTION NUSUK ─── */}
             {!loading && stats.eligiblesNusuk > 0 && (
               <div className="bg-white border border-indigo-100 rounded-2xl overflow-hidden shadow-sm">
                 <div className="px-5 py-4 border-b border-indigo-100 flex justify-between items-center bg-gradient-to-r from-indigo-50/50 to-purple-50/50">
@@ -1177,8 +1177,24 @@ export default function Dashboard() {
             <div className="w-12 h-1 bg-slate-200 rounded-full mx-auto my-3 sm:hidden shrink-0" />
             <div className="flex items-center justify-between px-5 pb-4 pt-1 sm:py-4 border-b border-slate-100 shrink-0">
               <div>
-                <h2 className="text-base sm:text-lg font-black text-slate-900">{modal.title}</h2>
-                <p className="text-xs text-slate-400 mt-0.5">{filteredItems.length} pèlerin(s)</p>
+                {modal.card ? (
+                  <>
+                    <div className="flex flex-wrap items-center gap-2 mb-1">
+                      <span className="text-xs font-black uppercase tracking-widest text-slate-500">{modal.card.tag || 'Carte'}</span>
+                      {modal.card.progress != null && (
+                        <span className="text-xs font-semibold px-2 py-1 rounded-full bg-slate-100 text-slate-600">{modal.card.progress}%</span>
+                      )}
+                    </div>
+                    <h2 className="text-base sm:text-lg font-black text-slate-900">{modal.card.label}</h2>
+                    <p className="text-sm text-slate-600 mt-1 font-black tracking-tight">{modal.card.value}</p>
+                    {modal.card.subtext && <p className="text-xs text-slate-400 mt-1">{modal.card.subtext}</p>}
+                  </>
+                ) : (
+                  <>
+                    <h2 className="text-base sm:text-lg font-black text-slate-900">{modal.title}</h2>
+                    <p className="text-xs text-slate-400 mt-0.5">{filteredItems.length} pèlerin(s)</p>
+                  </>
+                )}
               </div>
               <button onClick={() => setModal(null)} className="p-2 rounded-xl bg-slate-50 text-slate-400 border border-slate-100"><X size={16} /></button>
             </div>
