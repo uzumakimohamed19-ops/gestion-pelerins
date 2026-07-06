@@ -1,6 +1,8 @@
 'use client'
 import { useEffect, useState } from 'react'
 import { supabase } from '../../../lib/supabase'
+import { useYear } from '@/lib/YearContext'
+import { YearSelector } from '@/components/YearSelector'
 import Link from 'next/link'
 import { 
   ArrowLeft, 
@@ -38,6 +40,7 @@ interface Operation {
 }
 
 export default function JournalOperations() {
+  const { selectedYear } = useYear()
   const [operations, setOperations] = useState<Operation[]>([])
   const [loading, setLoading] = useState(true)
   const [searchTerm, setSearchTerm] = useState('')
@@ -57,12 +60,16 @@ export default function JournalOperations() {
     loading === true && setLoading(false)
   }
 
-  const operationsFiltrees = operations.filter(op =>
-    op.client_nom.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    op.type_activite.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    (op.description || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
-    (op.client_telephone || '').includes(searchTerm)
-  )
+  const operationsFiltrees = operations.filter(op => {
+    const matchYear = selectedYear === 'all' ? true : new Date(op.created_at).getFullYear() === selectedYear
+    const matchSearch =
+      op.client_nom.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      op.type_activite.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (op.description || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (op.client_telephone || '').includes(searchTerm)
+
+    return matchYear && matchSearch
+  })
 
   const totalBenefice = operationsFiltrees.reduce((acc, curr) => acc + curr.benefice, 0)
 
@@ -265,6 +272,10 @@ export default function JournalOperations() {
               <p className="text-xl md:text-2xl font-black text-emerald-600">{totalBenefice.toLocaleString()} CFA</p>
             </div>
           </div>
+        </div>
+
+        <div className="mb-6 flex justify-end">
+          <YearSelector />
         </div>
 
         {/* RECHERCHE ET ACTIONS */}

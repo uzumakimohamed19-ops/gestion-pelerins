@@ -1,6 +1,8 @@
 'use client'
 import { useEffect, useState, useCallback } from 'react'
 import { supabase } from '../../../lib/supabase'
+import { useYear } from '@/lib/YearContext'
+import { YearSelector } from '@/components/YearSelector'
 import {
   ArrowLeft, TrendingUp, Wallet, PieChart,
   AlertCircle, CreditCard, RefreshCw, BarChart2,
@@ -327,10 +329,10 @@ type Periode = 'mois' | 'an' | 'annee' | 'tout'
 
 export default function ComptabiliteAgence() {
   const agenceId = useAgenceId()
+  const { selectedYear } = useYear()
   const [loading, setLoading]     = useState(true)
   const [loadDep, setLoadDep]     = useState(true)
   const [periode, setPeriode]     = useState<Periode>('mois')
-  const [annee, setAnnee]         = useState(ANNEE)
   const [modeFiltre, setModeFiltre] = useState('TOUS')
   const [showForm, setShowForm]   = useState(false)
   const [catFiltre, setCatFiltre] = useState('TOUTES')
@@ -345,15 +347,17 @@ export default function ComptabiliteAgence() {
   const [totalDep, setTotalDep]           = useState(0)
   const [corbeille, setCorbeille]         = useState<DepenseSupprimee[]>([])
 
+  const effectiveYear = typeof selectedYear === 'number' ? selectedYear : new Date().getFullYear()
+
   const getRange = useCallback(() => {
-    if (periode==='mois')  { const d=new Date();d.setDate(1);d.setHours(0,0,0,0);return{debut:d.toISOString(),fin:null} }
-    if (periode==='an')    { const d=new Date();d.setMonth(0,1);d.setHours(0,0,0,0);return{debut:d.toISOString(),fin:null} }
-    if (periode==='annee') return{debut:new Date(annee,0,1).toISOString(),fin:new Date(annee,11,31,23,59,59).toISOString()}
-    return{debut:null,fin:null}
-  },[periode,annee])
+    if (periode==='mois')  { const d=new Date(effectiveYear, new Date().getMonth(), 1); d.setHours(0,0,0,0); return {debut:d.toISOString(), fin:null} }
+    if (periode==='an')    { const d=new Date(effectiveYear, 0, 1); d.setHours(0,0,0,0); return {debut:d.toISOString(), fin:null} }
+    if (periode==='annee') return {debut:new Date(effectiveYear,0,1).toISOString(), fin:new Date(effectiveYear,11,31,23,59,59).toISOString()}
+    return {debut:null, fin:null}
+  }, [periode, effectiveYear])
 
   const loadLocalCache = useCallback(async () => {
-    const cacheKey = `compta_${periode}_${annee}_${modeFiltre}_${catFiltre}`
+    const cacheKey = `compta_${periode}_${effectiveYear}_${modeFiltre}_${catFiltre}`
     const localData = await getCacheLocal(cacheKey)
     if (localData) {
       if (localData.stats) setStats(localData.stats)
@@ -365,7 +369,7 @@ export default function ComptabiliteAgence() {
       setLoading(false)
       setLoadDep(false)
     }
-  }, [periode, annee, modeFiltre, catFiltre])
+  }, [periode, effectiveYear, modeFiltre, catFiltre])
 
   const fetchStats = useCallback(async () => {
     if(!agenceId) return
@@ -388,13 +392,13 @@ export default function ComptabiliteAgence() {
       })
       setStats(s)
       
-      const cacheKey = `compta_${periode}_${annee}_${modeFiltre}_${catFiltre}`
+      const cacheKey = `compta_${periode}_${effectiveYear}_${modeFiltre}_${catFiltre}`
       getCacheLocal(cacheKey).then(old => {
         setCacheLocal(cacheKey, { ...(old || {}), stats: s })
       })
     }
     setLoading(false)
-  }, [agenceId, getRange, modeFiltre, periode, annee, catFiltre])
+  }, [agenceId, getRange, modeFiltre, periode, effectiveYear, catFiltre])
 
   const fetchDep = useCallback(async () => {
     if(!agenceId) return
@@ -410,11 +414,11 @@ export default function ComptabiliteAgence() {
     setTotalDep(l.reduce((a,d) => a+d.montant, 0))
     setLoadDep(false)
 
-    const cacheKey = `compta_${periode}_${annee}_${modeFiltre}_${catFiltre}`
+    const cacheKey = `compta_${periode}_${effectiveYear}_${modeFiltre}_${catFiltre}`
     getCacheLocal(cacheKey).then(old => {
       setCacheLocal(cacheKey, { ...(old || {}), depenses: l })
     })
-  }, [agenceId, getRange, catFiltre, periode, annee, modeFiltre])
+  }, [agenceId, getRange, catFiltre, periode, effectiveYear, modeFiltre])
 
   const fetchCorbeille = useCallback(async () => {
     if(!agenceId) return
@@ -422,11 +426,11 @@ export default function ComptabiliteAgence() {
     const list = (data??[]) as DepenseSupprimee[]
     setCorbeille(list)
 
-    const cacheKey = `compta_${periode}_${annee}_${modeFiltre}_${catFiltre}`
+    const cacheKey = `compta_${periode}_${effectiveYear}_${modeFiltre}_${catFiltre}`
     getCacheLocal(cacheKey).then(old => {
       setCacheLocal(cacheKey, { ...(old || {}), corbeille: list })
     })
-  }, [agenceId, periode, annee, modeFiltre, catFiltre])
+  }, [agenceId, periode, effectiveYear, modeFiltre, catFiltre])
 
   const refreshAllData = useCallback(() => {
     fetchStats()
@@ -440,7 +444,7 @@ export default function ComptabiliteAgence() {
         refreshAllData()
       })
     }
-  }, [agenceId, periode, annee, modeFiltre, catFiltre, loadLocalCache, refreshAllData])
+  }, [agenceId, periode, effectiveYear, modeFiltre, catFiltre, loadLocalCache, refreshAllData])
 
   const delDep = async (dep: Depense) => {
     if(!confirm(`Supprimer "${dep.libelle}" ?\nElle sera conservée dans la corbeille.`)) return
@@ -460,7 +464,7 @@ export default function ComptabiliteAgence() {
     </div>
   )
 
-  const periodeLabel = periode==='mois'?'Ce mois':periode==='an'?'Cette année':periode==='annee'?String(annee):'Toute la période'
+  const periodeLabel = periode==='mois' ? `Ce mois ${effectiveYear}` : periode==='an' ? `Cette année ${effectiveYear}` : periode==='annee' ? `Année ${effectiveYear}` : 'Toute la période'
 
   return (
     <div className="min-h-screen bg-white text-slate-900 pb-24">
@@ -490,11 +494,6 @@ export default function ComptabiliteAgence() {
                 {p==='mois'?'Ce mois':p==='an'?'Cette année':p==='annee'?'Par année':'Tout'}
               </Pill>
             ))}
-            {periode==='annee'&&(
-              <select value={annee} onChange={e=>setAnnee(+e.target.value)}
-                className="flex-shrink-0 bg-slate-900 text-white px-3 py-1.5 rounded-full font-black text-[11px] outline-none border-0"
-              >{ANNEES.map(a=><option key={a} value={a}>{a}</option>)}</select>
-            )}
             <div className="w-px h-4 bg-slate-200 flex-shrink-0 mx-1" />
             <select value={modeFiltre} onChange={e=>setModeFiltre(e.target.value)}
               className="flex-shrink-0 border border-slate-200 text-slate-600 px-3 py-1.5 rounded-full font-bold text-[11px] outline-none bg-white"
@@ -511,6 +510,9 @@ export default function ComptabiliteAgence() {
 
       {/* ════ CONTENU ═══════════════════════════════════════════════════════ */}
       <main className="max-w-5xl mx-auto px-4 md:px-6 py-6 space-y-8">
+        <div className="flex justify-end">
+          <YearSelector />
+        </div>
         {loading && depenses.length === 0 ? (
           <div className="py-28 text-center">
             <div className="w-10 h-10 border-2 border-slate-200 border-t-slate-800 rounded-full animate-spin mx-auto mb-4" />

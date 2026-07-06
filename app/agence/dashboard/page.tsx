@@ -9,6 +9,8 @@ import {
 } from 'lucide-react'
 import Link from 'next/link'
 import { get, set } from 'idb-keyval'
+import { useYear } from '@/lib/YearContext'
+import { YearSelector } from '@/components/YearSelector'
 
 interface Operation {
   id: string
@@ -120,18 +122,9 @@ function AlertPill({ alert, onClick }: { alert: AlertItem; onClick: () => void }
 }
 
 export default function DashboardAgence() {
+  const { selectedYear } = useYear()
   const [loading, setLoading] = useState(true)
   const [allData, setAllData] = useState<Operation[]>()
-  const [stats, setStats] = useState({
-    caTotal: 0,
-    beneficeTotal: 0,
-    nombreVentes: 0,
-    panierMoyen: 0,
-    margeMoyenne: 0,
-    tauxRentabilite: 0,
-    hauteMarge: 0,
-    pctHauteMarge: 0
-  })
   
   const [modal, setModal] = useState<ModalState>(null)
   const [searchQuery, setSearchQuery] = useState('')
@@ -166,10 +159,18 @@ export default function DashboardAgence() {
     })
   }, [])
 
+  const filterByYear = (data: Operation[]) => {
+    if (selectedYear === 'all') return data
+    return data.filter((op) => {
+      const year = op.created_at ? new Date(op.created_at).getFullYear() : null
+      return year === selectedYear
+    })
+  }
+
   useEffect(() => {
     async function chargerDonnees() {
       await cacheFirstFetch<Operation[]>({
-        cacheKey: 'agence_dashboard_operations',
+        cacheKey: selectedYear === 'all' ? 'agence_dashboard_operations_all' : `agence_dashboard_operations_${selectedYear}`,
         setLoading,
         fetchRemote: async () => {
           const { data, error } = await supabase
@@ -180,60 +181,49 @@ export default function DashboardAgence() {
           return data as Operation[]
         },
         onCache: (data) => {
-          const count = data.length
-          const totalCA = data.reduce((acc, curr) => acc + (curr.prix_vente || 0), 0)
-          const totalBenef = data.reduce((acc, curr) => acc + (curr.benefice || 0), 0)
-          const panierMoyen = count > 0 ? Math.round(totalCA / count) : 0
-          const margeMoyenne = count > 0 ? Math.round(totalBenef / count) : 0
-          const tauxRentabilite = totalCA > 0 ? Math.round((totalBenef / totalCA) * 100) : 0
-          const hauteMarge = data.filter(o => o.prix_vente > 0 && (o.benefice / o.prix_vente) >= 0.2).length
-          const pctHauteMarge = count > 0 ? Math.round((hauteMarge / count) * 100) : 0
-
-          setStats({
-            caTotal: totalCA,
-            beneficeTotal: totalBenef,
-            nombreVentes: count,
-            panierMoyen,
-            margeMoyenne,
-            tauxRentabilite,
-            hauteMarge,
-            pctHauteMarge
-          })
           setAllData(data)
         },
         onRemote: (data) => {
-          const count = data.length
-          const totalCA = data.reduce((acc, curr) => acc + (curr.prix_vente || 0), 0)
-          const totalBenef = data.reduce((acc, curr) => acc + (curr.benefice || 0), 0)
-          const panierMoyen = count > 0 ? Math.round(totalCA / count) : 0
-          const margeMoyenne = count > 0 ? Math.round(totalBenef / count) : 0
-          const tauxRentabilite = totalCA > 0 ? Math.round((totalBenef / totalCA) * 100) : 0
-          const hauteMarge = data.filter(o => o.prix_vente > 0 && (o.benefice / o.prix_vente) >= 0.2).length
-          const pctHauteMarge = count > 0 ? Math.round((hauteMarge / count) * 100) : 0
-
-          setStats({
-            caTotal: totalCA,
-            beneficeTotal: totalBenef,
-            nombreVentes: count,
-            panierMoyen,
-            margeMoyenne,
-            tauxRentabilite,
-            hauteMarge,
-            pctHauteMarge
-          })
           setAllData(data)
         }
       })
     }
     chargerDonnees()
-  }, [])
+  }, [selectedYear])
+
+  const visibleData = useMemo(() => {
+    if (!allData) return []
+    return filterByYear(allData)
+  }, [allData, selectedYear])
+
+  const stats = useMemo(() => {
+    const count = visibleData.length
+    const totalCA = visibleData.reduce((acc, curr) => acc + (curr.prix_vente || 0), 0)
+    const totalBenef = visibleData.reduce((acc, curr) => acc + (curr.benefice || 0), 0)
+    const panierMoyen = count > 0 ? Math.round(totalCA / count) : 0
+    const margeMoyenne = count > 0 ? Math.round(totalBenef / count) : 0
+    const tauxRentabilite = totalCA > 0 ? Math.round((totalBenef / totalCA) * 100) : 0
+    const hauteMarge = visibleData.filter(o => o.prix_vente > 0 && (o.benefice / o.prix_vente) >= 0.2).length
+    const pctHauteMarge = count > 0 ? Math.round((hauteMarge / count) * 100) : 0
+
+    return {
+      caTotal: totalCA,
+      beneficeTotal: totalBenef,
+      nombreVentes: count,
+      panierMoyen,
+      margeMoyenne,
+      tauxRentabilite,
+      hauteMarge,
+      pctHauteMarge
+    }
+  }, [visibleData])
 
   const alerts = useMemo(() => {
-    if (!allData || !allData.length) return []
+    if (!visibleData.length) return []
     const list: AlertItem[] = []
     
-    const sansMarge = allData.filter(o => (o.benefice || 0) <= 0).length
-    const sansType = allData.filter(o => !o.type_activite).length
+    const sansMarge = visibleData.filter(o => (o.benefice || 0) <= 0).length
+    const sansType = visibleData.filter(o => !o.type_activite).length
 
     if (sansMarge > 0)
       list.push({ type: 'red', msg: `${sansMarge} opération(s) à marge nulle ou négative`, filter: 'Marge Nulle' })
@@ -241,19 +231,19 @@ export default function DashboardAgence() {
       list.push({ type: 'amber', msg: `${sansType} vente(s) sans type d'activité spécifié`, filter: 'Incomplet' })
     
     return list
-  }, [allData])
+  }, [visibleData])
 
   function openModal(label: string) {
-    if (!allData) return
+    if (!visibleData.length) return
     const map: Record<string, { items: Operation[]; title: string }> = {
-      "Chiffre d'Affaires":   { items: allData, title: "Toutes les ventes (CA)" },
-      "Bénéfice Net Total":   { items: allData, title: "Suivi des profits nets" },
-      "Total Opérations":     { items: allData, title: "Historique global" },
-      "Ventes Haute Marge":   { items: allData.filter(o => o.prix_vente > 0 && (o.benefice / o.prix_vente) >= 0.2), title: "Performances Haute Marge" },
-      "Marge Nulle":          { items: allData.filter(o => (o.benefice || 0) <= 0), title: "Alertes Marges Nulles" },
-      "Incomplet":            { items: allData.filter(o => !o.type_activite), title: "Activités non spécifiées" }
+      "Chiffre d'Affaires":   { items: visibleData, title: "Toutes les ventes (CA)" },
+      "Bénéfice Net Total":   { items: visibleData, title: "Suivi des profits nets" },
+      "Total Opérations":     { items: visibleData, title: "Historique global" },
+      "Ventes Haute Marge":   { items: visibleData.filter(o => o.prix_vente > 0 && (o.benefice / o.prix_vente) >= 0.2), title: "Performances Haute Marge" },
+      "Marge Nulle":          { items: visibleData.filter(o => (o.benefice || 0) <= 0), title: "Alertes Marges Nulles" },
+      "Incomplet":            { items: visibleData.filter(o => !o.type_activite), title: "Activités non spécifiées" }
     }
-    setModal(map[label] || { items: allData, title: label })
+    setModal(map[label] || { items: visibleData, title: label })
     setSearchQuery(''); setActiveTab('all')
   }
 
@@ -292,7 +282,7 @@ export default function DashboardAgence() {
     }
   }
 
-  const dernieresVentes = allData ? allData.slice(0, 5) : []
+  const dernieresVentes = visibleData.slice(0, 5)
 
   const mainCards: TileCard[] = [
     {
@@ -345,7 +335,7 @@ export default function DashboardAgence() {
       <div className="block md:hidden pb-10">
       
         {/* En-tête Immersif Bleu - pt-4 pour épouser le haut parfaitement */}
-        <div className="bg-gradient-to-b from-slate-800 to-slate-900 text-white px-5 pt-4 pb-14 rounded-b-[2.5rem] shadow-lg shadow-slate-900/10 relative overflow-hidden">
+        <div className="bg-gradient-to-b from-slate-800 to-slate-900 text-white px-5 pt-3 pb-8 rounded-b-[2.4rem] shadow-lg shadow-slate-900/10 relative overflow-hidden md:hidden">
           
           <div className="absolute right-[-20px] bottom-[-20px] text-white/5 pointer-events-none transform -rotate-12 select-none">
             <Building2 size={220} />
@@ -396,8 +386,11 @@ export default function DashboardAgence() {
           </div>
         </div>
 
-        {/* Grille de Stats Mobile */}
-        <div className="px-5 -mt-8 relative z-20 grid grid-cols-2 gap-3">
+        <div className="px-5 -mt-8 relative z-20 pb-2">
+          <div className="mb-4 flex justify-end">
+            <YearSelector />
+          </div>
+          <div className="grid grid-cols-2 gap-3 rounded-[1.5rem] bg-slate-50/80 p-2 shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
           {mainCards.slice(2).map((card, i) => (
             <button
               key={i}
@@ -415,6 +408,7 @@ export default function DashboardAgence() {
               </p>
             </button>
           ))}
+          </div>
         </div>
 
         {/* Liste Activité Mobile */}
@@ -505,6 +499,9 @@ export default function DashboardAgence() {
 
         <div className="flex flex-col lg:flex-row gap-8 items-start w-full">
           <div className="flex-1 min-w-0 w-full flex flex-col gap-6">
+            <div className="flex justify-end">
+              <YearSelector />
+            </div>
             <div className="grid grid-cols-2 xl:grid-cols-3 gap-6">
               {mainCards.map((card, i) => (
                 <Tile key={i} card={card} loading={loading} onClick={() => openModal(card.label)} />
@@ -583,7 +580,7 @@ export default function DashboardAgence() {
               ))}
               
               <button
-                onClick={() => allData && exportToExcel(allData, 'Global_Agence_Operations')}
+                onClick={() => visibleData.length > 0 && exportToExcel(visibleData, 'Global_Agence_Operations')}
                 className="mt-6 w-full flex items-center justify-center gap-2 py-3 border border-slate-200 text-slate-700 bg-slate-50 rounded-xl text-xs font-bold hover:bg-slate-100 transition-colors"
               >
                 <FileSpreadsheet size={14} className="text-emerald-600" /> Export Excel Global

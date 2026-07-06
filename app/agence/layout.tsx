@@ -1,7 +1,9 @@
 'use client'
 
 import SidebarAgence from '@/components/SidebarAgence'
+import { YearSelector } from '@/components/YearSelector'
 import { usePathname } from 'next/navigation'
+import { YearProvider } from '@/lib/YearContext'
 
 export default function AgenceLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
@@ -10,7 +12,8 @@ export default function AgenceLayout({ children }: { children: React.ReactNode }
   const isDashboard = pathname === '/agence' || pathname === '/agence/dashboard'
 
   return (
-    <div className="w-full min-h-screen bg-[#FBFBFB] flex flex-col">
+    <YearProvider scope="agence">
+      <div className="w-full min-h-screen bg-[#FBFBFB] flex flex-col">
       
       {/* INJECTION CSS NATIVE ET INCASSABLE : 
           Ceci neutralise les limites de largeur de toutes tes pages (max-w-5xl, 7xl...) 
@@ -48,6 +51,7 @@ export default function AgenceLayout({ children }: { children: React.ReactNode }
       >
         {children}
       </main>
-    </div>
+      </div>
+    </YearProvider>
   )
 }

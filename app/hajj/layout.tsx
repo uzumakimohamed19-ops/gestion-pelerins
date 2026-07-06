@@ -3,6 +3,7 @@
 import '../globals.css'
 import Navbar from '../../components/Navbar'
 import { usePathname } from 'next/navigation'
+import { YearProvider } from '@/lib/YearContext'
 
 export default function HajjLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
@@ -11,7 +12,8 @@ export default function HajjLayout({ children }: { children: React.ReactNode }) 
   const isDashboard = pathname === '/hajj' || pathname === '/hajj/dashboard'
 
   return (
-    <div className="min-h-screen antialiased flex flex-col w-full bg-slate-50">
+    <YearProvider scope="hajj">
+      <div className="min-h-screen antialiased flex flex-col w-full bg-slate-50">
       
       {/* 🛡️ INJECTION CSS DE NETTOYAGE ABSOLU (Uniquement sur PC >= 1024px) */}
       <style dangerouslySetInnerHTML={{
@@ -67,6 +69,7 @@ export default function HajjLayout({ children }: { children: React.ReactNode }) 
         {children}
       </main>
       
-    </div>
+      </div>
+    </YearProvider>
   )
 }

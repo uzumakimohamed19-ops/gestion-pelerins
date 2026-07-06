@@ -5,7 +5,7 @@ import { Calendar, ChevronDown, Check } from 'lucide-react'
 import { useState, useRef, useEffect } from 'react'
 
 export function YearSelector() {
-  const { selectedYear, setSelectedYear, availableYears } = useYear()
+  const { selectedYear, setSelectedYear, availableYears, scope } = useYear()
   const [isOpen, setIsOpen] = useState(false)
   const dropdownRef = useRef<HTMLDivElement>(null)
 
@@ -20,8 +20,9 @@ export function YearSelector() {
     return () => document.removeEventListener('mousedown', handleClickOutside)
   }, [])
 
-  // Libellé de l'année sélectionnée
-  const currentLabel = selectedYear === 'all' ? 'Toutes les années' : `Campagne ${selectedYear}`
+  const labelText = scope === 'agence' ? 'Exercice' : 'Année'
+  const optionPrefix = scope === 'agence' ? 'Exercice' : 'Campagne'
+  const currentLabel = selectedYear === 'all' ? 'Toutes les années' : `${optionPrefix} ${selectedYear}`
 
   return (
     <div className="relative inline-block text-left select-none" ref={dropdownRef}>
@@ -37,7 +38,7 @@ export function YearSelector() {
             <Calendar size={15} />
           </div>
           <div className="text-left">
-            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider leading-none">Année</p>
+            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider leading-none">{labelText}</p>
             <p className="text-sm font-black text-slate-800 tracking-tight mt-0.5 truncate">{currentLabel}</p>
           </div>
         </div>
@@ -86,7 +87,7 @@ export function YearSelector() {
                       : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
                   }`}
                 >
-                  <span className="tabular-nums">Campagne {y}</span>
+                  <span className="tabular-nums">{optionPrefix} {y}</span>
                   {isSelected && <Check size={14} className="stroke-[3]" />}
                 </button>
               )

@@ -3,25 +3,32 @@
 import React, { createContext, useContext, useState, useEffect } from 'react'
 import { get, set } from 'idb-keyval'
 
+type YearScope = 'hajj' | 'agence'
+
 type YearContextType = {
   selectedYear: number | 'all'
   setSelectedYear: (year: number | 'all') => void
   availableYears: number[]
+  scope: YearScope
 }
 
 const YearContext = createContext<YearContextType | undefined>(undefined)
 
-export function YearProvider({ children }: { children: React.ReactNode }) {
+function getStorageKey(scope: YearScope) {
+  return `selectedYear_${scope}`
+}
+
+export function YearProvider({ children, scope = 'hajj' }: { children: React.ReactNode; scope?: YearScope }) {
   const currentYear = new Date().getFullYear()
   const [selectedYear, setSelectedYearState] = useState<number | 'all'>(currentYear)
   const [availableYears, setAvailableYears] = useState<number[]>([])
-  // Récupérer l'année sélectionnée depuis IndexedDB (idb-keyval), initialiser
+
   useEffect(() => {
     if (typeof window === 'undefined') return
     let mounted = true
     ;(async () => {
       try {
-        const saved: any = await get('selectedYear')
+        const saved: any = await get(getStorageKey(scope))
         if (!mounted) return
         if (saved != null) {
           setSelectedYearState(saved === 'all' ? 'all' : parseInt(String(saved)))
@@ -33,29 +40,26 @@ export function YearProvider({ children }: { children: React.ReactNode }) {
       }
     })()
     return () => { mounted = false }
-  }, [currentYear])
+  }, [currentYear, scope])
 
-  // Recalculer la liste d'années visible en fonction de l'année sélectionnée
   useEffect(() => {
     const base = selectedYear === 'all' ? currentYear : selectedYear
     const start = Math.max(1900, (base as number) - 2)
-    const end = (base as number) + 5 // inclut 5 années à venir
+    const end = (base as number) + 5
     const years: number[] = []
     for (let y = start; y <= end; y++) years.push(y)
-    // Présenter du plus récent au plus ancien pour l'UX
     setAvailableYears(years.reverse())
   }, [selectedYear, currentYear])
 
   const setSelectedYear = (year: number | 'all') => {
     setSelectedYearState(year)
     if (typeof window !== 'undefined') {
-      // Persist asynchronously in IndexedDB to avoid blocking the main thread
-      try { set('selectedYear', String(year)) } catch (e) { /* ignore */ }
+      try { set(getStorageKey(scope), String(year)) } catch (e) { /* ignore */ }
     }
   }
 
   return (
-    <YearContext.Provider value={{ selectedYear, setSelectedYear, availableYears }}>
+    <YearContext.Provider value={{ selectedYear, setSelectedYear, availableYears, scope }}>
       {children}
     </YearContext.Provider>
   )
@@ -73,6 +77,7 @@ export function useYear() {
       selectedYear: fallbackYear,
       setSelectedYear: (_: number | 'all') => {},
       availableYears: years.reverse(),
+      scope: 'hajj' as YearScope,
     }
   }
   return context
