@@ -338,91 +338,42 @@ function generateAndPrintPDF(
   }
 }
 
-// ─── Stat Card PC — Design Vivant & Animé ─────────────────────────────────────
-function Tile({ card, loading, onClick, index }: { card: TileCard; loading: boolean; onClick: () => void; index?: number }) {
-  const delay = `${(index ?? 0) * 60}ms`
-
-  // Map borderColor class to a glow shadow color
-  const glowMap: Record<string, string> = {
-    'border-blue-100':    'hover:shadow-blue-200/60',
-    'border-emerald-100': 'hover:shadow-emerald-200/60',
-    'border-amber-100':   'hover:shadow-amber-200/60',
-    'border-teal-100':    'hover:shadow-teal-200/60',
-    'border-purple-100':  'hover:shadow-purple-200/60',
-    'border-cyan-100':    'hover:shadow-cyan-200/60',
-    'border-rose-100':    'hover:shadow-rose-200/60',
-    'border-indigo-100':  'hover:shadow-indigo-200/60',
-  }
-  const glow = glowMap[card.borderColor] ?? 'hover:shadow-slate-200/60'
-
+// ─── Stat Card PC Compacte et Détaillée ────────────────────────────────────────
+function Tile({ card, loading, onClick }: { card: TileCard; loading: boolean; onClick: () => void }) {
   return (
     <button
       onClick={onClick}
       disabled={loading}
-      style={{ animationDelay: delay, animationFillMode: 'both' }}
-      className={`
-        group relative text-left rounded-2xl p-4
-        bg-white border ${card.borderColor}
-        shadow-sm ${glow} hover:shadow-xl
-        hover:-translate-y-1.5 active:scale-[0.97]
-        transition-all duration-300
-        flex flex-col justify-between w-full min-h-[120px]
-        overflow-hidden
-        animate-[fadeSlideUp_0.4s_ease_both]
-      `}
+      className={`group text-left bg-white border ${card.borderColor} rounded-xl p-3 hover:shadow-md hover:-translate-y-0.5 active:scale-[0.99] transition-all duration-300 flex flex-col justify-between w-full min-h-[100px] relative overflow-hidden shadow-sm`}
     >
-      {/* Gradient background blob — subtle, appears on hover */}
-      <div className={`absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-500 ${card.light} rounded-2xl`} />
-
-      {/* Decorative top-right orb */}
-      <div
-        className={`absolute -right-5 -top-5 w-20 h-20 rounded-full ${card.light} opacity-60 group-hover:opacity-100 group-hover:scale-125 transition-all duration-500`}
-      />
-
-      {/* Top row: icon + tag */}
-      <div className="flex items-start justify-between w-full mb-3 relative z-10">
-        <div
-          className={`p-2.5 rounded-xl ${card.light} border border-white shadow-sm
-            transition-all duration-300 group-hover:scale-110 group-hover:-rotate-3`}
-        >
-          <card.icon size={18} className={card.textColor} />
+      <div className="flex items-start justify-between w-full mb-2">
+        <div className={`p-2 rounded-lg ${card.light} border border-white shadow-sm transition-transform group-hover:scale-105`}>
+          <card.icon size={16} className={card.textColor} />
         </div>
         {card.tag && (
-          <span
-            className={`text-[9px] font-black px-2 py-0.5 rounded-full uppercase tracking-widest border
-              ${card.light} ${card.textColor} ${card.borderColor} opacity-80`}
-          >
+          <span className="text-[8px] font-bold px-1 py-0.5 rounded-md uppercase tracking-wider bg-slate-50 text-slate-400 border border-slate-100">
             {card.tag}
           </span>
         )}
       </div>
-
-      {/* Value + label */}
-      <div className="min-w-0 w-full relative z-10">
+      
+      <div className="min-w-0 w-full">
         {loading ? (
-          <div className="h-7 w-24 bg-slate-100 rounded-lg animate-pulse mb-1.5" />
+          <div className="h-6 w-20 bg-slate-100 rounded-lg animate-pulse mb-1" />
         ) : (
-          <p className="text-2xl font-black text-slate-900 leading-none tabular-nums tracking-tight mb-1 truncate group-hover:tracking-tighter transition-all duration-300">
+          <p className="text-lg md:text-xl font-black text-slate-900 leading-none tabular-nums tracking-tight mb-1 truncate">
             {card.value}
           </p>
         )}
-        <p className="text-[10px] text-slate-500 font-bold tracking-widest uppercase truncate">
-          {card.label}
-        </p>
+        <p className="text-[10px] md:text-xs text-slate-500 font-medium tracking-wide uppercase truncate">{card.label}</p>
       </div>
 
-      {/* Subtext badge */}
       {card.subtext && !loading && (
-        <p
-          className={`text-[9px] font-black mt-2 ${card.textColor} bg-white/70 backdrop-blur-sm
-            px-2 py-0.5 rounded-md inline-block w-max max-w-full truncate relative z-10
-            border border-white/80 shadow-sm`}
-        >
+        <p className={`text-[9px] font-bold mt-1.5 ${card.textColor} bg-slate-50/50 px-1.5 py-0.5 rounded-md border border-slate-100 inline-block w-max max-w-full truncate`}>
           {card.subtext}
         </p>
       )}
-
-      {/* Animated progress bar */}
+      
       {card.progress != null && !loading && (
         <Bar value={card.progress} color={card.progressColor ?? 'bg-slate-400'} />
       )}
@@ -430,87 +381,32 @@ function Tile({ card, loading, onClick, index }: { card: TileCard; loading: bool
   )
 }
 
-// ─── Barre de progression animée ─────────────────────────────────────────────
+// ─── Barre de progression ────────────────────────────────────────────────────
 function Bar({ value, color }: { value: number; color: string }) {
   return (
-    <div className="mt-2.5 h-1.5 bg-slate-100 rounded-full overflow-hidden relative z-10">
-      <div
-        className={`h-full rounded-full ${color} transition-all duration-1000 relative`}
-        style={{ width: `${value}%` }}
-      >
-        {/* Shimmer sweep */}
-        <span
-          className="absolute inset-0 rounded-full"
-          style={{
-            background: 'linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.5) 50%, transparent 100%)',
-            animation: 'shimmerBar 2s infinite',
-          }}
-        />
-      </div>
+    <div className="mt-2 h-1 bg-slate-100 rounded-full overflow-hidden">
+      <div className={`h-full rounded-full ${color} transition-all duration-1000`} style={{ width: `${value}%` }} />
     </div>
   )
 }
 
-// ─── Alertes latérales PC — Redesign vivant ───────────────────────────────────
-const alertConfig = {
-  amber: {
-    dot: 'bg-amber-500',
-    border: 'border-amber-200',
-    bg: 'bg-amber-50',
-    hoverBg: 'hover:bg-amber-100/60',
-    text: 'text-amber-800',
-    icon: 'text-amber-500',
-    glow: 'hover:shadow-amber-100',
-  },
-  red: {
-    dot: 'bg-rose-500',
-    border: 'border-rose-200',
-    bg: 'bg-rose-50',
-    hoverBg: 'hover:bg-rose-100/60',
-    text: 'text-rose-800',
-    icon: 'text-rose-500',
-    glow: 'hover:shadow-rose-100',
-  },
-  blue: {
-    dot: 'bg-blue-500',
-    border: 'border-blue-200',
-    bg: 'bg-blue-50',
-    hoverBg: 'hover:bg-blue-100/60',
-    text: 'text-blue-800',
-    icon: 'text-blue-500',
-    glow: 'hover:shadow-blue-100',
-  },
+// ─── Alertes latérales PC ────────────────────────────────────────────────────
+const alertStyles = {
+  amber: { dot: 'bg-amber-500', bg: 'hover:bg-amber-50/50', border: 'border-amber-100/70' },
+  red:   { dot: 'bg-red-500',   bg: 'hover:bg-red-50/50',   border: 'border-red-100/70' },
+  blue:  { dot: 'bg-blue-500',  bg: 'hover:bg-blue-50/50',  border: 'border-blue-100/70' },
 }
 
-function AlertPill({ alert, onClick, index }: { alert: AlertItem; onClick: () => void; index?: number }) {
-  const s = alertConfig[alert.type] ?? alertConfig.amber
+function AlertPill({ alert, onClick }: { alert: AlertItem; onClick: () => void }) {
+  const s = alertStyles[alert.type] || alertStyles.amber
   return (
     <button
       onClick={onClick}
-      style={{ animationDelay: `${(index ?? 0) * 80}ms`, animationFillMode: 'both' }}
-      className={`
-        w-full text-left flex items-center gap-3 px-3.5 py-3 rounded-xl
-        border ${s.border} ${s.bg} ${s.hoverBg}
-        shadow-sm ${s.glow} hover:shadow-md
-        hover:-translate-y-0.5 active:scale-[0.98]
-        transition-all duration-200 group
-        animate-[fadeSlideUp_0.4s_ease_both]
-      `}
+      className={`w-full text-left flex items-center gap-2.5 px-3 py-2.5 rounded-lg border ${s.border} bg-white ${s.bg} transition-all duration-200 group shadow-sm`}
     >
-      {/* Animated dot */}
-      <span className="relative flex items-center justify-center shrink-0 w-5 h-5">
-        <span className={`absolute w-2.5 h-2.5 rounded-full ${s.dot} opacity-30 animate-ping`} />
-        <span className={`relative w-2 h-2 rounded-full ${s.dot}`} />
-      </span>
-
-      <p className={`text-xs font-semibold ${s.text} leading-snug flex-1 min-w-0 truncate`}>
-        {alert.msg}
-      </p>
-
-      <ChevronRight
-        size={13}
-        className={`${s.icon} group-hover:translate-x-1 shrink-0 transition-transform duration-200`}
-      />
+      <span className={`w-1.5 h-1.5 rounded-full shrink-0 animate-pulse ${s.dot}`} />
+      <p className="text-xs text-slate-600 font-medium leading-snug flex-1 truncate">{alert.msg}</p>
+      <ChevronRight size={12} className="text-slate-300 group-hover:text-slate-500 group-hover:translate-x-0.5 shrink-0 transition-all" />
     </button>
   )
 }
@@ -518,7 +414,7 @@ function AlertPill({ alert, onClick, index }: { alert: AlertItem; onClick: () =>
 // ─── Dashboard Principal ─────────────────────────────────────────────────────
 export default function Dashboard() {
   const { selectedYear, setSelectedYear, availableYears } = useYear()
-
+  
   const [stats, setStats] = useState({
     total: 0, avecDoc: 0, sansDoc: 0,
     totalGouv: 0, totalNusuk: 0,
@@ -540,8 +436,6 @@ export default function Dashboard() {
   const [pdfConfirmOpen, setPdfConfirmOpen] = useState(false)
   const [pdfExportTarget, setPdfExportTarget] = useState<{ items: Pelerin[]; title: string } | null>(null)
   const [nomAgence, setNomAgence] = useState('')
-  const [touchStartY, setTouchStartY] = useState<number | null>(null)
-  const [dragOffset, setDragOffset] = useState(0)
   const dateDuJour = new Date().toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' })
 
   function processStats(data: Pelerin[]) {
@@ -608,25 +502,6 @@ export default function Dashboard() {
     return list
   }, [stats, allData])
 
-  const handleSheetTouchStart = (e: React.TouchEvent<HTMLDivElement>) => {
-    if (window.innerWidth >= 768) return
-    setTouchStartY(e.touches[0].clientY)
-  }
-
-  const handleSheetTouchMove = (e: React.TouchEvent<HTMLDivElement>) => {
-    if (touchStartY === null || window.innerWidth >= 768) return
-    const delta = e.touches[0].clientY - touchStartY
-    if (delta > 0) setDragOffset(delta)
-  }
-
-  const handleSheetTouchEnd = () => {
-    if (dragOffset > 95) {
-      setModal(null)
-    }
-    setTouchStartY(null)
-    setDragOffset(0)
-  }
-
   function openModal(label: string, card?: TileCard) {
     const map: Record<string, { items: Pelerin[]; title: string }> = {
       'Total inscrits':     { items: allData, title: 'Tous les pèlerins' },
@@ -677,13 +552,13 @@ export default function Dashboard() {
         activeTab === 'sans_doc' ? !p.document_url :
         activeTab === 'paye' ? (p.total_paye ?? 0) > 0 :
         activeTab === 'non_paye' ? (p.total_paye ?? 0) === 0 : true
-
-      const matchNusukPayment =
+      
+      const matchNusukPayment = 
         nusukPaymentFilter === 'all' ? true :
         nusukPaymentFilter === 'full' ? (p.total_paye ?? 0) > 0 :
         nusukPaymentFilter === 'partial' ? (p.total_paye ?? 0) > 0 :
         nusukPaymentFilter === 'none' ? (p.total_paye ?? 0) === 0 : true
-
+      
       return matchSearch && matchAgence && matchTab && matchNusukPayment
     })
   }, [modal, searchQuery, agenceFilter, activeTab, nusukPaymentFilter])
@@ -783,34 +658,7 @@ export default function Dashboard() {
   ]
 
   return (
-    <div className="w-full min-h-screen bg-slate-50 select-none">
-
-      {/* Keyframe animations injected globally — won't affect mobile */}
-      <style>{`
-        @keyframes fadeSlideUp {
-          from { opacity: 0; transform: translateY(14px); }
-          to   { opacity: 1; transform: translateY(0); }
-        }
-        @keyframes shimmerBar {
-          0%   { transform: translateX(-100%); }
-          100% { transform: translateX(200%); }
-        }
-        @keyframes gradientShift {
-          0%   { background-position: 0% 50%; }
-          50%  { background-position: 100% 50%; }
-          100% { background-position: 0% 50%; }
-        }
-        @keyframes floatOrb {
-          0%, 100% { transform: translate(0,0) scale(1); }
-          33%       { transform: translate(12px,-8px) scale(1.05); }
-          66%       { transform: translate(-8px,10px) scale(0.97); }
-        }
-        @keyframes pulseRing {
-          0%   { box-shadow: 0 0 0 0 rgba(99,102,241,0.4); }
-          70%  { box-shadow: 0 0 0 10px rgba(99,102,241,0); }
-          100% { box-shadow: 0 0 0 0 rgba(99,102,241,0); }
-        }
-      `}</style>
+    <div className="w-full min-h-screen bg-slate-50/40 select-none">
 
       {/* Modal de confirmation export PDF */}
       <PdfConfirmModal
@@ -820,15 +668,15 @@ export default function Dashboard() {
         title={pdfExportTarget?.title || ''}
         count={pdfExportTarget?.items.length || 0}
       />
-
+      
       {/* 📱 ───────────────────────────────────────────────────────────────────
           AFFICHAGE MOBILE ORIGINAL — VERSION INCHANGÉE
           ────────────────────────────────────────────────────────────────────── */}
       <div className="block md:hidden pb-10">
-
+      
         {/* En-tête Immersif Bleu et Dynamique */}
         <div className="bg-gradient-to-b from-blue-600 to-blue-700 text-white px-5 pt-7 pb-14 rounded-b-[2.5rem] shadow-lg shadow-blue-600/10 relative overflow-hidden">
-
+          
           <div className="absolute right-[-20px] bottom-[-20px] text-white/5 pointer-events-none transform -rotate-12 select-none">
             <Building2 size={220} />
           </div>
@@ -868,15 +716,15 @@ export default function Dashboard() {
                   </span>
                   <span className="text-sm font-bold text-blue-200">CFA</span>
                 </div>
-                <button
-                  onClick={() => setShowAmount(!showAmount)}
+                <button 
+                  onClick={() => setShowAmount(!showAmount)} 
                   className="p-1 rounded-lg bg-white/10 border border-white/10 active:scale-90 transition-transform flex items-center justify-center"
                 >
                   {showAmount ? <EyeOff size={14} className="text-blue-100" /> : <Eye size={14} className="text-blue-100" />}
                 </button>
               </div>
             </div>
-
+            
             <div className="text-right">
               <p className="text-[10px] text-blue-200 font-bold uppercase tracking-wider">Date du jour</p>
               <p className="text-xs font-black text-white capitalize mt-0.5">{dateDuJour}</p>
@@ -950,7 +798,7 @@ export default function Dashboard() {
               <div>
                 <p className="text-[10px] text-slate-400 font-medium">Conformité et synchronisation</p>
               </div>
-
+              
               <div className="space-y-3.5">
                 {[
                   { label: 'Dossiers justificatifs', pct: stats.tauxCompletion, color: 'bg-blue-600' },
@@ -1029,208 +877,110 @@ export default function Dashboard() {
       </div>
 
       {/* 💻 ───────────────────────────────────────────────────────────────────
-          AFFICHAGE PC — DESIGN VIVANT & ANIMÉ (REDESIGN COMPLET)
+          AFFICHAGE PC REDESSINÉ — CARTES COMPACTES, ESPACE OPTIMISÉ
           ────────────────────────────────────────────────────────────────────── */}
-      <div className="hidden md:flex flex-col min-h-screen bg-slate-50">
-
-        {/* ── HEADER GRADIENT ANIMÉ ── */}
-        <header className="relative mt-4 mx-4 lg:mx-6 rounded-[32px] overflow-visible border border-white/70 shadow-[0_25px_70px_-24px_rgba(15,23,42,0.35)]">
-          {/* Gradient background animé */}
-          <div
-            className="absolute inset-0 rounded-[32px]"
-            style={{
-              background: 'linear-gradient(135deg, #1e3a8a 0%, #1d4ed8 40%, #4f46e5 70%, #7c3aed 100%)',
-              backgroundSize: '300% 300%',
-              animation: 'gradientShift 8s ease infinite',
-            }}
-          />
-          {/* Orbes flottants décoratifs */}
-          <div
-            className="absolute -top-16 -right-16 w-72 h-72 rounded-full"
-            style={{
-              background: 'radial-gradient(circle, rgba(99,102,241,0.35) 0%, transparent 70%)',
-              animation: 'floatOrb 10s ease-in-out infinite',
-            }}
-          />
-          <div
-            className="absolute -bottom-12 left-1/3 w-56 h-56 rounded-full"
-            style={{
-              background: 'radial-gradient(circle, rgba(124,58,237,0.25) 0%, transparent 70%)',
-              animation: 'floatOrb 13s ease-in-out infinite reverse',
-            }}
-          />
-          {/* Texture croisillons */}
-          <div
-            className="absolute inset-0 opacity-[0.04] pointer-events-none"
-            style={{
-              backgroundImage: `radial-gradient(circle, white 1px, transparent 1px)`,
-              backgroundSize: '28px 28px',
-            }}
-          />
-
-          <div className="relative z-10 max-w-[1600px] mx-auto px-6 lg:px-10 py-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-            {/* Gauche : branding + titre */}
-            <div className="flex items-center gap-4">
-              {/* Avatar agence */}
-              <div className="relative">
-                <div
-                  className="w-12 h-12 rounded-2xl bg-white/15 border border-white/25 backdrop-blur-sm flex items-center justify-center font-black text-xl text-white shadow-lg"
-                  style={{ animation: 'pulseRing 3s ease-in-out infinite' }}
-                >
-                  {nomAgence[0]?.toUpperCase() || 'H'}
-                </div>
-                {/* Live indicator */}
-                <span className="absolute -bottom-1 -right-1 w-3.5 h-3.5 rounded-full bg-emerald-400 border-2 border-white/80 animate-pulse" />
-              </div>
-
-              <div>
-                <div className="flex items-center gap-2 mb-0.5">
-                  <span className="text-[10px] font-black bg-white/15 border border-white/20 text-white px-2.5 py-0.5 rounded-full uppercase tracking-widest backdrop-blur-sm">
-                    Hajj 2026
-                  </span>
-                  {!loading && (
-                    <span className="text-[10px] font-semibold text-blue-200 bg-blue-900/30 border border-blue-400/20 px-2 py-0.5 rounded-full">
-                      {nomAgence}
-                    </span>
-                  )}
-                </div>
-                <h1 className="text-2xl font-black text-white tracking-tight leading-none">
-                  Tableau de bord
-                </h1>
-                <p className="text-xs text-blue-200 font-medium mt-0.5 capitalize">{dateDuJour}</p>
-              </div>
-            </div>
-
-            {/* Droite : stats + actions */}
-            <div className="flex items-center gap-3 flex-wrap">
-              {/* Recettes pill */}
-              {!loading && (
-                <div className="flex items-center gap-2.5 bg-white/10 border border-white/20 backdrop-blur-sm rounded-2xl px-4 py-2.5">
-                  <Wallet size={15} className="text-emerald-300 shrink-0" />
-                  <div>
-                    <p className="text-[9px] text-blue-200 font-bold uppercase tracking-wider">Encaissé</p>
-                    <p className="text-sm font-black text-white tabular-nums leading-none">
-                      {recettes.toLocaleString('fr-FR')}
-                      <span className="text-[10px] font-bold text-blue-300 ml-1">CFA</span>
-                    </p>
-                  </div>
-                </div>
-              )}
-
-              {/* Total pèlerins pill */}
-              {!loading && (
-                <div className="flex items-center gap-2.5 bg-white/10 border border-white/20 backdrop-blur-sm rounded-2xl px-4 py-2.5">
-                  <Users size={15} className="text-blue-300 shrink-0" />
-                  <div>
-                    <p className="text-[9px] text-blue-200 font-bold uppercase tracking-wider">Inscrits</p>
-                    <p className="text-sm font-black text-white tabular-nums leading-none">{stats.total}</p>
-                  </div>
-                </div>
-              )}
-
-              {/* Sélecteur année */}
-              <div className="relative z-50 bg-white/10 border border-white/20 backdrop-blur-sm rounded-2xl px-3 py-1.5">
-                <YearSelector />
-              </div>
-
-              {/* CTA Ajouter */}
-              <Link
-                href="/hajj/ajouter-pelerin"
-                className="inline-flex items-center gap-2 bg-white text-indigo-700 text-xs font-black px-4 py-2.5 rounded-2xl
-                  hover:bg-indigo-50 active:scale-95 transition-all shadow-lg shadow-indigo-900/20"
-              >
-                <UserPlus size={14} />
-                Nouveau pèlerin
-              </Link>
-            </div>
+      <div className="hidden md:block max-w-[1600px] mx-auto px-4 sm:px-6 lg:px-8 pt-6 pb-12 w-full">
+        
+        {/* En-tête compact */}
+        <div className="mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 border-b border-slate-100 pb-4">
+          <div>
+            <span className="text-[9px] font-black text-indigo-600 bg-indigo-50 px-2 py-1 rounded-md uppercase tracking-widest border border-indigo-100">Hajj 2026</span>
+            <h1 className="text-2xl font-black text-slate-900 tracking-tight mt-1.5">Tableau de suivi</h1>
           </div>
-        </header>
+          <div className="flex items-center flex-wrap gap-2">
+            {!loading && (
+              <span className="text-xs font-semibold text-slate-600 bg-white border border-slate-200/80 px-3 py-2 rounded-lg shadow-sm flex items-center gap-1.5">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                <b className="text-slate-900">{stats.total}</b> pèlerins
+              </span>
+            )}
+            <Link
+              href="/hajj/ajouter-pelerin"
+              className="inline-flex items-center gap-1.5 bg-slate-900 text-white text-xs font-bold px-4 py-2 rounded-lg hover:bg-slate-800 active:scale-95 transition-all shadow-sm"
+            >
+              <UserPlus size={14} /> Nouveau
+            </Link>
+          </div>
+        </div>
 
-        {/* ── CORPS PRINCIPAL ── */}
-        <main className="flex-1 max-w-[1600px] mx-auto w-full px-6 lg:px-10 pt-7 pb-12">
+        {/* Sélecteur d'année */}
+        <div className="mb-5">
+          <YearSelector />
+        </div>
 
-          {/* ── GRILLE PRINCIPALE ── */}
-          <div className="flex flex-col lg:flex-row gap-6 items-start w-full">
+        {/* Grille principale compacte */}
+        <div className="flex flex-col lg:flex-row gap-6 items-start w-full">
+          <div className="flex-1 min-w-0 w-full flex flex-col gap-4">
+            
+            {/* Cartes KPI en grille dense */}
+            <div className="grid grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-3">
+              {mainCards.map((card, i) => (
+                <Tile key={i} card={card} loading={loading} onClick={() => !loading && openModal(card.label, card)} />
+              ))}
+            </div>
 
-            {/* ── COLONNE CENTRALE ── */}
-            <div className="flex-1 min-w-0 w-full flex flex-col gap-5">
-
-              {/* KPI Cards */}
-              <div className="grid grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-3">
-                {mainCards.map((card, i) => (
-                  <Tile
-                    key={i}
-                    index={i}
-                    card={card}
-                    loading={loading}
-                    onClick={() => !loading && openModal(card.label, card)}
-                  />
-                ))}
-              </div>
-
-              {/* ── Éligibles Nusuk ── */}
-              {!loading && stats.eligiblesNusuk > 0 && (
-                <div
-                  className="bg-white border border-indigo-100/80 rounded-2xl overflow-hidden shadow-md"
-                  style={{ animation: 'fadeSlideUp 0.5s ease both', animationDelay: '300ms' }}
-                >
-                  {/* Header dégradé */}
-                  <div className="px-5 py-3.5 border-b border-indigo-100 flex justify-between items-center"
-                    style={{ background: 'linear-gradient(135deg, #eef2ff 0%, #f5f3ff 100%)' }}
-                  >
-                    <div className="flex items-center gap-3">
-                      <div
-                        className="p-2 rounded-xl bg-indigo-600 shadow-md shadow-indigo-200"
-                        style={{ animation: 'pulseRing 3s ease-in-out infinite' }}
-                      >
-                        <CheckCircle2 size={16} className="text-white" />
-                      </div>
-                      <div>
-                        <p className="text-sm font-black text-indigo-700 tracking-tight">Éligibles Nusuk</p>
-                        <p className="text-[10px] text-indigo-400 font-semibold">
-                          {stats.eligiblesNusuk} pèlerins avec dossier + validation Gouv
-                        </p>
-                      </div>
+            {/* Section Pèlerins Éligibles Nusuk */}
+            {!loading && stats.eligiblesNusuk > 0 && (
+              <div className="bg-white border border-indigo-100 rounded-xl overflow-hidden shadow-sm">
+                <div className="px-4 py-3 border-b border-indigo-100 flex justify-between items-center bg-gradient-to-r from-indigo-50/50 to-purple-50/50">
+                  <div className="flex items-center gap-2.5">
+                    <div className="p-1.5 rounded-lg bg-indigo-100">
+                      <CheckCircle2 size={16} className="text-indigo-600" />
                     </div>
-                    <button
-                      onClick={() => openModal('Éligibles Nusuk')}
-                      className="text-xs text-indigo-600 font-black hover:text-indigo-800 flex items-center gap-1.5
-                        bg-indigo-50 hover:bg-indigo-100 border border-indigo-200/60 px-3 py-1.5 rounded-xl
-                        transition-all active:scale-95"
-                    >
-                      Voir tout <ArrowRight size={12} />
-                    </button>
+                    <div>
+                      <p className="text-xs font-bold text-indigo-600 uppercase tracking-wider">Éligibles Nusuk</p>
+                      <p className="text-[10px] text-indigo-500 font-medium">{stats.eligiblesNusuk} pèlerins prêts</p>
+                    </div>
                   </div>
+                  <button
+                    onClick={() => openModal('Éligibles Nusuk')}
+                    className="text-xs text-indigo-600 font-bold hover:text-indigo-700 flex items-center gap-1 transition-colors"
+                  >
+                    Voir <ArrowRight size={11} />
+                  </button>
+                </div>
 
-                  {/* Filtres paiement */}
-                  <div className="px-5 py-2.5 border-b border-indigo-50 bg-indigo-50/30 flex gap-2 flex-wrap">
-                    {[
-                      { key: 'all',  label: `Tous (${pelerinsEligiblesNusuk.length})`,   active: 'bg-indigo-600 text-white shadow-md shadow-indigo-200',   inactive: 'bg-white text-indigo-600 border border-indigo-200 hover:bg-indigo-50' },
-                      { key: 'full', label: `Payés (${pelerinsEligiblesNusuk.filter(p => (p.total_paye ?? 0) > 0).length})`, active: 'bg-emerald-600 text-white shadow-md shadow-emerald-200', inactive: 'bg-white text-emerald-600 border border-emerald-200 hover:bg-emerald-50' },
-                      { key: 'none', label: `Non payés (${pelerinsEligiblesNusuk.filter(p => (p.total_paye ?? 0) === 0).length})`, active: 'bg-rose-600 text-white shadow-md shadow-rose-200', inactive: 'bg-white text-rose-600 border border-rose-200 hover:bg-rose-50' },
-                    ].map(f => (
-                      <button
-                        key={f.key}
-                        onClick={() => setNusukPaymentFilter(f.key)}
-                        className={`text-xs font-black px-3 py-1.5 rounded-xl transition-all active:scale-95 ${
-                          nusukPaymentFilter === f.key ? f.active : f.inactive
-                        }`}
-                      >
-                        {f.label}
-                      </button>
-                    ))}
-                  </div>
+                {/* Filtres paiement */}
+                <div className="px-4 py-2 border-b border-indigo-50 bg-indigo-50/30 flex gap-1.5 flex-wrap">
+                  <button
+                    onClick={() => setNusukPaymentFilter('all')}
+                    className={`text-xs font-bold px-2.5 py-1 rounded-lg transition-all ${
+                      nusukPaymentFilter === 'all'
+                        ? 'bg-indigo-600 text-white'
+                        : 'bg-white text-indigo-600 border border-indigo-100 hover:bg-indigo-50'
+                    }`}
+                  >
+                    Tous ({pelerinsEligiblesNusuk.length})
+                  </button>
+                  <button
+                    onClick={() => setNusukPaymentFilter('full')}
+                    className={`text-xs font-bold px-2.5 py-1 rounded-lg transition-all ${
+                      nusukPaymentFilter === 'full'
+                        ? 'bg-emerald-600 text-white'
+                        : 'bg-white text-emerald-600 border border-emerald-100 hover:bg-emerald-50'
+                    }`}
+                  >
+                    Payés ({pelerinsEligiblesNusuk.filter(p => (p.total_paye ?? 0) > 0).length})
+                  </button>
+                  <button
+                    onClick={() => setNusukPaymentFilter('none')}
+                    className={`text-xs font-bold px-2.5 py-1 rounded-lg transition-all ${
+                      nusukPaymentFilter === 'none'
+                        ? 'bg-rose-600 text-white'
+                        : 'bg-white text-rose-600 border border-rose-100 hover:bg-rose-50'
+                    }`}
+                  >
+                    Non payés ({pelerinsEligiblesNusuk.filter(p => (p.total_paye ?? 0) === 0).length})
+                  </button>
+                </div>
 
-                  {/* Liste compacte */}
-                  <ul className="divide-y divide-indigo-50/80">
+                {/* Liste compacte */}
+                <div className="overflow-x-auto">
+                  <ul className="divide-y divide-indigo-50">
                     {pelerinsEligiblesFiltrés.slice(0, 6).map((p, i) => (
-                      <li
-                        key={p.id || i}
-                        className="px-5 py-3 flex items-center justify-between gap-3 hover:bg-indigo-50/40 transition-colors"
-                        style={{ animationDelay: `${i * 40}ms` }}
-                      >
-                        <div className="flex items-center gap-3 min-w-0 flex-1">
-                          <div className="w-8 h-8 rounded-xl bg-indigo-100 border border-indigo-200/60 flex items-center justify-center text-xs font-black text-indigo-600 shrink-0 shadow-sm">
+                      <li key={p.id || i} className="px-4 py-2.5 flex items-center justify-between gap-3 hover:bg-indigo-50/30 transition-colors">
+                        <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                          <div className="w-7 h-7 rounded-lg bg-indigo-100 border border-indigo-200 flex items-center justify-center text-xs font-bold text-indigo-600 shrink-0">
                             {(p.prenom?.[0] || '?').toUpperCase()}
                           </div>
                           <div className="min-w-0 flex-1">
@@ -1238,13 +988,13 @@ export default function Dashboard() {
                             <p className="text-[10px] text-slate-400 truncate">{p.telephone_pelerin || '—'}</p>
                           </div>
                         </div>
-                        <div className="shrink-0">
+                        <div className="shrink-0 text-right">
                           {(p.total_paye ?? 0) > 0 ? (
-                            <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200/60 px-2.5 py-1 rounded-xl shadow-sm">
+                            <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-100 px-2 py-0.5 rounded-lg">
                               {(p.total_paye ?? 0).toLocaleString('fr-FR')} CFA
                             </span>
                           ) : (
-                            <span className="text-[10px] font-semibold text-rose-500 bg-rose-50 border border-rose-200/60 px-2.5 py-1 rounded-xl shadow-sm">
+                            <span className="text-[10px] font-semibold text-rose-500 bg-rose-50 border border-rose-100 px-2 py-0.5 rounded-lg">
                               Impayé
                             </span>
                           )}
@@ -1252,247 +1002,122 @@ export default function Dashboard() {
                       </li>
                     ))}
                   </ul>
-
-                  {/* Footer export */}
-                  <div className="px-5 py-3 border-t border-indigo-50 bg-indigo-50/20 flex items-center justify-between flex-wrap gap-2">
-                    <p className="text-xs text-indigo-500 font-semibold">
-                      <span className="font-black text-indigo-700">{pelerinsEligiblesFiltrés.length}</span> pèlerin(s) affiché(s)
-                    </p>
-                    <div className="flex gap-2">
-                      <button
-                        onClick={() => exportToExcel(pelerinsEligiblesFiltrés, 'Eligibles_Nusuk')}
-                        className="flex items-center gap-1.5 px-3 py-1.5 bg-white border border-indigo-200 text-indigo-600 rounded-xl text-xs font-bold hover:bg-indigo-50 active:scale-95 transition-all shadow-sm"
-                      >
-                        <FileSpreadsheet size={12} /> Excel
-                      </button>
-                      <button
-                        onClick={() => triggerPdfExport(pelerinsEligiblesFiltrés, 'Pèlerins éligibles')}
-                        className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 text-white rounded-xl text-xs font-bold hover:bg-indigo-700 active:scale-95 transition-all shadow-md shadow-indigo-200"
-                      >
-                        <FileText size={12} /> PDF
-                      </button>
-                    </div>
-                  </div>
                 </div>
-              )}
 
-              {/* ── Flux récent ── */}
-              {derniersPelerins.length > 0 && (
-                <div
-                  className="bg-white border border-slate-200/60 rounded-2xl overflow-hidden shadow-md"
-                  style={{ animation: 'fadeSlideUp 0.5s ease both', animationDelay: '380ms' }}
-                >
-                  <div className="px-5 py-3.5 border-b border-slate-100 flex justify-between items-center bg-gradient-to-r from-slate-50 to-white">
-                    <div className="flex items-center gap-2.5">
-                      <div className="p-1.5 rounded-lg bg-slate-100">
-                        <Calendar size={14} className="text-slate-600" />
-                      </div>
-                      <p className="text-xs font-black text-slate-700 uppercase tracking-wider">Flux récent</p>
-                    </div>
-                    <Link
-                      href="/hajj/liste-pelerins"
-                      className="text-xs text-indigo-600 font-black hover:text-indigo-800 flex items-center gap-1.5
-                        bg-indigo-50 hover:bg-indigo-100 border border-indigo-200/60 px-3 py-1.5 rounded-xl
-                        transition-all active:scale-95"
-                    >
-                      Voir tout <ArrowRight size={11} />
-                    </Link>
+                {/* Footer */}
+                <div className="px-4 py-2 border-t border-indigo-50 bg-indigo-50/20 flex items-center justify-between flex-wrap gap-2">
+                  <div className="text-xs text-indigo-600 font-medium">
+                    <span className="font-black">{pelerinsEligiblesFiltrés.length}</span> affiché(s)
                   </div>
-
-                  <ul className="divide-y divide-slate-50">
-                    {derniersPelerins.map((p, i) => (
-                      <li
-                        key={p.id || i}
-                        className="px-5 py-3 flex items-center justify-between gap-3 hover:bg-slate-50/60 transition-colors group"
-                      >
-                        <div className="flex items-center gap-3 min-w-0 flex-1">
-                          {/* Avatar avec gradient */}
-                          <div
-                            className="w-8 h-8 rounded-xl flex items-center justify-center text-xs font-black text-white shrink-0 shadow-sm group-hover:scale-105 transition-transform"
-                            style={{
-                              background: `hsl(${(p.prenom?.charCodeAt(0) ?? 60) * 4 % 360}, 60%, 55%)`,
-                            }}
-                          >
-                            {(p.prenom?.[0] || '?').toUpperCase()}
-                          </div>
-                          <div className="min-w-0 flex-1">
-                            <p className="text-xs font-bold text-slate-800 truncate">{p.prenom} {p.nom_complet}</p>
-                            <div className="flex gap-1.5 mt-0.5 flex-wrap items-center">
-                              {p.agences?.nom_agence && (
-                                <span className="text-[9px] text-indigo-600 bg-indigo-50 border border-indigo-100/60 px-1.5 py-0.5 rounded-md font-semibold">
-                                  {p.agences.nom_agence}
-                                </span>
-                              )}
-                              {p.document_url ? (
-                                <span className="text-[9px] text-emerald-700 bg-emerald-50 border border-emerald-100/60 px-1.5 py-0.5 rounded-md font-bold">✓ Dossier</span>
-                              ) : (
-                                <span className="text-[9px] text-amber-600 bg-amber-50 border border-amber-100/60 px-1.5 py-0.5 rounded-md font-bold">✗ Incomplet</span>
-                              )}
-                            </div>
-                          </div>
-                        </div>
-                        <div className="text-right shrink-0">
-                          {(p.total_paye ?? 0) > 0 ? (
-                            <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200/60 px-2.5 py-1 rounded-xl shadow-sm">
-                              {(p.total_paye ?? 0).toLocaleString('fr-FR')} CFA
-                            </span>
-                          ) : (
-                            <span className="text-[10px] font-semibold text-rose-500 bg-rose-50 border border-rose-200/60 px-2.5 py-1 rounded-xl shadow-sm">
-                              Impayé
-                            </span>
-                          )}
-                        </div>
-                      </li>
-                    ))}
-                  </ul>
-
-                  {/* Export footer */}
-                  <div className="px-5 py-3 border-t border-slate-100 bg-slate-50/40 flex justify-end gap-2">
+                  <div className="flex gap-1.5 flex-wrap">
                     <button
-                      onClick={() => !loading && exportToExcel(allData, 'Global_Hajj_2026')}
-                      disabled={loading}
-                      className="flex items-center gap-1.5 px-3 py-1.5 bg-white border border-slate-200 text-slate-700 rounded-xl text-xs font-bold hover:bg-slate-50 active:scale-95 transition-all shadow-sm"
+                      onClick={() => exportToExcel(pelerinsEligiblesFiltrés, 'Eligibles_Nusuk')}
+                      className="flex items-center gap-1 px-2.5 py-1 bg-white border border-indigo-100 text-indigo-600 rounded-lg text-xs font-bold hover:bg-indigo-50 active:scale-95 transition-all"
                     >
-                      <FileSpreadsheet size={12} className="text-emerald-600" /> Excel
+                      <FileSpreadsheet size={11} /> Excel
                     </button>
                     <button
-                      onClick={() => !loading && triggerPdfExport(allData, 'Tous les pèlerins')}
-                      disabled={loading}
-                      className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 text-white rounded-xl text-xs font-bold hover:bg-indigo-700 active:scale-95 transition-all shadow-md shadow-indigo-200"
+                      onClick={() => triggerPdfExport(pelerinsEligiblesFiltrés, 'Pèlerins éligibles')}
+                      className="flex items-center gap-1 px-2.5 py-1 bg-indigo-600 text-white rounded-lg text-xs font-bold hover:bg-indigo-700 active:scale-95 transition-all"
                     >
-                      <FileText size={12} /> PDF
+                      <FileText size={11} /> PDF
                     </button>
                   </div>
                 </div>
-              )}
-            </div>
+              </div>
+            )}
 
-            {/* ── COLONNE LATÉRALE ── */}
-            <div className="w-full lg:w-72 xl:w-80 shrink-0 flex flex-col gap-4">
-
-              {/* ── Bloc Alertes / Anomalies ── */}
-              {!loading && alerts.length > 0 && (
-                <div
-                  className="bg-white border border-slate-200/60 rounded-2xl overflow-hidden shadow-md"
-                  style={{ animation: 'fadeSlideUp 0.5s ease both', animationDelay: '200ms' }}
-                >
-                  {/* Header */}
-                  <div className="px-4 py-3 border-b border-slate-100 flex items-center gap-2.5"
-                    style={{ background: 'linear-gradient(135deg, #fff7ed 0%, #fff 100%)' }}
-                  >
-                    <div className="p-1.5 rounded-lg bg-amber-100">
-                      <AlertTriangle size={13} className="text-amber-600" />
-                    </div>
-                    <p className="text-xs font-black text-slate-700 uppercase tracking-wider">Anomalies</p>
-                    <span className="ml-auto text-[10px] font-black bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full">
-                      {alerts.length}
-                    </span>
-                  </div>
-
-                  <div className="p-3 flex flex-col gap-2">
-                    {alerts.map((a, i) => (
-                      <AlertPill key={i} index={i} alert={a} onClick={() => openModal(a.filter)} />
-                    ))}
-                  </div>
+            {/* Derniers pèlerins */}
+            {derniersPelerins.length > 0 && (
+              <div className="bg-white border border-slate-100 rounded-xl overflow-hidden shadow-sm">
+                <div className="px-4 py-3 border-b border-slate-100 flex justify-between items-center bg-slate-50/30">
+                  <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">Flux récent</p>
+                  <Link href="/hajj/liste-pelerins" className="text-xs text-indigo-600 font-bold hover:text-indigo-700 flex items-center gap-1 transition-colors">
+                    Voir tout <ArrowRight size={11} />
+                  </Link>
                 </div>
-              )}
-
-              {/* ── Processus métiers — Barres animées ── */}
-              {!loading && (
-                <div
-                  className="bg-white border border-slate-200/60 rounded-2xl p-5 shadow-md"
-                  style={{ animation: 'fadeSlideUp 0.5s ease both', animationDelay: '260ms' }}
-                >
-                  <div className="flex items-center gap-2 mb-4">
-                    <div className="p-1.5 rounded-lg bg-slate-100">
-                      <TrendingUp size={13} className="text-slate-600" />
-                    </div>
-                    <p className="text-xs font-black text-slate-700 uppercase tracking-wider">Processus</p>
-                  </div>
-
-                  <div className="flex flex-col gap-4">
-                    {[
-                      { label: 'Dossiers', pct: stats.tauxCompletion,  color: 'bg-emerald-500', glow: 'shadow-emerald-200', textColor: 'text-emerald-700', bg: 'bg-emerald-50' },
-                      { label: 'Paiements', pct: stats.tauxPaiement,   color: 'bg-teal-500',    glow: 'shadow-teal-200',    textColor: 'text-teal-700',    bg: 'bg-teal-50' },
-                      { label: 'Gouv',      pct: stats.tauxGouv,       color: 'bg-indigo-500',  glow: 'shadow-indigo-200',  textColor: 'text-indigo-700',  bg: 'bg-indigo-50' },
-                      { label: 'Nusuk',     pct: stats.tauxNusuk,      color: 'bg-purple-500',  glow: 'shadow-purple-200',  textColor: 'text-purple-700',  bg: 'bg-purple-50' },
-                    ].map((r, i) => (
-                      <div key={i}>
-                        <div className="flex justify-between items-center mb-1.5">
-                          <span className="text-xs text-slate-600 font-semibold">{r.label}</span>
-                          <span className={`text-xs font-black px-2 py-0.5 rounded-lg ${r.bg} ${r.textColor}`}>
-                            {r.pct}%
-                          </span>
+                <ul className="divide-y divide-slate-100">
+                  {derniersPelerins.map((p, i) => (
+                    <li key={p.id || i} className="px-4 py-2.5 flex items-center justify-between gap-3 hover:bg-slate-50/30 transition-colors">
+                      <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                        <div className="w-7 h-7 rounded-lg bg-slate-100 border border-slate-200/50 flex items-center justify-center text-xs font-bold text-slate-700 shrink-0">
+                          {(p.prenom?.[0] || '?').toUpperCase()}
                         </div>
-                        {/* Track */}
-                        <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
-                          <div
-                            className={`h-full rounded-full ${r.color} transition-all duration-1000 relative`}
-                            style={{ width: `${r.pct}%` }}
-                          >
-                            {/* Shimmer animé */}
-                            <span
-                              className="absolute inset-0 rounded-full"
-                              style={{
-                                background: 'linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.5) 50%, transparent 100%)',
-                                animation: `shimmerBar 2.5s ${i * 0.3}s infinite`,
-                              }}
-                            />
+                        <div className="min-w-0 flex-1">
+                          <p className="text-xs font-bold text-slate-800 truncate">{p.prenom} {p.nom_complet}</p>
+                          <div className="flex gap-1 mt-0.5 flex-wrap items-center">
+                            {p.agences?.nom_agence && (
+                              <span className="text-[9px] text-indigo-600 bg-indigo-50 border border-indigo-100/50 px-1.5 py-0.5 rounded-md font-semibold">{p.agences.nom_agence}</span>
+                            )}
+                            {p.document_url ? (
+                              <span className="text-[9px] text-emerald-700 bg-emerald-50 border border-emerald-100/50 px-1.5 py-0.5 rounded-md font-semibold">✓</span>
+                            ) : (
+                              <span className="text-[9px] text-amber-600 bg-amber-50 border border-amber-100/50 px-1.5 py-0.5 rounded-md font-semibold">✗</span>
+                            )}
                           </div>
                         </div>
                       </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* ── Résumé compact ── */}
-              {!loading && (
-                <div
-                  className="rounded-2xl p-5 text-white shadow-lg overflow-hidden relative"
-                  style={{
-                    background: 'linear-gradient(135deg, #1e3a8a 0%, #1d4ed8 60%, #4f46e5 100%)',
-                    backgroundSize: '200% 200%',
-                    animation: 'gradientShift 6s ease infinite',
-                  }}
-                >
-                  {/* Orbe décoratif */}
-                  <div className="absolute -right-8 -bottom-8 w-32 h-32 rounded-full"
-                    style={{ background: 'radial-gradient(circle, rgba(255,255,255,0.1) 0%, transparent 70%)' }}
-                  />
-                  <p className="text-[9px] font-black uppercase tracking-widest text-blue-300 mb-3">Vue globale</p>
-                  <div className="grid grid-cols-2 gap-2">
-                    {[
-                      { label: 'Dossiers', val: `${stats.tauxCompletion}%` },
-                      { label: 'Payés',    val: `${stats.tauxPaiement}%` },
-                      { label: 'Gouv',     val: `${stats.tauxGouv}%` },
-                      { label: 'Nusuk',    val: `${stats.tauxNusuk}%` },
-                    ].map((item, i) => (
-                      <div key={i} className="bg-white/10 rounded-xl p-2.5 border border-white/10">
-                        <p className="text-[9px] text-blue-300 font-bold uppercase tracking-wider">{item.label}</p>
-                        <p className="text-lg font-black text-white tabular-nums leading-none mt-0.5">{item.val}</p>
+                      <div className="text-right shrink-0">
+                        {(p.total_paye ?? 0) > 0 ? (
+                          <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-100 px-2 py-0.5 rounded-lg">{(p.total_paye ?? 0).toLocaleString('fr-FR')} CFA</span>
+                        ) : (
+                          <span className="text-[10px] font-semibold text-rose-500 bg-rose-50 border border-rose-100 px-2 py-0.5 rounded-lg">Impayé</span>
+                        )}
                       </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
           </div>
-        </main>
+
+          {/* Colonne latérale compacte */}
+          <div className="w-full lg:w-72 xl:w-80 shrink-0 flex flex-col gap-4">
+            {/* Alertes */}
+            {!loading && alerts.length > 0 && (
+              <div className="bg-white border border-slate-100 rounded-xl overflow-hidden shadow-sm w-full">
+                <div className="px-3.5 py-2.5 border-b border-slate-100 flex items-center gap-2 bg-slate-50/50">
+                  <AlertTriangle size={13} className="text-amber-500" />
+                  <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">Anomalies</p>
+                </div>
+                <div className="p-2 flex flex-col gap-1.5">
+                  {alerts.map((a, i) => (
+                    <AlertPill key={i} alert={a} onClick={() => openModal(a.filter)} />
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Processus métiers */}
+            {!loading && (
+              <div className="bg-white border border-slate-100 rounded-xl p-4 shadow-sm w-full">
+                <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">Processus</p>
+                {[
+                  { label: 'Dossiers', pct: stats.tauxCompletion, color: 'bg-emerald-500' },
+                  { label: 'Paiements', pct: stats.tauxPaiement, color: 'bg-teal-500' },
+                  { label: 'Gouv', pct: stats.tauxGouv, color: 'bg-indigo-500' },
+                  { label: 'Nusuk', pct: stats.tauxNusuk, color: 'bg-purple-500' },
+                ].map((r, i) => (
+                  <div key={i} className="mb-3 last:mb-0">
+                    <div className="flex justify-between items-center mb-1">
+                      <span className="text-xs text-slate-600 font-medium">{r.label}</span>
+                      <span className="text-xs font-black text-slate-800">{r.pct}%</span>
+                    </div>
+                    <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                      <div className={`h-full rounded-full ${r.color} transition-all duration-1000`} style={{ width: `${r.pct}%` }} />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
       </div>
 
       {/* ── MODALE MUTUALISÉE ────────────────────────────────────────────────────── */}
       {modal && (
-        <div className="fixed inset-0 z-[2000] flex items-end sm:items-center justify-center bg-slate-900/60 backdrop-blur-sm p-0 sm:p-4" onClick={() => setModal(null)}>
-          <div
-            className="bg-white w-full sm:max-w-3xl rounded-t-2xl sm:rounded-2xl shadow-2xl h-[85vh] sm:h-auto max-h-[85vh] sm:max-h-[calc(100vh-80px)] flex flex-col"
-            onClick={e => e.stopPropagation()}
-            onTouchStart={handleSheetTouchStart}
-            onTouchMove={handleSheetTouchMove}
-            onTouchEnd={handleSheetTouchEnd}
-            onTouchCancel={handleSheetTouchEnd}
-            style={{ transform: dragOffset > 0 ? `translateY(${dragOffset}px)` : undefined, transition: dragOffset > 0 ? 'none' : 'transform 0.2s ease-out' }}
-          >
+        <div className="fixed inset-0 z-[999] flex items-end sm:items-center justify-center bg-slate-900/60 backdrop-blur-sm p-0 sm:p-4" onClick={() => setModal(null)}>
+          <div className="bg-white w-full sm:max-w-3xl rounded-t-2xl sm:rounded-2xl shadow-2xl h-[85vh] sm:h-auto max-h-[85vh] sm:max-h-[calc(100vh-80px)] flex flex-col" onClick={e => e.stopPropagation()}>
             <div className="w-12 h-1 bg-slate-200 rounded-full mx-auto my-3 sm:hidden shrink-0" />
             <div className="flex items-center justify-between px-5 pb-4 pt-1 sm:py-4 border-b border-slate-100 shrink-0">
               <div>

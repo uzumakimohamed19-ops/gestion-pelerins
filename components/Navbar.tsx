@@ -23,6 +23,9 @@ import {
   Globe 
 } from 'lucide-react'
 
+// Rayon (en px) de la courbe concave "inverted border radius"
+const CONCAVE_R = 20
+
 export default function Navbar() {
   const { hideNavbar } = (function safeUseUI() {
     try {
@@ -144,35 +147,37 @@ export default function Navbar() {
         }
       `}</style>
 
-      {/* 💻 DESKTOP SIDEBAR (Transformée de Topbar à Sidebar fixe à gauche) */}
-      <nav className="hidden lg:flex flex-col justify-between w-64 bg-white/80 backdrop-blur-md border-r border-gray-100 fixed top-0 bottom-0 left-0 z-50 shadow-sm p-6 print:hidden">
+      {/* 💻 DESKTOP SIDEBAR — plate, soudée au fond de page (pas d'ombre "carte flottante") */}
+      <nav className="hidden lg:flex flex-col justify-between w-64 bg-gradient-to-b from-[#4A7DF0] via-[#6E97F2] to-[#DCE7FC] fixed top-0 bottom-0 left-0 z-50 p-6 print:hidden overflow-visible">
         
         {/* Section Haut : Logo + Menu de liens empilés verticalement */}
         <div className="flex flex-col gap-8">
           
           {/* LOGO & NOM AGENCE */}
           <Link href="/" className="flex items-center gap-3 shrink-0">
-            <div className="w-10 h-10 bg-blue-600 rounded-xl flex items-center justify-center shadow-md shadow-blue-200 shrink-0">
-              <Building2 className="text-white w-5 h-5" />
+            <div className="w-11 h-11 bg-white rounded-2xl flex items-center justify-center shadow-md shrink-0">
+              <Building2 className="text-blue-600 w-5 h-5" />
             </div>
             <div className="flex flex-col global-logo-text min-w-0">
-              <span className="text-sm font-bold text-gray-900 truncate uppercase">
+              <span className="text-sm font-black text-white truncate uppercase tracking-tight drop-shadow-sm">
                 {nomAgence}
               </span>
-              <span className="text-[9px] font-semibold text-blue-600 uppercase tracking-widest whitespace-nowrap mt-1">
+              <span className="text-[9px] font-semibold text-blue-50/90 uppercase tracking-widest whitespace-nowrap mt-1">
                 Plateforme Hajj
               </span>
             </div>
           </Link>
 
           {/* LINKS MENU VERTICAL */}
-          <div className="flex flex-col gap-1.5">
+          <div className="flex flex-col gap-2">
             {role === 'admin' && (
               <Link 
                 href="/hajj/admin"
-                className="flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-bold bg-amber-50 text-amber-700 hover:bg-amber-100 border border-amber-100 transition-all mb-2"
+                className="flex items-center gap-3 px-4 py-3 rounded-2xl text-sm font-bold bg-amber-400 text-amber-900 hover:bg-amber-300 transition-all mb-2 shadow-sm"
               >
-                <ShieldCheck size={16} />
+                <div className="w-8 h-8 rounded-xl bg-white/40 flex items-center justify-center shrink-0">
+                  <ShieldCheck size={16} />
+                </div>
                 <span>Admin</span>
               </Link>
             )}
@@ -183,14 +188,59 @@ export default function Navbar() {
                 <Link
                   key={item.name}
                   href={item.href}
-                  className={`flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-semibold transition-all duration-200
+                  className={`relative flex items-center gap-3 h-12 px-3 text-sm font-semibold transition-all duration-200
                     ${isActive
-                      ? 'bg-blue-600 text-white shadow-md shadow-blue-100'
-                      : 'text-gray-600 hover:bg-gray-50 hover:text-blue-600'
+                      ? 'text-blue-600 font-bold'
+                      : 'rounded-2xl text-white/90 hover:bg-white/15'
                     }`}
+                  style={
+                    isActive
+                      ? {
+                          background: '#f8fafc',
+                          borderRadius: '24px 0 0 24px',
+                          marginRight: '-24px',
+                          paddingRight: '24px',
+                        }
+                      : undefined
+                  }
                 >
-                  <item.icon size={16} className={isActive ? 'text-white' : 'text-gray-400'} />
-                  <span>{item.name}</span>
+                  {/* 🩹 Patch concave HAUT — mord dans le bleu au-dessus de la pilule */}
+                  {isActive && (
+                    <span
+                      aria-hidden
+                      style={{
+                        position: 'absolute',
+                        right: 0,
+                        top: -CONCAVE_R,
+                        width: CONCAVE_R,
+                        height: CONCAVE_R,
+                        background: `radial-gradient(circle at bottom right, #f8fafc ${CONCAVE_R}px, transparent ${CONCAVE_R + 1}px)`,
+                        pointerEvents: 'none',
+                      }}
+                    />
+                  )}
+
+                  <div className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 transition-all
+                    ${isActive ? 'bg-blue-50' : 'bg-white/20'}`}>
+                    <item.icon size={16} className={isActive ? 'text-blue-600' : 'text-white'} />
+                  </div>
+                  <span className="truncate">{item.name}</span>
+
+                  {/* 🩹 Patch concave BAS — mord dans le bleu en-dessous de la pilule */}
+                  {isActive && (
+                    <span
+                      aria-hidden
+                      style={{
+                        position: 'absolute',
+                        right: 0,
+                        bottom: -CONCAVE_R,
+                        width: CONCAVE_R,
+                        height: CONCAVE_R,
+                        background: `radial-gradient(circle at top right, #f8fafc ${CONCAVE_R}px, transparent ${CONCAVE_R + 1}px)`,
+                        pointerEvents: 'none',
+                      }}
+                    />
+                  )}
                 </Link>
               )
             })}
@@ -198,9 +248,9 @@ export default function Navbar() {
         </div>
 
         {/* Section Bas : Profil & Déconnexion fixés au pied */}
-        <div className="pt-4 border-t border-gray-100 flex items-center justify-between">
+        <div className="pt-4 border-t border-white/25 flex items-center justify-between">
           <div className="flex items-center gap-3 min-w-0">
-            <div className="w-9 h-9 rounded-full bg-gray-50 border border-gray-200 overflow-hidden shadow-inner ring-2 ring-gray-100 shrink-0">
+            <div className="w-9 h-9 rounded-full bg-white/20 border-2 border-white/40 overflow-hidden shadow-inner shrink-0">
               <Image
                 src={`https://ui-avatars.com/api/?name=${avatarFallbackName}&background=eff6ff&color=2563eb&bold=true`}
                 alt="Avatar"
@@ -209,14 +259,14 @@ export default function Navbar() {
               />
             </div>
             <div className="flex flex-col min-w-0">
-              <span className="text-xs font-bold text-gray-800 truncate">{userName || 'Utilisateur'}</span>
-              <span className="text-[10px] text-gray-400 uppercase font-medium">{role}</span>
+              <span className="text-xs font-bold text-white truncate">{userName || 'Utilisateur'}</span>
+              <span className="text-[10px] text-blue-50/80 uppercase font-medium">{role}</span>
             </div>
           </div>
           
           <button
             onClick={handleLogout}
-            className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-xl transition-all shrink-0"
+            className="p-2 text-white/80 hover:text-white hover:bg-white/15 rounded-xl transition-all shrink-0"
             title="Déconnexion"
           >
             <LogOut size={18} />
@@ -224,7 +274,7 @@ export default function Navbar() {
         </div>
       </nav>
 
-      {/* 📱 MOBILE NAV */}
+      {/* 📱 MOBILE NAV — inchangé */}
       <div className="lg:hidden">
         
         {/* BARRE DE NAVIGATION FIXE EN BAS AVEC EFFET DE FLOU */}
