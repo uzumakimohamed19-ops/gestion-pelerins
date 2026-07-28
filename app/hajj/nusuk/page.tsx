@@ -546,7 +546,7 @@ export default function PagePlatformeMdh() {
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 pb-12">
       {/* Header */}
       <div className="sticky top-0 z-40 border-b border-slate-200 bg-white/95 backdrop-blur-md shadow-sm">
-        <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-4 md:px-8">
+        <div className="mx-auto flex max-w-7xl flex-col gap-3 px-4 py-4 sm:flex-row sm:items-center sm:justify-between md:px-8">
           <div className="flex items-center gap-3">
             <Link 
               href="/hajj/admin" 
@@ -733,8 +733,107 @@ export default function PagePlatformeMdh() {
           </div>
         </div>
 
+        {/* Liste mobile en cartes */}
+        <div className="mt-4 space-y-3 md:hidden">
+          {loading ? (
+            <div className="rounded-2xl border border-slate-200 bg-white p-6 text-center text-sm font-semibold text-slate-400 shadow-sm">
+              <div className="flex items-center justify-center gap-2">
+                <RefreshCw size={16} className="animate-spin" />
+                Chargement des dossiers Platforme MDH…
+              </div>
+            </div>
+          ) : filteredData.length === 0 ? (
+            <div className="rounded-2xl border border-slate-200 bg-white p-6 text-center text-sm font-semibold text-slate-400 shadow-sm">
+              Aucun pèlerin ne correspond à votre recherche.
+            </div>
+          ) : (
+            filteredData.map((p) => {
+              const isEligibleToGouv = Boolean(p.document_url)
+              const isGouvRegistered = Boolean(p.sur_plateforme_gouv)
+              const isNusukRegistered = Boolean(p.sur_plateforme_nusuk)
+              const isDeleting = showDeleteConfirm === p.id
+
+              return (
+                <div key={p.id} className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
+                  <div className="flex items-start gap-2.5">
+                    <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-slate-900 text-sm font-black text-white flex-shrink-0">
+                      {p.prenom?.[0] || ''}{p.nom_complet?.[0] || ''}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <p className="text-sm font-black uppercase text-slate-900 truncate">{p.prenom} {p.nom_complet}</p>
+                        {isEligibleToGouv ? (
+                          <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[9px] font-black uppercase tracking-wider text-emerald-700">
+                            <FileCheck size={10} /> Complet
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2 py-0.5 text-[9px] font-black uppercase tracking-wider text-amber-700">
+                            <FileWarning size={10} /> Incomplet
+                          </span>
+                        )}
+                      </div>
+                      <p className="mt-1 text-[11px] font-semibold text-slate-500 truncate">{p.num_passeport || 'Pas de passeport'}</p>
+                      {p.agences?.nom_agence && (
+                        <p className="mt-1 text-[10px] font-semibold text-slate-400">{p.agences.nom_agence}</p>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[10px] font-black whitespace-nowrap ${isGouvRegistered ? 'bg-indigo-50 text-indigo-700' : 'bg-slate-100 text-slate-600'}`}>
+                      <ShieldCheck size={11} />
+                      {isGouvRegistered ? 'Gouv inscrit' : 'Gouv non'}
+                    </span>
+                    <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[10px] font-black whitespace-nowrap ${isNusukRegistered ? 'bg-purple-50 text-purple-700' : 'bg-slate-100 text-slate-600'}`}>
+                      <Globe size={11} />
+                      {isNusukRegistered ? 'Nusuk inscrit' : 'Nusuk non'}
+                    </span>
+                  </div>
+
+                  <div className="mt-3 flex flex-col gap-2">
+                    <button
+                      disabled={actionInProgressId === p.id || !sessionSummary.session_open || (isGouvRegistered && userRole !== 'admin')}
+                      onClick={() => toggleGouvStatus(p.id, isGouvRegistered)}
+                      className={`rounded-xl px-3 py-2 text-[10px] font-black uppercase tracking-[0.12em] transition ${actionInProgressId === p.id ? 'cursor-wait bg-slate-100 text-slate-500' : !sessionSummary.session_open || (isGouvRegistered && userRole !== 'admin') ? 'cursor-not-allowed bg-slate-100 text-slate-400' : isGouvRegistered ? 'bg-emerald-600 text-white hover:bg-emerald-700' : 'bg-indigo-600 text-white hover:bg-indigo-700'}`}
+                    >
+                      {actionInProgressId === p.id ? '…' : isGouvRegistered ? (userRole === 'admin' ? 'Retirer' : 'Déjà inscrit') : 'Inscrire'}
+                    </button>
+                    {userRole === 'admin' && (
+                      !isDeleting ? (
+                        <button
+                          onClick={() => setShowDeleteConfirm(p.id)}
+                          className="w-full rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-[10px] font-black uppercase tracking-[0.12em] text-rose-600 hover:bg-rose-100 transition"
+                        >
+                          <Trash2 size={11} className="inline mr-1" /> Supprimer
+                        </button>
+                      ) : (
+                        <div className="flex gap-2">
+                          <button
+                            onClick={() => deletePelerin(p.id)}
+                            disabled={actionInProgressId === p.id}
+                            className="flex-1 rounded-xl bg-rose-600 px-3 py-2 text-[10px] font-black text-white hover:bg-rose-700 disabled:opacity-50 transition"
+                          >
+                            Confirmer
+                          </button>
+                          <button
+                            onClick={() => setShowDeleteConfirm(null)}
+                            disabled={actionInProgressId === p.id}
+                            className="flex-1 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-[10px] font-black text-slate-600 hover:bg-slate-100 disabled:opacity-50 transition"
+                          >
+                            Annuler
+                          </button>
+                        </div>
+                      )
+                    )}
+                  </div>
+                </div>
+              )
+            })
+          )}
+        </div>
+
         {/* Table responsive */}
-        <div className="mt-4 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+        <div className="mt-4 hidden overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm md:block">
           <div className="overflow-x-auto">
             <table className="min-w-full text-left">
               <thead className="bg-slate-50 border-b border-slate-200">
