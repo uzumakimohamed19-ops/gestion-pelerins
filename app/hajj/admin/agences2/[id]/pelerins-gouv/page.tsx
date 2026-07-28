@@ -2,8 +2,21 @@
 
 import { useState, useEffect, use } from 'react'
 import { supabase } from '@/lib/supabase'
-import { Loader2, ArrowLeft, Building2, Phone, MapPin, CheckCircle2, Search, ArrowRight, Eye, RefreshCw, Globe, Trash2 } from 'lucide-react'
+import {
+  Loader2,
+  ArrowLeft,
+  Phone,
+  MapPin,
+  CheckCircle2,
+  Search,
+  Eye,
+  Globe,
+  Trash2,
+  FileDown
+} from 'lucide-react'
 import Link from 'next/link'
+import jsPDF from 'jspdf'
+import autoTable from 'jspdf-autotable'
 
 export default function AgencePelerinsGouvPage({ params }: { params: Promise<{ id: string }> }) {
   // Dépaquetage des paramètres d'URL (Next.js 15+)
@@ -49,17 +62,43 @@ export default function AgencePelerinsGouvPage({ params }: { params: Promise<{ i
     }
   }, [agenceId])
 
+  // Modification réactive de l'état local + base de données
   const toggleStatus = async (pelerinId: string, field: 'sur_plateforme_gouv' | 'sur_plateforme_nusuk', value: boolean) => {
     setUpdatingId(pelerinId + field)
+
+    // Sauvegarde de l'état précédent pour rollback en cas d'erreur
+    const previousPelerins = [...pelerins]
+
+    // Mise à jour instantanée de l'UI
+    if (field === 'sur_plateforme_gouv' && !value) {
+      // Si on retire de GOUV, on supprime le pèlerin de la vue actuelle
+      setPelerins((prev) => prev.filter((p) => p.id !== pelerinId))
+    } else {
+      // Sinon on met simplement à jour sa propriété
+      setPelerins((prev) =>
+        prev.map((p) => (p.id === pelerinId ? { ...p, [field]: value } : p))
+      )
+    }
+
     try {
       const updatePayload: Record<string, unknown> = { [field]: value }
       if (field === 'sur_plateforme_gouv') {
-        updatePayload.hajj_session_id = value ? null : null
+        updatePayload.hajj_session_id = null
       }
-      const { error } = await supabase.from('pelerins').update(updatePayload).eq('id', pelerinId)
-      if (!error) {
-        setPelerins(prev => prev.map((p) => p.id === pelerinId ? { ...p, [field]: value } : p))
+
+      const { error } = await supabase
+        .from('pelerins')
+        .update(updatePayload)
+        .eq('id', pelerinId)
+
+      if (error) {
+        console.error('Erreur Supabase:', error)
+        // Restauration si échec
+        setPelerins(previousPelerins)
       }
+    } catch (err) {
+      console.error(err)
+      setPelerins(previousPelerins)
     } finally {
       setUpdatingId(null)
     }
@@ -74,6 +113,106 @@ export default function AgencePelerinsGouvPage({ params }: { params: Promise<{ i
       p.num_passeport?.toLowerCase().includes(query)
     )
   })
+
+  // Exportation PDF très professionnelle
+  const exportPDF = () => {
+    if (!agence) return
+
+    const doc = new jsPDF('landscape', 'mm', 'a4')
+
+    // Bandeau tricolore (Hajj / Mali)
+    doc.setFillColor(20, 181, 58) // Vert
+    doc.rect(0, 0, 99, 4, 'F')
+    doc.setFillColor(252, 209, 22) // Jaune
+    doc.rect(99, 0, 99, 4, 'F')
+    doc.setFillColor(206, 17, 38) // Rouge
+    doc.rect(198, 0, 99, 4, 'F')
+
+    // Titre Principal
+    doc.setFont('helvetica', 'bold')
+    doc.setFontSize(18)
+    doc.setTextColor(30, 41, 59)
+    doc.text('LISTE OFFICIELLE DES PÈLERINS VALIDÉS (GOUV)', 14, 18)
+
+    // Informations Agence
+    doc.setFontSize(9)
+    doc.setFont('helvetica', 'normal')
+    doc.setTextColor(100, 116, 139)
+    doc.text(
+      `Agence : ${agence.nom_agence || 'N/A'} (Code: ${agence.code_agence || 'N/A'}) | Tél: ${agence.telephone_agence || 'N/A'}`,
+      14,
+      24
+    )
+    doc.text(
+      `Généré le : ${new Date().toLocaleDateString('fr-FR')} à ${new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })} | Total pèlerins : ${pelerinsFiltres.length}`,
+      14,
+      29
+    )
+
+    // Ligne de séparation
+    doc.setDrawColor(226, 232, 240)
+    doc.setLineWidth(0.5)
+    doc.line(14, 33, 283, 33)
+
+    // Préparation des données pour le tableau
+    const tableRows = pelerinsFiltres.map((p, index) => [
+      index + 1,
+      `${(p.prenom || '').toUpperCase()} ${(p.nom_complet || '').toUpperCase()}`,
+      p.num_passeport || '—',
+      p.telephone_pelerin || '—',
+      p.date_naissance ? new Date(p.date_naissance).toLocaleDateString('fr-FR') : '—',
+      p.sexe || p.genre || '—',
+      p.sur_plateforme_nusuk ? 'Inscrit' : 'Non inscrit',
+      p.document_url ? 'Complet' : 'Incomplet',
+    ])
+
+    // Table AutoTable
+    autoTable(doc, {
+      startY: 37,
+      head: [
+        ['#', 'Identité du Pèlerin', 'N° Passeport', 'Téléphone', 'Date Naissance', 'Sexe', 'Nusuk', 'Dossier'],
+      ],
+      body: tableRows,
+      theme: 'grid',
+      headStyles: {
+        fillColor: [16, 185, 129], // Vert Emerald élégant
+        textColor: [255, 255, 255],
+        fontStyle: 'bold',
+        fontSize: 9,
+        halign: 'left',
+      },
+      styles: {
+        fontSize: 8.5,
+        cellPadding: 3,
+        textColor: [51, 65, 85],
+      },
+      columnStyles: {
+        0: { cellWidth: 10, halign: 'center' },
+        1: { fontStyle: 'bold' },
+        2: { fontStyle: 'bold' },
+        6: { halign: 'center' },
+        7: { halign: 'center' },
+      },
+      alternateRowStyles: {
+        fillColor: [248, 250, 252],
+      },
+    })
+
+    // Pied de page
+    const pageCount = doc.getNumberOfPages()
+    for (let i = 1; i <= pageCount; i++) {
+      doc.setPage(i)
+      doc.setFontSize(8)
+      doc.setTextColor(148, 163, 184)
+      doc.text(
+        `Liste Officielle Pèlerins GOUV — ${agence.nom_agence || 'Agence'} — Page ${i} / ${pageCount}`,
+        14,
+        200
+      )
+    }
+
+    doc.save(`Pelerins_GOUV_${agence.nom_agence || 'Agence'}.pdf`)
+  }
 
   if (loading) {
     return (
@@ -121,8 +260,18 @@ export default function AgencePelerinsGouvPage({ params }: { params: Promise<{ i
             </div>
           </div>
 
-          <div className="px-4 py-2 bg-gray-100 rounded-2xl text-xs font-black text-gray-700 font-mono">
-            CODE: {agence.code_agence || 'N/A'}
+          <div className="flex items-center gap-3 w-full md:w-auto justify-between md:justify-end">
+            <div className="px-4 py-2 bg-gray-100 rounded-2xl text-xs font-black text-gray-700 font-mono">
+              CODE: {agence.code_agence || 'N/A'}
+            </div>
+
+            {/* Bouton Exportation PDF */}
+            <button
+              onClick={exportPDF}
+              className="inline-flex items-center gap-2 px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white text-xs font-black rounded-2xl shadow-sm transition-all active:scale-95"
+            >
+              <FileDown size={16} /> Exporter PDF
+            </button>
           </div>
         </div>
       )}
@@ -134,7 +283,7 @@ export default function AgencePelerinsGouvPage({ params }: { params: Promise<{ i
           type="text"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          placeholder="Rechercher par prénom, nom, NINA ou N° Passeport..."
+          placeholder="Rechercher par prénom, nom ou N° Passeport..."
           className="w-full bg-transparent text-sm font-bold text-gray-900 outline-none placeholder:text-gray-400 placeholder:font-normal"
         />
       </div>
@@ -233,9 +382,13 @@ export default function AgencePelerinsGouvPage({ params }: { params: Promise<{ i
                         <button
                           onClick={() => toggleStatus(pelerin.id, 'sur_plateforme_gouv', false)}
                           disabled={updatingId === pelerin.id + 'sur_plateforme_gouv'}
-                          className="inline-flex items-center gap-1.5 px-2.5 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 rounded-full text-[10px] font-black transition-all disabled:opacity-60"
+                          className="inline-flex items-center gap-1.5 px-2.5 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 rounded-full text-[10px] font-black transition-all disabled:opacity-60"
                         >
-                          {updatingId === pelerin.id + 'sur_plateforme_gouv' ? <Loader2 size={10} className="animate-spin" /> : <Trash2 size={10} />}
+                          {updatingId === pelerin.id + 'sur_plateforme_gouv' ? (
+                            <Loader2 size={10} className="animate-spin" />
+                          ) : (
+                            <Trash2 size={10} />
+                          )}
                           Retirer Gouv
                         </button>
                         <button
@@ -243,7 +396,11 @@ export default function AgencePelerinsGouvPage({ params }: { params: Promise<{ i
                           disabled={updatingId === pelerin.id + 'sur_plateforme_nusuk'}
                           className="inline-flex items-center gap-1.5 px-2.5 py-1.5 bg-purple-50 hover:bg-purple-100 text-purple-700 rounded-full text-[10px] font-black transition-all disabled:opacity-60"
                         >
-                          {updatingId === pelerin.id + 'sur_plateforme_nusuk' ? <Loader2 size={10} className="animate-spin" /> : <Globe size={10} />}
+                          {updatingId === pelerin.id + 'sur_plateforme_nusuk' ? (
+                            <Loader2 size={10} className="animate-spin" />
+                          ) : (
+                            <Globe size={10} />
+                          )}
                           {pelerin.sur_plateforme_nusuk ? 'Retirer Nusuk' : 'Ajouter Nusuk'}
                         </button>
                         <Link

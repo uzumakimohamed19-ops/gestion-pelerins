@@ -98,11 +98,6 @@ export default function Navbar() {
     return () => window.removeEventListener('scroll', handleScroll)
   }, [lastScrollY, isMenuOpen])
 
-  useEffect(() => {
-    if (typeof window === 'undefined') return
-    window.dispatchEvent(new Event(isMenuOpen ? 'mobile-nav-open' : 'mobile-nav-close'))
-  }, [isMenuOpen])
-
   const handleLogout = async () => {
     await supabase.auth.signOut()
     router.push('/login')
@@ -164,6 +159,16 @@ export default function Navbar() {
               <Building2 className="text-blue-600 w-5 h-5" />
             </div>
             <div className="flex flex-col global-logo-text min-w-0">
+              {/* Drapeau du Mali imprimé au-dessus du nom de l'agence */}
+              <div 
+                className="w-full h-[6px] rounded-[1px] flex overflow-hidden mb-1 shadow-[inset_0_1px_1px_rgba(255,255,255,0.6),_0_1px_2px_rgba(0,0,0,0.2)] border border-black/10"
+                title="Drapeau du Mali"
+              >
+                <div className="flex-1 bg-[#14B53A] bg-gradient-to-b from-white/30 via-transparent to-black/20" />
+                <div className="flex-1 bg-[#FCD116] bg-gradient-to-b from-white/30 via-transparent to-black/20" />
+                <div className="flex-1 bg-[#CE1126] bg-gradient-to-b from-white/30 via-transparent to-black/20" />
+              </div>
+
               <span className="text-sm font-black text-white truncate uppercase tracking-tight drop-shadow-sm">
                 {nomAgence}
               </span>
