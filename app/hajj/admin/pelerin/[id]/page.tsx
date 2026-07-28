@@ -3,15 +3,17 @@ import { useEffect, useState } from 'react'
 import { useParams } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import { cacheFirstFetch } from '@/lib/cacheFirst'
-import { User, FileText, ArrowLeft, Printer, Calendar, ShieldCheck, Building2, Globe, CheckCircle2, Save, Syringe, Stethoscope, BookOpen, Hotel, Plane } from 'lucide-react'
+import { User, FileText, ArrowLeft, Printer, Calendar, ShieldCheck, Building2, Globe, CheckCircle2, Save, Syringe, Stethoscope, BookOpen, Hotel, Plane, Lock } from 'lucide-react'
 import Link from 'next/link'
 import { YearSelector } from '@/components/YearSelector'
+import { getPassportPublicUrl } from '@/lib/hajjPassport'
 
 export default function DetailsAdminPelerin() {
   const { id } = useParams()
   const [p, setPelerin] = useState<any>(null)
   const [loading, setLoading] = useState(true)
   const [updating, setUpdating] = useState(false)
+  const [sessionLocked, setSessionLocked] = useState(false)
 
   useEffect(() => {
     async function getPelerin() {
@@ -39,11 +41,79 @@ export default function DetailsAdminPelerin() {
     getPelerin()
   }, [id])
 
+  useEffect(() => {
+    let active = true
+
+    const loadSessionState = async () => {
+      const [{ data: configData }, { data: sessionData }] = await Promise.all([
+        supabase
+          .from('hajj_campaign_config')
+          .select('session_ouverte')
+          .eq('id', 1)
+          .maybeSingle(),
+        supabase
+          .from('hajj_sessions')
+          .select('*')
+          .eq('est_active', true)
+          .order('date_ouverture', { ascending: false })
+          .limit(1)
+          .maybeSingle()
+      ])
+
+      if (!active) return
+
+      const isSessionOpenInDb = Boolean(
+        sessionData?.id && (
+          sessionData?.est_active === true ||
+          sessionData?.session_ouverte === true ||
+          sessionData?.is_active === true
+        )
+      )
+
+      setSessionLocked(!(isSessionOpenInDb || Boolean(configData?.session_ouverte)))
+    }
+
+    void loadSessionState()
+
+    const channel = supabase
+      .channel('session_lock_admin_pelerin')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'hajj_campaign_config' }, () => {
+        void loadSessionState()
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'hajj_sessions' }, () => {
+        void loadSessionState()
+      })
+      .subscribe()
+
+    return () => {
+      active = false
+      supabase.removeChannel(channel)
+    }
+  }, [])
+
   const toggleStatus = async (field: string, currentValue: boolean) => {
+    if (field === 'sur_plateforme_gouv' && sessionLocked) return
     setUpdating(true)
+    const nextValue = !currentValue
+    const updatePayload: Record<string, unknown> = { [field]: nextValue }
+
+    if (field === 'sur_plateforme_gouv') {
+      if (nextValue) {
+        const { data: sessionData } = await supabase
+          .from('hajj_sessions')
+          .select('id')
+          .order('date_ouverture', { ascending: false })
+          .limit(1)
+          .maybeSingle()
+        updatePayload.hajj_session_id = sessionData?.id ?? null
+      } else {
+        updatePayload.hajj_session_id = null
+      }
+    }
+
     const { error } = await supabase
       .from('pelerins')
-      .update({ [field]: !currentValue })
+      .update(updatePayload)
       .eq('id', id)
 
     if (!error) {
@@ -87,7 +157,8 @@ export default function DetailsAdminPelerin() {
   if (loading) return <div className="p-10 text-center font-bold italic animate-pulse text-gray-400">CHARGEMENT DU DOSSIER ADMIN...</div>
   if (!p) return <div className="p-10 text-center font-black text-red-500">PÈLERIN NON TROUVÉ.</div>
 
-  const scanUrl = p.document_url ? `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/passeports/${p.document_url}` : p.scan_passeport || null
+  // Correction ici : utilisation de document_url uniquement
+  const scanUrl = getPassportPublicUrl(p.document_url, p.document_url)
 
   return (
     <div className="max-w-4xl mx-auto px-4 pt-4 pb-28 md:py-10">
@@ -121,6 +192,12 @@ export default function DetailsAdminPelerin() {
           </button>
         </div>
       </div>
+
+      {sessionLocked && (
+        <div className="mb-6 flex items-center gap-2 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-bold text-amber-700">
+          <Lock size={16} /> La session GOUV est fermée : ce statut est verrouillé jusqu’à ce que l’admin réouvre la session.
+        </div>
+      )}
 
       <div className="space-y-6">
         
@@ -173,14 +250,14 @@ export default function DetailsAdminPelerin() {
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <button 
                 onClick={() => toggleStatus('sur_plateforme_gouv', p.sur_plateforme_gouv)}
-                disabled={updating}
-                className={`p-4 rounded-2xl border-2 flex items-center justify-between transition-all active:scale-98 ${p.sur_plateforme_gouv ? 'border-emerald-500 bg-emerald-50 text-emerald-700' : 'border-gray-100 bg-gray-50 text-gray-400 hover:border-gray-300'}`}
+                disabled={updating || sessionLocked}
+                className={`p-4 rounded-2xl border-2 flex items-center justify-between transition-all active:scale-98 ${sessionLocked ? 'border-gray-200 bg-gray-50 text-gray-500' : p.sur_plateforme_gouv ? 'border-emerald-500 bg-emerald-50 text-emerald-700' : 'border-gray-100 bg-gray-50 text-gray-400 hover:border-gray-300'}`}
               >
                 <div className="flex items-center gap-3 text-left">
-                  <ShieldCheck size={20} className="shrink-0" />
+                  {sessionLocked ? <Lock size={20} className="shrink-0" /> : <ShieldCheck size={20} className="shrink-0" />}
                   <span className="font-bold text-xs uppercase">Plateforme Gouv</span>
                 </div>
-                {p.sur_plateforme_gouv ? <CheckCircle2 size={20} className="text-emerald-500 shrink-0" /> : <div className="w-5 h-5 rounded-full border-2 border-gray-200 shrink-0" />}
+                {sessionLocked ? <Lock size={20} className="shrink-0" /> : p.sur_plateforme_gouv ? <CheckCircle2 size={20} className="text-emerald-500 shrink-0" /> : <div className="w-5 h-5 rounded-full border-2 border-gray-200 shrink-0" />}
               </button>
 
               <button 
@@ -372,7 +449,7 @@ export default function DetailsAdminPelerin() {
         </div>
       </div>
 
-      {/* Barre d'action fixe sur Mobile - Bouton unique Pleine Largeur pour éviter les conflits d'impression */}
+      {/* Barre d'action fixe sur Mobile */}
       <div className="fixed bottom-0 left-0 right-0 p-4 bg-white/90 backdrop-blur-md border-t border-gray-100 flex items-center sm:hidden shadow-xl z-50 print:hidden">
         <button 
           onClick={saveAdvancedData}

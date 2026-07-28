@@ -1,21 +1,26 @@
 'use client'
-import { useEffect, useState, useMemo, useRef, useCallback, type ElementType } from 'react'
+
+import Link from 'next/link'
+import { useEffect, useMemo, useRef, useState, useCallback } from 'react'
 import { supabase } from '@/lib/supabase'
-import { cacheFirstFetch } from '@/lib/cacheFirst'
 import { useYear } from '@/lib/YearContext'
 import {
-  Globe, ShieldCheck, FileCheck, FileWarning, Search, X,
-  Filter, FileSpreadsheet, FileText, ArrowLeft, Building2,
-  Wallet, CheckCircle2, AlertCircle, ChevronLeft, ChevronRight,
-  SlidersHorizontal, CheckSquare, Square, Eye, CreditCard,
-  RefreshCw, UserCheck, Download
+  ArrowLeft,
+  CheckCircle2,
+  FileCheck,
+  FileWarning,
+  Globe,
+  Lock,
+  RefreshCw,
+  Search,
+  ShieldCheck,
+  X,
+  AlertCircle,
+  Wifi,
+  WifiOff,
+  Activity,
+  Trash2
 } from 'lucide-react'
-import Link from 'next/link'
-import { YearSelector } from '@/components/YearSelector'
-
-// ─── CLÉS SESSION STORAGE ─────────────────────────────────────────────────────
-const SCROLL_KEY = 'nusuk_scroll_pos'
-const FILTERS_KEY = 'nusuk_filters'
 
 type Pelerin = {
   id: string
@@ -23,893 +28,834 @@ type Pelerin = {
   nom_complet?: string
   telephone_pelerin?: string
   num_passeport?: string
-  date_expiration?: string
   campagne?: string | number
-  agences?: { nom_agence?: string }
   document_url?: string | null
   sur_plateforme_gouv?: boolean
   sur_plateforme_nusuk?: boolean
-  total_paye?: number
+  agences?: { nom_agence?: string }
+  created_at?: string
+  date_inscription?: string
+  hajj_session_id?: string | null
+  updated_at?: string
 }
 
-// ─── MODAL DE CONFIRMATION EXPORT PDF ────────────────────────────────────────
-type PdfConfirmModalProps = {
-  isOpen: boolean
-  onClose: () => void
-  onConfirm: (includeFinance: boolean) => void
-  title: string
-  count: number
+type SessionSummary = {
+  label: string
+  quota_total: number
+  quota_utilise: number
+  quota_restant: number
+  session_open: boolean
+  last_sync: number
 }
 
-function PdfConfirmModal({ isOpen, onClose, onConfirm, title, count }: PdfConfirmModalProps) {
-  if (!isOpen) return null
-  return (
-    <div className="fixed inset-0 z-[1100] flex items-center justify-center bg-slate-900/70 backdrop-blur-sm p-4" onClick={onClose}>
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6 flex flex-col gap-5" onClick={e => e.stopPropagation()}>
-        <div className="flex items-center gap-3">
-          <div className="p-3 rounded-xl bg-indigo-50 border border-indigo-100">
-            <FileText size={22} className="text-indigo-600" />
-          </div>
-          <div>
-            <h3 className="text-base font-black text-slate-900">Exporter en PDF</h3>
-            <p className="text-xs text-slate-400 mt-0.5">{count} pèlerin(s) — {title}</p>
-          </div>
-        </div>
-        <div className="bg-amber-50 border border-amber-100 rounded-xl p-4">
-          <p className="text-xs font-bold text-amber-800 mb-1 flex items-center gap-1.5">
-            <span className="w-1.5 h-1.5 rounded-full bg-amber-500 inline-block" /> Données financières
-          </p>
-          <p className="text-xs text-amber-700 leading-relaxed">
-            Souhaitez-vous inclure les <strong>montants versés</strong> et les statuts de paiement dans le rapport PDF ?
-          </p>
-        </div>
-        <div className="flex flex-col gap-2">
-          <button onClick={() => onConfirm(true)} className="w-full flex items-center justify-center gap-2 py-3 bg-indigo-600 text-white text-sm font-bold rounded-xl hover:bg-indigo-700 transition-colors">
-            Inclure les données financières
-          </button>
-          <button onClick={() => onConfirm(false)} className="w-full flex items-center justify-center gap-2 py-3 bg-slate-100 text-slate-700 text-sm font-bold rounded-xl hover:bg-slate-200 transition-colors">
-            Sans données financières
-          </button>
-          <button onClick={onClose} className="w-full py-2 text-xs text-slate-400 hover:text-slate-600 font-medium">Annuler</button>
-        </div>
-      </div>
-    </div>
-  )
-}
+type SyncStatus = 'connected' | 'disconnected' | 'syncing' | 'error'
 
-// ─── EN-TÊTE ET LOGIQUE D'IMPRESSION DU RAPPORT PDF ──────────────────────────
-function generateAndPrintPDF(items: Pelerin[], title: string, includeFinance: boolean, selectedYear: string | number) {
-  const datePrint = new Date().toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
-  const totalPaye = items.reduce((acc, p) => acc + (p.total_paye || 0), 0)
-
-  const rows = items.map((p, i) => `
-    <tr style="background:${i % 2 === 0 ? '#fff' : '#f8fafc'};">
-      <td style="padding:10px 12px;color:#94a3b8;font-size:11px;font-weight:600;">${i + 1}</td>
-      <td style="padding:10px 12px;">
-        <div style="font-weight:700;color:#0f172a;font-size:13px;">${p.prenom || ''} ${p.nom_complet || ''}</div>
-        <div style="color:#94a3b8;font-size:11px;margin-top:2px;">Passeport: ${p.num_passeport || '—'}</div>
-      </td>
-      <td style="padding:10px 12px;font-size:12px;color:#4338ca;font-weight:600;">${p.agences?.nom_agence || '—'}</td>
-      <td style="padding:10px 12px;text-align:center;">${p.document_url ? '✓' : '✗'}</td>
-      <td style="padding:10px 12px;text-align:center;color:#0d9488;font-weight:700;">${p.sur_plateforme_gouv ? '✓' : '—'}</td>
-      <td style="padding:10px 12px;text-align:center;color:#7c3aed;font-weight:700;">${p.sur_plateforme_nusuk ? '✓' : '—'}</td>
-      ${includeFinance ? `<td style="padding:10px 12px;text-align:right;font-weight:700;">${(p.total_paye || 0).toLocaleString('fr-FR')} CFA</td>` : ''}
-    </tr>
-  `).join('')
-
-  const thStyle = `padding:10px 12px;font-size:11px;font-weight:700;text-transform:uppercase;color:#475569;background:#f1f5f9;border-bottom:2px solid #e2e8f0;`
-
-  const html = `
-    <!DOCTYPE html>
-    <html>
-    <head>
-      <meta charset="UTF-8" />
-      <title>Rapport Nusuk — ${title}</title>
-      <style>
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;900&display=swap');
-        body { font-family: 'Inter', sans-serif; padding: 20px; color: #0f172a; }
-        table { border-collapse: collapse; width: 100%; margin-top: 20px; }
-        @media print { .no-print { display: none !important; } tr { page-break-inside: avoid; } }
-      </style>
-    </head>
-    <body>
-      <div style="background:linear-gradient(135deg,#7c3aed 0%,#4f46e5 100%);color:white;padding:24px;border-radius:12px;">
-        <h1 style="font-size:22px;font-weight:900;">${title}</h1>
-        <p style="font-size:12px;opacity:0.8;margin-top:4px;">Campagne Hajj ${selectedYear} — Généré le ${datePrint}</p>
-        <p style="font-size:12px;font-weight:bold;margin-top:8px;">Total pèlerins : ${items.length}</p>
-        ${includeFinance ? `<p style="font-size:14px;font-weight:900;margin-top:4px;">Volume financier : ${totalPaye.toLocaleString('fr-FR')} CFA</p>` : ''}
-      </div>
-      <table>
-        <thead>
-          <tr>
-            <th style="${thStyle}width:40px;">#</th>
-            <th style="${thStyle}">Pèlerin</th>
-            <th style="${thStyle}">Agence</th>
-            <th style="${thStyle}text-align:center;">Dossier</th>
-            <th style="${thStyle}text-align:center;">Gouv</th>
-            <th style="${thStyle}text-align:center;">Nusuk</th>
-            ${includeFinance ? `<th style="${thStyle}text-align:right;">Payé</th>` : ''}
-          </tr>
-        </thead>
-        <tbody>${rows}</tbody>
-      </table>
-      <div class="no-print" style="position:fixed;bottom:24px;right:24px;display:flex;gap:10px;">
-        <button onclick="window.print()" style="background:#7c3aed;color:white;border:none;padding:12px 24px;border-radius:8px;font-weight:700;cursor:pointer;">Imprimer PDF</button>
-        <button onclick="window.close()" style="background:#f1f5f9;color:#475569;border:1px solid #e2e8f0;padding:12px 18px;border-radius:8px;cursor:pointer;">Fermer</button>
-      </div>
-    </body>
-    </html>
-  `
-  const printWindow = window.open('', '_blank')
-  if (printWindow) {
-    printWindow.document.write(html)
-    printWindow.document.close()
-  }
-}
-
-export default function PageGestionNusuk() {
+export default function PagePlatformeMdh() {
   const { selectedYear } = useYear()
-  const [data, setData] = useState<Pelerin[]>([])
-  // loading = vrai seulement si aucune donnée cache n'est encore arrivée
+  const [pelerins, setPelerins] = useState<Pelerin[]>([])
   const [loading, setLoading] = useState(true)
-  // indicateur discret de synchronisation en arrière-plan (pas de spinner)
-  const [isBgSyncing, setIsBgSyncing] = useState(false)
-  const [lastSyncTime, setLastSyncTime] = useState<string | null>(null)
+  const [search, setSearch] = useState('')
+  const [selectedAgence, setSelectedAgence] = useState('all')
+  const [showEligibleOnly, setShowEligibleOnly] = useState(false)
   const [agences, setAgences] = useState<string[]>([])
-  
-  // Simuler/Vérifier si l'utilisateur est admin (A adapter selon votre logique d'auth globale)
-  const [isAdmin, setIsAdmin] = useState<boolean>(true)
-
-  // States de Filtrage Avancé initialisés à partir du SessionStorage s'ils existent
-  const [search, setSearch] = useState(() => {
-    if (typeof window !== 'undefined') {
-      try {
-        const saved = sessionStorage.getItem(FILTERS_KEY)
-        if (saved) return JSON.parse(saved).search || ''
-      } catch {}
-    }
-    return ''
+  const [sessionSummary, setSessionSummary] = useState<SessionSummary>({
+    label: 'Aucune session active',
+    quota_total: 0,
+    quota_utilise: 0,
+    quota_restant: 0,
+    session_open: false,
+    last_sync: 0
   })
-  const [selectedAgence, setSelectedAgence] = useState(() => {
-    if (typeof window !== 'undefined') {
-      try {
-        const saved = sessionStorage.getItem(FILTERS_KEY)
-        if (saved) return JSON.parse(saved).selectedAgence || 'all'
-      } catch {}
-    }
-    return 'all'
-  })
-  const [filterEligibility, setFilterEligibility] = useState<'all' | 'eligible' | 'non-eligible'>(() => {
-    if (typeof window !== 'undefined') {
-      try {
-        const saved = sessionStorage.getItem(FILTERS_KEY)
-        if (saved) return JSON.parse(saved).filterEligibility || 'all'
-      } catch {}
-    }
-    return 'all'
-  })
-  const [filterGouv, setFilterGouv] = useState<'all' | 'true' | 'false'>(() => {
-    if (typeof window !== 'undefined') {
-      try {
-        const saved = sessionStorage.getItem(FILTERS_KEY)
-        if (saved) return JSON.parse(saved).filterGouv || 'all'
-      } catch {}
-    }
-    return 'all'
-  })
-  const [filterNusuk, setFilterNusuk] = useState<'all' | 'true' | 'false'>(() => {
-    if (typeof window !== 'undefined') {
-      try {
-        const saved = sessionStorage.getItem(FILTERS_KEY)
-        if (saved) return JSON.parse(saved).filterNusuk || 'all'
-      } catch {}
-    }
-    return 'all'
-  })
-  const [filterFinance, setFilterFinance] = useState<'all' | 'full' | 'partial' | 'none'>(() => {
-    if (typeof window !== 'undefined') {
-      try {
-        const saved = sessionStorage.getItem(FILTERS_KEY)
-        if (saved) return JSON.parse(saved).filterFinance || 'all'
-      } catch {}
-    }
-    return 'all'
-  })
-  const [filterDoc, setFilterDoc] = useState<'all' | 'complet' | 'incomplet'>(() => {
-    if (typeof window !== 'undefined') {
-      try {
-        const saved = sessionStorage.getItem(FILTERS_KEY)
-        if (saved) return JSON.parse(saved).filterDoc || 'all'
-      } catch {}
-    }
-    return 'all'
-  })
-
-  // UI States
-  const [mobileFilterOpen, setMobileFilterOpen] = useState(false)
-  const [selectedIds, setSelectedIds] = useState<string[]>([])
-  const [isUpdating, setIsUpdating] = useState(false)
+  const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string; id: string } | null>(null)
   const [actionInProgressId, setActionInProgressId] = useState<string | null>(null)
+  const [syncStatus, setSyncStatus] = useState<SyncStatus>('syncing')
+  const [connectionError, setConnectionError] = useState<string | null>(null)
+  const [retryCount, setRetryCount] = useState(0)
+  const [userRole, setUserRole] = useState<'admin' | 'user' | null>(null)
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState<string | null>(null)
 
-  // Pagination
-  const [currentPage, setCurrentPage] = useState(1)
-  const itemsPerPage = 25
+  // Références pour la gestion des souscriptions et timers
+  const subscriptionRef = useRef<any>(null)
+  const syncTimerRef = useRef<NodeJS.Timeout | null>(null)
+  const reconnectTimerRef = useRef<NodeJS.Timeout | null>(null)
+  const messageTimerRef = useRef<NodeJS.Timeout | null>(null)
+  const lastSyncRef = useRef<number>(0)
+  const isMountedRef = useRef(true)
 
-  // Modals d'exports
-  const [pdfConfirmOpen, setPdfConfirmOpen] = useState(false)
-
-  // ─── REF MÉMOIRE SCROLL ───────────────────────────────────────────────────
-  const scrollRestored = useRef(false)
-  const hasHadData = useRef(false)
-
-  // ─── PERSISTANCE FILTRES EN TEMPS RÉEL ───────────────────────────────────
+  // Récupérer le rôle utilisateur
   useEffect(() => {
-    try {
-      sessionStorage.setItem(FILTERS_KEY, JSON.stringify({
-        search, selectedAgence, filterEligibility,
-        filterGouv, filterNusuk, filterFinance, filterDoc
-      }))
-    } catch {}
-  }, [search, selectedAgence, filterEligibility, filterGouv, filterNusuk, filterFinance, filterDoc])
-
-  // ─── RESTAURATION SCROLL APRÈS AFFICHAGE DU CACHE ─────────────────────────
-  useEffect(() => {
-    if (data.length > 0 && !scrollRestored.current) {
-      scrollRestored.current = true
+    const getUserRole = async () => {
       try {
-        const savedY = sessionStorage.getItem(SCROLL_KEY)
-        if (savedY) {
-          const target = parseInt(savedY, 10)
-          requestAnimationFrame(() => {
-            window.scrollTo({ top: target, behavior: 'instant' })
-            sessionStorage.removeItem(SCROLL_KEY)
-          })
+        const { data: { user } } = await supabase.auth.getUser()
+        if (user) {
+          const { data } = await supabase
+            .from('user_roles')
+            .select('role')
+            .eq('user_id', user.id)
+            .single()
+          
+          setUserRole(data?.role === 'admin' ? 'admin' : 'user')
         }
-      } catch {}
-    }
-  }, [data])
-
-  // ─── RACCOURCI CLAVIER : ESC vide la recherche ───────────────────────────
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && search) {
-        setSearch('')
-        setCurrentPage(1)
+      } catch (error) {
+        console.error('Erreur récupération rôle utilisateur', error)
+        setUserRole('user')
       }
     }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [search])
 
-  // ─── SAUVEGARDE SCROLL AVANT NAVIGATION ───────────────────────────────────
-  const saveScrollPosition = useCallback(() => {
-    try {
-      sessionStorage.setItem(SCROLL_KEY, String(window.scrollY))
-    } catch {}
+    getUserRole()
   }, [])
 
-  // ─── ACTION UNIQUE : VALIDATION NUSUK DEPUIS LA LISTE ──────────────────────
-  const toggleNusukStatus = async (id: string, currentStatus: boolean) => {
-    setActionInProgressId(id)
-    const targetValue = !currentStatus
-    const { error } = await supabase.from('pelerins').update({ sur_plateforme_nusuk: targetValue }).eq('id', id)
-    if (!error) {
-      setData(prev => prev.map(p => p.id === id ? { ...p, sur_plateforme_nusuk: targetValue } : p))
-    }
-    setActionInProgressId(null)
-  }
+  // Fonction de chargement des données avec gestion d'erreur robuste
+  const syncQuotaToSession = useCallback(async (rows: Pelerin[], sessionOverride?: any) => {
+    if (!isMountedRef.current) return
 
-  // ─── CHARGEMENT DONNÉES ──────────────────────────────────────────────────
-  useEffect(() => {
-    scrollRestored.current = false
-    hasHadData.current = false
+    const targetSession = sessionOverride || (await supabase
+      .from('hajj_sessions')
+      .select('*')
+      .order('date_ouverture', { ascending: false })
+      .limit(1)
+      .maybeSingle()).data
 
-    async function loadData() {
-      setIsBgSyncing(true)
+    if (!targetSession?.id) return
 
-      await cacheFirstFetch<any[]>({
-        cacheKey: selectedYear === 'all' ? 'nusuk_data_all' : `nusuk_data_${selectedYear}`,
-        setLoading: data.length === 0 ? setLoading : () => {}, // Modifié pour ne JAMAIS re-bloquer l'interface si le cache possède déjà des lignes
-        fetchRemote: async () => {
-          const { data: res, error } = await supabase.from('pelerins').select('*, agences(nom_agence)')
-          if (error || !res) return undefined
-          return res
-        },
-        onCache: (res) => {
-          const filteredByYear = selectedYear === 'all' ? res : res.filter(p => Number(p.campagne) === selectedYear)
-          setData(filteredByYear)
-          setLoading(false)
-          const list = [...new Set(filteredByYear.map(p => p.agences?.nom_agence).filter(Boolean))] as string[]
-          setAgences(list.sort())
-          hasHadData.current = true
-        },
-        onRemote: (res) => {
-          const filteredByYear = selectedYear === 'all' ? res : res.filter(p => Number(p.campagne) === selectedYear)
+    const quotaTotal = Number(targetSession.quota_alloue || 0)
+    const quotaUsed = rows.filter((p) => {
+      if (!p.sur_plateforme_gouv) return false
 
-          setData(prev => {
-            if (JSON.stringify(prev) === JSON.stringify(filteredByYear)) return prev
-            return filteredByYear
-          })
+      const row = p as Pelerin & { hajj_session_id?: string | null; created_at?: string; date_inscription?: string }
+      if (targetSession.id && row.hajj_session_id && row.hajj_session_id === targetSession.id) return true
 
-          setLoading(false)
-          const list = [...new Set(filteredByYear.map(p => p.agences?.nom_agence).filter(Boolean))] as string[]
-          setAgences(list.sort())
-          setLastSyncTime(new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }))
-          setIsBgSyncing(false)
+      const candidateDate = row.created_at || row.date_inscription
+      if (candidateDate) {
+        const createdAt = new Date(candidateDate).getTime()
+        if (Number.isFinite(createdAt) && targetSession.date_ouverture) {
+          const sessionStart = new Date(targetSession.date_ouverture).getTime()
+          if (Number.isFinite(sessionStart)) return createdAt >= sessionStart
         }
+        return true
+      }
+
+      return true
+    }).length
+
+    await supabase
+      .from('hajj_sessions')
+      .update({ quota_utilise: quotaUsed })
+      .eq('id', targetSession.id)
+
+    await supabase
+      .from('hajj_campaign_config')
+      .update({
+        quota_session_restant: Math.max(0, quotaTotal - quotaUsed),
+        updated_at: new Date().toISOString()
       })
+      .eq('id', 1)
+  }, [])
 
-      setIsBgSyncing(false)
+  const loadData = useCallback(async (isRetry = false) => {
+    if (!isMountedRef.current) return
+
+    try {
+      setSyncStatus('syncing')
+      setConnectionError(null)
+
+      const [configRes, sessionRes, pelerinsRes] = await Promise.all([
+        supabase
+          .from('hajj_campaign_config')
+          .select('*')
+          .eq('id', 1)
+          .maybeSingle(),
+        supabase
+          .from('hajj_sessions')
+          .select('*')
+          .order('date_ouverture', { ascending: false })
+          .limit(1)
+          .maybeSingle(),
+        supabase
+          .from('pelerins')
+          .select('*, agences(nom_agence)')
+          .order('created_at', { ascending: false })
+      ])
+
+      if (!isMountedRef.current) return
+
+      // Gestion des erreurs Supabase
+      if (configRes.error && configRes.error.code !== 'PGRST116') throw configRes.error
+      if (sessionRes.error && sessionRes.error.code !== 'PGRST116') throw sessionRes.error
+      if (pelerinsRes.error) throw pelerinsRes.error
+
+      const configData = configRes.data
+      const sessionData = sessionRes.data
+      const rawPelerins = pelerinsRes.data || []
+
+      const isSessionOpenInDb = Boolean(
+        sessionData?.id && (
+          sessionData?.est_active === true ||
+          sessionData?.session_ouverte === true ||
+          sessionData?.is_active === true
+        )
+      )
+
+      const isSessionOpen = isSessionOpenInDb || Boolean(configData?.session_ouverte)
+
+      if (sessionData?.id && isSessionOpen) {
+        await supabase
+          .from('pelerins')
+          .update({ hajj_session_id: sessionData.id })
+          .eq('sur_plateforme_gouv', true)
+          .is('hajj_session_id', null)
+      }
+
+      // Filtrage par année
+      const filteredByYear = selectedYear === 'all'
+        ? rawPelerins
+        : rawPelerins.filter((p) => Number(p.campagne ?? 0) === Number(selectedYear))
+
+      setPelerins(filteredByYear)
+      setRetryCount(0)
+
+      // Extraction des agences uniques
+      const agencyList = [...new Set(
+        filteredByYear
+          .map((p) => p.agences?.nom_agence)
+          .filter(Boolean)
+      )] as string[]
+      setAgences(agencyList.sort())
+
+      // Calcul des quotas en temps réel à partir des inscriptions Gouv réelles
+      const quotaTotal = Number(sessionData?.quota_alloue || configData?.quota_session_total || configData?.quota_total_global || 0)
+      const quotaUsed = filteredByYear.filter((p) => {
+        if (!p.sur_plateforme_gouv) return false
+
+        const row = p as Pelerin & { hajj_session_id?: string | null; created_at?: string; date_inscription?: string }
+        if (sessionData?.id && row.hajj_session_id && row.hajj_session_id === sessionData.id) return true
+
+        const candidateDate = row.created_at || row.date_inscription
+        if (candidateDate) {
+          const createdAt = new Date(candidateDate).getTime()
+          if (Number.isFinite(createdAt) && sessionData?.date_ouverture) {
+            const sessionStart = new Date(sessionData.date_ouverture).getTime()
+            if (Number.isFinite(sessionStart)) return createdAt >= sessionStart
+          }
+          return true
+        }
+
+        return true
+      }).length
+
+      if (sessionData?.id) {
+        await syncQuotaToSession(filteredByYear, sessionData)
+      }
+
+      setSessionSummary((prev) => ({
+        label: sessionData?.nom_session || (isSessionOpen ? 'Session ouverte' : 'Aucune session active'),
+        quota_total: quotaTotal,
+        quota_utilise: quotaUsed,
+        quota_restant: Math.max(0, quotaTotal - quotaUsed),
+        session_open: isSessionOpen,
+        last_sync: Date.now()
+      }))
+
+      setSyncStatus('connected')
+      lastSyncRef.current = Date.now()
+    } catch (error: any) {
+      console.error('Erreur chargement données', error)
+      
+      if (!isMountedRef.current) return
+
+      // Gestion des erreurs de connexion
+      if (error?.message?.includes('Failed to fetch') || error?.code === 'NETWORK_ERROR') {
+        setConnectionError('Connexion perdue. Tentative de reconnexion...')
+        setSyncStatus('disconnected')
+        
+        // Retry exponentiel avec backoff
+        const nextRetry = Math.min(1000 * Math.pow(2, retryCount), 30000)
+        setRetryCount(prev => prev + 1)
+        
+        if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current)
+        reconnectTimerRef.current = setTimeout(() => {
+          if (isMountedRef.current) loadData(true)
+        }, nextRetry)
+      } else {
+        setConnectionError('Erreur lors du chargement des données')
+        setSyncStatus('error')
+      }
+    } finally {
+      if (isMountedRef.current) {
+        setLoading(false)
+      }
     }
-
-    loadData()
-    setSelectedIds([])
-    setCurrentPage(1)
   }, [selectedYear])
 
-  // ─── FILTRAGE MULTICRITÈRES ───────────────────────────────────────────────
-  const filteredData = useMemo(() => {
-    return data.filter(p => {
-      const nomComplet = `${p.prenom || ''} ${p.nom_complet || ''}`.toLowerCase()
-      const matchesSearch = nomComplet.includes(search.toLowerCase()) || (p.num_passeport && p.num_passeport.toLowerCase().includes(search.toLowerCase()))
-      const matchesAgence = selectedAgence === 'all' || p.agences?.nom_agence === selectedAgence
+  // Chargement initial et synchronisation
+  useEffect(() => {
+    isMountedRef.current = true
+    loadData()
 
-      const isDocComplet = !!p.document_url
-      const isEligibleBase = p.sur_plateforme_gouv && isDocComplet
+    // Synchronisation toutes les 2 secondes (temps réel)
+    if (syncTimerRef.current) clearInterval(syncTimerRef.current)
+    syncTimerRef.current = setInterval(() => {
+      if (isMountedRef.current && Date.now() - lastSyncRef.current > 2000) {
+        void loadData()
+      }
+    }, 2000)
 
-      const matchesEligible = filterEligibility === 'all' || (filterEligibility === 'eligible' ? isEligibleBase : !isEligibleBase)
-      const matchesGouv = filterGouv === 'all' || (filterGouv === 'true' ? p.sur_plateforme_gouv : !p.sur_plateforme_gouv)
-      const matchesNusuk = filterNusuk === 'all' || (filterNusuk === 'true' ? p.sur_plateforme_nusuk : !p.sur_plateforme_nusuk)
-      const matchesDoc = filterDoc === 'all' || (filterDoc === 'complet' ? isDocComplet : !isDocComplet)
+    return () => {
+      if (syncTimerRef.current) clearInterval(syncTimerRef.current)
+    }
+  }, [selectedYear, loadData])
 
-      let matchesFinance = true
-      const total = p.total_paye || 0
-      if (filterFinance === 'full') matchesFinance = total >= 3000000
-      else if (filterFinance === 'partial') matchesFinance = total > 0 && total < 3000000
-      else if (filterFinance === 'none') matchesFinance = total === 0
+  // Souscription aux changements en temps réel Supabase
+  useEffect(() => {
+    if (!isMountedRef.current) return
 
-      return matchesSearch && matchesAgence && matchesEligible && matchesGouv && matchesNusuk && matchesFinance && matchesDoc
-    })
-  }, [data, search, selectedAgence, filterEligibility, filterGouv, filterNusuk, filterFinance, filterDoc])
+    const setupRealtimeSubscription = async () => {
+      try {
+        // Souscription aux changements de pèlerins
+        subscriptionRef.current = supabase
+          .channel('pelerins-changes')
+          .on(
+            'postgres_changes',
+            {
+              event: '*',
+              schema: 'public',
+              table: 'pelerins'
+            },
+            (payload) => {
+              if (!isMountedRef.current) return
+              
+              // Rechargement immédiat des données
+              loadData()
+            }
+          )
+          .on(
+            'postgres_changes',
+            {
+              event: '*',
+              schema: 'public',
+              table: 'hajj_sessions'
+            },
+            (payload) => {
+              if (!isMountedRef.current) return
+              loadData()
+            }
+          )
+          .subscribe((status) => {
+            if (status === 'SUBSCRIBED') {
+              setSyncStatus('connected')
+            } else if (status === 'CLOSED') {
+              setSyncStatus('disconnected')
+            }
+          })
+      } catch (error) {
+        console.error('Erreur souscription temps réel', error)
+      }
+    }
 
-  // ─── PAGINATION ───────────────────────────────────────────────────────────
-  const paginatedData = useMemo(() => {
-    const start = (currentPage - 1) * itemsPerPage
-    return filteredData.slice(start, start + itemsPerPage)
-  }, [filteredData, currentPage])
+    setupRealtimeSubscription()
 
-  const totalPages = Math.ceil(filteredData.length / itemsPerPage)
+    return () => {
+      if (subscriptionRef.current) {
+        supabase.removeChannel(subscriptionRef.current)
+      }
+    }
+  }, [loadData])
 
-  // ─── STATISTIQUES ─────────────────────────────────────────────────────────
-  const stats = useMemo(() => {
-    const total = filteredData.length
-    const nusukInscrit = filteredData.filter(p => p.sur_plateforme_nusuk).length
-    const gouvInscrit = filteredData.filter(p => p.sur_plateforme_gouv).length
-    const totalEligibles = filteredData.filter(p => p.sur_plateforme_gouv && p.document_url).length
-    return { total, nusukInscrit, gouvInscrit, totalEligibles }
-  }, [filteredData])
+  // Gestion des messages avec auto-fermeture
+  useEffect(() => {
+    if (!message) return
+    
+    if (messageTimerRef.current) clearTimeout(messageTimerRef.current)
+    messageTimerRef.current = setTimeout(() => {
+      if (isMountedRef.current) setMessage(null)
+    }, 3000)
 
-  // ─── NOMBRE DE FILTRES ACTIFS ─────────────────────────────────────────────
-  const activeFilterCount = useMemo(() => {
-    let count = 0
-    if (selectedAgence !== 'all') count++
-    if (filterEligibility !== 'all') count++
-    if (filterGouv !== 'all') count++
-    if (filterNusuk !== 'all') count++
-    if (filterFinance !== 'all') count++
-    if (filterDoc !== 'all') count++
-    return count
-  }, [selectedAgence, filterEligibility, filterGouv, filterNusuk, filterFinance, filterDoc])
+    return () => {
+      if (messageTimerRef.current) clearTimeout(messageTimerRef.current)
+    }
+  }, [message])
 
-  // ─── RÉINITIALISER TOUS LES FILTRES ──────────────────────────────────────
-  const resetAllFilters = useCallback(() => {
-    setSearch('')
-    setSelectedAgence('all')
-    setFilterEligibility('all')
-    setFilterGouv('all')
-    setFilterNusuk('all')
-    setFilterFinance('all')
-    setFilterDoc('all')
-    setCurrentPage(1)
+  // Cleanup au démontage
+  useEffect(() => {
+    return () => {
+      isMountedRef.current = false
+      if (syncTimerRef.current) clearInterval(syncTimerRef.current)
+      if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current)
+      if (messageTimerRef.current) clearTimeout(messageTimerRef.current)
+      if (subscriptionRef.current) supabase.removeChannel(subscriptionRef.current)
+    }
   }, [])
 
-  // ─── ACTIONS DE MASSE ─────────────────────────────────────────────────────
-  const handleBulkNusukStatus = async (targetValue: boolean) => {
-    if (selectedIds.length === 0) return
-    setIsUpdating(true)
-    const { error } = await supabase.from('pelerins').update({ sur_plateforme_nusuk: targetValue }).in('id', selectedIds)
-    if (!error) {
-      setData(prev => prev.map(p => selectedIds.includes(p.id) ? { ...p, sur_plateforme_nusuk: targetValue } : p))
-      setSelectedIds([])
-    }
-    setIsUpdating(false)
-  }
-
-  const toggleSelectAll = () => {
-    if (selectedIds.length === paginatedData.length) {
-      setSelectedIds([])
-    } else {
-      setSelectedIds(paginatedData.map(p => p.id))
-    }
-  }
-
-  const toggleSelectRow = (id: string) => {
-    setSelectedIds(prev => prev.includes(id) ? prev.filter(item => item !== id) : [...prev, id])
-  }
-
-  // ─── EXPORTS ──────────────────────────────────────────────────────────────
-  const handleExcelExport = () => {
-    let csvContent = 'data:text/csv;charset=utf-8,\uFEFF'
-    csvContent += `N°;Prenom et Nom;Agence;Passeport;Dossier;Gouv Mali;Nusuk KSA${!isAdmin ? ';Montant Payé' : ''}\n`
-    filteredData.forEach((p, idx) => {
-      csvContent += `${idx + 1};${p.prenom || ''} ${p.nom_complet || ''};${p.agences?.nom_agence || '—'};${p.num_passeport || '—'};${p.document_url ? 'Complet' : 'Incomplet'};${p.sur_plateforme_gouv ? 'Validé' : 'Non'};${p.sur_plateforme_nusuk ? 'Inscrit' : 'Non'}${!isAdmin ? `;${p.total_paye || 0}` : ''}\n`
+  // Filtrage et statistiques avec memoization
+  const filteredData = useMemo(() => {
+    const query = search.toLowerCase()
+    return pelerins.filter((p) => {
+      const name = `${p.prenom || ''} ${p.nom_complet || ''}`.toLowerCase()
+      const matchesSearch = !query || name.includes(query) || (p.num_passeport || '').toLowerCase().includes(query)
+      const matchesAgence = selectedAgence === 'all' || p.agences?.nom_agence === selectedAgence
+      const isEligibleToGouv = Boolean(p.document_url)
+      const matchesEligibility = !showEligibleOnly || isEligibleToGouv
+      return matchesSearch && matchesAgence && matchesEligibility
     })
-    const encodedUri = encodeURI(csvContent)
-    const link = document.createElement('a')
-    link.setAttribute('href', encodedUri)
-    link.setAttribute('download', `Export_Nusuk_Campagne_${selectedYear}.csv`)
-    document.body.appendChild(link)
-    link.click()
-    document.body.removeChild(link)
+  }, [pelerins, search, selectedAgence, showEligibleOnly])
+
+  const stats = useMemo(() => {
+    const total = filteredData.length
+    const gouvInscrits = filteredData.filter((p) => p.sur_plateforme_gouv).length
+    const nusukInscrits = filteredData.filter((p) => p.sur_plateforme_nusuk).length
+    const eligiblesGouv = filteredData.filter((p) => Boolean(p.document_url)).length
+
+    return { total, gouvInscrits, nusukInscrits, eligiblesGouv }
+  }, [filteredData])
+
+  // Mise à jour du statut Gouv
+  const toggleGouvStatus = async (id: string, currentStatus: boolean) => {
+    if (!sessionSummary.session_open) {
+      setMessage({ 
+        type: 'error', 
+        text: 'La session Gouv est fermée. Les inscriptions sont verrouillées.',
+        id: `msg-${Date.now()}`
+      })
+      return
+    }
+
+    const p = pelerins.find((item) => item.id === id)
+    if (!p) return
+
+    if (currentStatus) {
+      if (userRole !== 'admin') {
+        setMessage({
+          type: 'error',
+          text: 'Seul l’administrateur peut retirer un pèlerin de la plateforme Gouv.',
+          id: `msg-${Date.now()}`
+        })
+        return
+      }
+    }
+
+    if (!currentStatus && !p.document_url) {
+      setMessage({ 
+        type: 'error', 
+        text: 'Ce pèlerin n\'est pas encore éligible au Gouv : le dossier n\'est pas complet.',
+        id: `msg-${Date.now()}`
+      })
+      return
+    }
+
+    setActionInProgressId(id)
+    try {
+      const nextValue = !currentStatus
+      let activeSessionId: string | null = null
+
+      if (nextValue) {
+        const { data: sessionData } = await supabase
+          .from('hajj_sessions')
+          .select('id')
+          .order('date_ouverture', { ascending: false })
+          .limit(1)
+          .maybeSingle()
+        activeSessionId = sessionData?.id ?? null
+      }
+
+      const { error } = await supabase
+        .from('pelerins')
+        .update({
+          sur_plateforme_gouv: nextValue,
+          hajj_session_id: nextValue ? activeSessionId : null
+        })
+        .eq('id', id)
+      
+      if (error) throw error
+
+      // Mise à jour locale immédiate
+      setPelerins((prev) => prev.map((item) => 
+        item.id === id ? { ...item, sur_plateforme_gouv: !currentStatus } : item
+      ))
+
+      setMessage({ 
+        type: 'success', 
+        text: !currentStatus ? 'Pèlerin inscrit sur la plateforme Gouv.' : 'Inscription Gouv retirée par l’administrateur.',
+        id: `msg-${Date.now()}`
+      })
+
+      // Synchronisation immédiate du quota côté base puis rechargement
+      await syncQuotaToSession(
+        pelerins.map((item) => item.id === id ? { ...item, sur_plateforme_gouv: !currentStatus } : item),
+        sessionSummary.label ? null : null
+      )
+      setTimeout(() => void loadData(), 500)
+    } catch (error) {
+      console.error('Erreur mise à jour Gouv', error)
+      setMessage({ 
+        type: 'error', 
+        text: 'Impossible de mettre à jour le statut Gouv.',
+        id: `msg-${Date.now()}`
+      })
+    } finally {
+      setActionInProgressId(null)
+    }
   }
 
-  const handlePdfConfirm = (includeFinance: boolean) => {
-    generateAndPrintPDF(filteredData, "Registre Général d'Enregistrement Nusuk", isAdmin ? false : includeFinance, selectedYear)
-    setPdfConfirmOpen(false)
+  // Suppression d'un pèlerin (admin uniquement)
+  const deletePelerin = async (id: string) => {
+    if (userRole !== 'admin') {
+      setMessage({ 
+        type: 'error', 
+        text: 'Seuls les administrateurs peuvent supprimer des pèlerins.',
+        id: `msg-${Date.now()}`
+      })
+      return
+    }
+
+    setActionInProgressId(id)
+    try {
+      const { error } = await supabase
+        .from('pelerins')
+        .delete()
+        .eq('id', id)
+      
+      if (error) throw error
+
+      setPelerins((prev) => prev.filter((item) => item.id !== id))
+      setMessage({ 
+        type: 'success', 
+        text: 'Pèlerin supprimé avec succès.',
+        id: `msg-${Date.now()}`
+      })
+      setShowDeleteConfirm(null)
+      
+      setTimeout(() => loadData(), 500)
+    } catch (error) {
+      console.error('Erreur suppression pèlerin', error)
+      setMessage({ 
+        type: 'error', 
+        text: 'Impossible de supprimer le pèlerin.',
+        id: `msg-${Date.now()}`
+      })
+    } finally {
+      setActionInProgressId(null)
+    }
   }
 
-  const isFirstLoad = loading && data.length === 0
+  // Forcer la synchronisation manuelle
+  const forceSync = () => {
+    loadData()
+  }
 
   return (
-    <div className="bg-[#f8fafc] min-h-screen pb-12">
-      {/* ─── STICKY HEADER COMPACT ET MODERNE (PC & MOBILE COHÉRENT) ─── */}
-      <div className="bg-white border-b border-slate-200/60 shadow-sm sticky top-0 z-40 backdrop-blur-md bg-white/95 transition-all">
-        <div className="max-w-7xl mx-auto px-4 md:px-8 py-3.5 md:py-5 flex items-center justify-between gap-3">
-          <div className="flex items-center gap-2.5 md:gap-4 min-w-0">
-            <Link href="/hajj/admin" className="p-2 bg-slate-50 border border-slate-200/70 hover:border-slate-300 rounded-xl text-slate-500 hover:text-indigo-600 transition-colors shrink-0">
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 pb-12">
+      {/* Header */}
+      <div className="sticky top-0 z-40 border-b border-slate-200 bg-white/95 backdrop-blur-md shadow-sm">
+        <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-4 md:px-8">
+          <div className="flex items-center gap-3">
+            <Link 
+              href="/hajj/admin" 
+              className="rounded-xl border border-slate-200 bg-slate-50 p-2 text-slate-600 transition hover:border-slate-300 hover:text-indigo-600 hover:bg-indigo-50"
+            >
               <ArrowLeft size={16} />
             </Link>
-            <div className="min-w-0">
-              <span className="hidden md:inline-block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-0.5">Espace Administrateur</span>
-              <h1 className="text-base md:text-2xl font-black text-slate-900 tracking-tight uppercase truncate flex items-center gap-2">
-                <Globe size={18} className="text-indigo-600 shrink-0" /> <span className="truncate">Nusuk Central</span>
-              </h1>
+            <div>
+              <p className="text-[10px] font-black uppercase tracking-[0.28em] text-slate-400">Espace administration</p>
+              <div className="flex flex-wrap items-center gap-2">
+                <h1 className="flex items-center gap-2 text-lg font-black tracking-tight text-slate-900 md:text-2xl">
+                  <Globe size={18} className="text-indigo-600" /> Plateforme MDH
+                </h1>
+                <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[10px] font-black ${sessionSummary.session_open ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}`}>
+                  {sessionSummary.session_open ? <CheckCircle2 size={12} /> : <Lock size={12} />}
+                  {sessionSummary.session_open ? 'Ouverte' : 'Fermée'}
+                </span>
+              </div>
             </div>
           </div>
-          
-          <div className="flex items-center gap-2 md:gap-3 shrink-0">
-            {isBgSyncing && (
-              <span className="flex items-center gap-1 text-[10px] font-bold text-indigo-600 bg-indigo-50/80 px-2 py-1 rounded-lg border border-indigo-100">
-                <RefreshCw size={11} className="animate-spin" />
-                <span className="hidden xs:inline">Sync...</span>
-              </span>
-            )}
-            {!isBgSyncing && lastSyncTime && (
-              <span className="text-[10px] font-bold text-slate-400 bg-slate-50 px-2 py-1 rounded-lg border border-slate-100 hidden sm:block">
-                À jour : {lastSyncTime}
-              </span>
-            )}
-            <YearSelector />
-          </div>
-        </div>
-      </div>
 
-      <div className="max-w-7xl mx-auto px-4 md:px-8 mt-4 md:mt-6">
-        {/* ─── KPI COMPACTS ET RESPONSIVES ─── */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-2.5 md:gap-5 mb-4 md:mb-6">
-          <div className="bg-white border border-slate-200/60 rounded-xl p-3 md:p-4 shadow-sm">
-            <p className="text-[9px] md:text-[10px] font-bold text-slate-400 uppercase tracking-wider truncate">Cible active filtrée</p>
-            <p className="text-lg md:text-2xl font-black text-slate-900 mt-0.5 md:mt-1 tabular-nums">{filteredData.length}</p>
-          </div>
-          <div className="bg-white border border-slate-200/60 rounded-xl p-3 md:p-4 shadow-sm border-l-indigo-500 border-l-2">
-            <p className="text-[9px] md:text-[10px] font-bold text-slate-400 uppercase tracking-wider truncate">Éligibles Nusuk</p>
-            <p className="text-lg md:text-2xl font-black text-indigo-600 mt-0.5 md:mt-1 tabular-nums">{stats.totalEligibles}</p>
-          </div>
-          <div className="bg-white border border-slate-200/60 rounded-xl p-3 md:p-4 shadow-sm border-l-teal-500 border-l-2">
-            <p className="text-[9px] md:text-[10px] font-bold text-slate-400 uppercase tracking-wider truncate">Inscrits Gouv</p>
-            <p className="text-lg md:text-2xl font-black text-teal-600 mt-0.5 md:mt-1 tabular-nums">{stats.gouvInscrit}</p>
-          </div>
-          <div className="bg-white border border-slate-200/60 rounded-xl p-3 md:p-4 shadow-sm border-l-purple-500 border-l-2">
-            <p className="text-[9px] md:text-[10px] font-bold text-slate-400 uppercase tracking-wider truncate">Inscrits Nusuk KSA</p>
-            <p className="text-lg md:text-2xl font-black text-purple-600 mt-0.5 md:mt-1 tabular-nums">{stats.nusukInscrit}</p>
-          </div>
-        </div>
-
-        {/* ─── BARRE DE FILTRES DESKTOP ─── */}
-        <div className="hidden lg:grid grid-cols-4 xl:grid-cols-7 gap-3 bg-white p-4 rounded-2xl border border-slate-200/60 shadow-sm mb-3">
-          <div className="relative col-span-1 xl:col-span-2">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={15} />
-            <input
-              type="text" placeholder="Nom ou Passeport… (Échap pour vider)" value={search}
-              onChange={e => { setSearch(e.target.value); setCurrentPage(1) }}
-              className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 text-xs font-bold rounded-xl outline-none focus:border-indigo-500 focus:bg-white"
-            />
-            {search && (
-              <button onClick={() => { setSearch(''); setCurrentPage(1) }} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700">
-                <X size={13} />
-              </button>
-            )}
-          </div>
-
-          <select value={selectedAgence} onChange={e => { setSelectedAgence(e.target.value); setCurrentPage(1) }} className="bg-slate-50 border border-slate-200 text-xs font-bold rounded-xl px-3 py-2 outline-none">
-            <option value="all">Toutes les agences</option>
-            {agences.map(ag => <option key={ag} value={ag}>{ag}</option>)}
-          </select>
-
-          <select value={filterEligibility} onChange={e => { setFilterEligibility(e.target.value as any); setCurrentPage(1) }} className="bg-slate-50 border border-slate-200 text-xs font-bold rounded-xl px-3 py-2 outline-none">
-            <option value="all">Éligibilité (Tous)</option>
-            <option value="eligible">Éligibles Nusuk uniquement</option>
-            <option value="non-eligible">Non éligibles</option>
-          </select>
-
-          <select value={filterGouv} onChange={e => { setFilterGouv(e.target.value as any); setCurrentPage(1) }} className="bg-slate-50 border border-slate-200 text-xs font-bold rounded-xl px-3 py-2 outline-none">
-            <option value="all">Plateforme Gouv (Tous)</option>
-            <option value="true">Inscrits Gouv</option>
-            <option value="false">Non inscrits Gouv</option>
-          </select>
-
-          <select value={filterNusuk} onChange={e => { setFilterNusuk(e.target.value as any); setCurrentPage(1) }} className="bg-slate-50 border border-slate-200 text-xs font-bold rounded-xl px-3 py-2 outline-none">
-            <option value="all">Portail Nusuk (Tous)</option>
-            <option value="true">Inscrits Nusuk</option>
-            <option value="false">Non inscrits Nusuk</option>
-          </select>
-
-          {!isAdmin && (
-            <select value={filterFinance} onChange={e => { setFilterFinance(e.target.value as any); setCurrentPage(1) }} className="bg-slate-50 border border-slate-200 text-xs font-bold rounded-xl px-3 py-2 outline-none">
-              <option value="all">Filtre Financier (Tous)</option>
-              <option value="full">Paiement Total (≥ 3M)</option>
-              <option value="partial">Paiement Partiel</option>
-              <option value="none">Aucun paiement</option>
-            </select>
-          )}
-        </div>
-
-        {/* ─── CHIPS FILTRES ACTIFS + RESET (Desktop) ─── */}
-        {activeFilterCount > 0 && (
-          <div className="hidden lg:flex items-center gap-2 mb-4 flex-wrap">
-            <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider">{activeFilterCount} filtre(s) actif(s)</span>
-            <button onClick={resetAllFilters} className="flex items-center gap-1 text-[10px] font-black text-rose-500 hover:text-rose-700 bg-rose-50 border border-rose-100 px-2.5 py-1 rounded-lg transition-colors">
-              <X size={10} /> Tout effacer
-            </button>
-          </div>
-        )}
-
-        {/* ─── ACTION BAR MOBILE OPTIMISÉE, MODERNE AVEC BOUTON EXPORT PLACÉ À DROITE DE NOUVEAU/FILTRES ─── */}
-        <div className="flex lg:hidden flex-col gap-2.5 mb-4 bg-white p-3 rounded-2xl border border-slate-200/70 shadow-sm">
-          <div className="relative w-full">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={14} />
-            <input
-              type="text" placeholder="Rechercher nom, passeport..." value={search}
-              onChange={e => { setSearch(e.target.value); setCurrentPage(1) }}
-              className="w-full pl-9 pr-8 py-2 bg-slate-50 border border-slate-200 text-xs font-bold rounded-xl outline-none focus:border-indigo-500 focus:bg-white transition-all"
-            />
-            {search && (
-              <button onClick={() => { setSearch(''); setCurrentPage(1) }} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400">
-                <X size={13} />
-              </button>
-            )}
-          </div>
-          <div className="flex gap-2 w-full">
-            <button onClick={() => setMobileFilterOpen(true)} className="relative flex-1 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-700 flex items-center justify-center gap-1.5 text-xs font-black transition-all active:scale-95">
-              <SlidersHorizontal size={14} className="text-indigo-600" />
-              <span>Filtres</span>
-              {activeFilterCount > 0 && (
-                <span className="w-4 h-4 bg-indigo-600 text-white text-[9px] font-black rounded-full flex items-center justify-center">
-                  {activeFilterCount}
+          <div className="flex items-center gap-2">
+            <div className="rounded-xl border border-indigo-200 bg-indigo-50 px-3 py-2 text-right">
+              <p className="text-[9px] font-black uppercase tracking-[0.24em] text-indigo-600">Quota</p>
+              <p className="text-sm font-black text-indigo-700">{sessionSummary.quota_utilise}/{sessionSummary.quota_total}</p>
+            </div>
+            {/* Statut de synchronisation */}
+            <div className="flex items-center gap-2">
+              {syncStatus === 'connected' && (
+                <span className="flex items-center gap-1.5 rounded-lg border border-emerald-100 bg-emerald-50 px-2.5 py-1 text-[10px] font-bold text-emerald-600">
+                  <Wifi size={11} className="animate-pulse" /> Connecté
                 </span>
               )}
-            </button>
+              {syncStatus === 'syncing' && (
+                <span className="flex items-center gap-1.5 rounded-lg border border-indigo-100 bg-indigo-50 px-2.5 py-1 text-[10px] font-bold text-indigo-600">
+                  <RefreshCw size={11} className="animate-spin" /> Sync
+                </span>
+              )}
+              {syncStatus === 'disconnected' && (
+                <span className="flex items-center gap-1.5 rounded-lg border border-amber-100 bg-amber-50 px-2.5 py-1 text-[10px] font-bold text-amber-600">
+                  <WifiOff size={11} /> Déconnecté
+                </span>
+              )}
+              {syncStatus === 'error' && (
+                <span className="flex items-center gap-1.5 rounded-lg border border-rose-100 bg-rose-50 px-2.5 py-1 text-[10px] font-bold text-rose-600">
+                  <AlertCircle size={11} /> Erreur
+                </span>
+              )}
+            </div>
 
-            {/* Bouton Export Moderne positionné directement à côté du bouton de gestion principal sur mobile */}
-            <button 
-              onClick={() => setPdfConfirmOpen(true)} 
-              className="flex-1 py-2 bg-indigo-600 text-white font-black rounded-xl text-xs flex items-center justify-center gap-1.5 shadow-sm active:scale-95 transition-all"
+            {/* Bouton de synchronisation manuelle */}
+            <button
+              onClick={forceSync}
+              disabled={syncStatus === 'syncing'}
+              className="rounded-lg border border-slate-200 bg-slate-50 p-2 text-slate-600 transition hover:border-slate-300 hover:text-indigo-600 hover:bg-indigo-50 disabled:opacity-50"
+              title="Forcer la synchronisation"
             >
-              <Download size={14} />
-              <span>Exporter</span>
+              <RefreshCw size={15} className={syncStatus === 'syncing' ? 'animate-spin' : ''} />
             </button>
           </div>
-        </div>
-
-        {/* ─── ZONE ACTIONS DE MASSE ─── */}
-        {selectedIds.length > 0 && (
-          <div className="bg-indigo-900 text-white px-4 py-3 rounded-xl flex items-center justify-between shadow-lg animate-fade-in mb-4">
-            <span className="text-xs font-bold">{selectedIds.length} ligne(s) sélectionnée(s)</span>
-            <div className="flex gap-2">
-              <button disabled={isUpdating} onClick={() => handleBulkNusukStatus(true)} className="px-2.5 py-1.5 bg-white/20 hover:bg-white/30 rounded-lg text-[11px] font-black uppercase tracking-wider transition-all disabled:opacity-50">
-                Inscrire Nusuk
-              </button>
-              <button disabled={isUpdating} onClick={() => handleBulkNusukStatus(false)} className="px-2.5 py-1.5 bg-rose-600 hover:bg-rose-700 rounded-lg text-[11px] font-black uppercase tracking-wider transition-all disabled:opacity-50">
-                Retirer Nusuk
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* ─── VERSION MOBILE : LISTING UI/UX ENTIÈREMENT REVU ─── */}
-        <div className="block lg:hidden space-y-2.5">
-          {isFirstLoad ? (
-            <div className="p-12 text-center font-black text-slate-300 animate-pulse uppercase text-xs tracking-widest">Chargement du registre...</div>
-          ) : paginatedData.length === 0 ? (
-            <div className="bg-white rounded-xl p-8 border border-slate-100 text-center shadow-sm">
-              <p className="text-slate-400 font-bold text-sm mb-2">Aucun résultat trouvé</p>
-              {activeFilterCount > 0 && (
-                <button onClick={resetAllFilters} className="text-xs text-indigo-600 font-bold underline underline-offset-2">Réinitialiser les filtres</button>
-              )}
-            </div>
-          ) : (
-            paginatedData.map(p => {
-              const isEligible = p.sur_plateforme_gouv && p.document_url
-              return (
-                <div key={p.id} className="bg-white border border-slate-200/70 rounded-xl p-3.5 shadow-sm flex flex-col justify-between relative transition-all hover:border-slate-300">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="flex items-center gap-2.5 min-w-0">
-                      <button onClick={() => toggleSelectRow(p.id)} className="text-slate-400 shrink-0">
-                        {selectedIds.includes(p.id) ? <CheckSquare size={18} className="text-indigo-600" /> : <Square size={18} />}
-                      </button>
-                      <div className="min-w-0">
-                        <p className="font-black text-slate-900 uppercase text-xs truncate">{p.prenom} {p.nom_complet}</p>
-                        <p className="text-[10px] text-slate-400 font-bold truncate mt-0.5 flex items-center gap-1">
-                          <Building2 size={10} className="text-slate-400 shrink-0" /> {p.agences?.nom_agence || 'Aucune agence'}
-                        </p>
-                      </div>
-                    </div>
-                    <span className={`text-[9px] font-black px-2 py-0.5 rounded-md uppercase tracking-wider shrink-0 ${isEligible ? 'bg-emerald-50 text-emerald-600 border border-emerald-100' : 'bg-slate-50 text-slate-400'}`}>
-                      {isEligible ? 'Éligible' : 'Incomplet'}
-                    </span>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-2 my-2.5 bg-slate-50 p-2 rounded-xl border border-slate-100">
-                    <div>
-                      <p className="text-[8px] text-slate-400 font-bold uppercase tracking-wider">Passeport</p>
-                      <p className="text-xs font-mono font-bold text-slate-700 flex items-center gap-1 mt-0.5">
-                        <CreditCard size={11} className="text-slate-400" /> {p.num_passeport || '—'}
-                      </p>
-                    </div>
-                    {!isAdmin ? (
-                      <div className="text-right">
-                        <p className="text-[8px] text-slate-400 font-bold uppercase tracking-wider">Situation Finance</p>
-                        <p className="text-xs font-black text-slate-700 mt-0.5">
-                          {(p.total_paye || 0) > 0 ? `${(p.total_paye || 0).toLocaleString('fr-FR')} F` : '0 F'}
-                        </p>
-                      </div>
-                    ) : (
-                      <div className="text-right">
-                        <p className="text-[8px] text-slate-400 font-bold uppercase tracking-wider">Mali Gouv Status</p>
-                        <p className={`text-[10px] font-black mt-0.5 ${p.sur_plateforme_gouv ? 'text-teal-600' : 'text-slate-400'}`}>
-                          {p.sur_plateforme_gouv ? '✓ Validé' : '— En attente'}
-                        </p>
-                      </div>
-                    )}
-                  </div>
-
-                  <div className="flex justify-between items-center pt-2.5 border-t border-slate-100 gap-2">
-                    {/* BOUTON DE VALIDATION NUSUK INLINE DIRECTPUIS LA LISTE MOBILE */}
-                    <button 
-                      disabled={actionInProgressId === p.id}
-                      onClick={() => toggleNusukStatus(p.id, !!p.sur_plateforme_nusuk)}
-                      className={`flex items-center gap-1 text-[9px] font-black uppercase px-2.5 py-1.5 rounded-lg border transition-all ${
-                        p.sur_plateforme_nusuk 
-                          ? 'bg-purple-50 text-purple-700 border-purple-200 hover:bg-purple-100' 
-                          : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-indigo-50 hover:text-indigo-600'
-                      }`}
-                    >
-                      <UserCheck size={12} className={actionInProgressId === p.id ? 'animate-spin' : ''} />
-                      <span>{p.sur_plateforme_nusuk ? 'Nusuk Valide ✓' : 'Valider Nusuk'}</span>
-                    </button>
-
-                    {/* Navigation Instantanée SANS blocage de rafraîchissement */}
-                    <Link
-                      href={`/hajj/pelerin/${p.id}`}
-                      onClick={saveScrollPosition}
-                      className="p-1.5 bg-slate-100 text-slate-700 hover:bg-indigo-600 hover:text-white rounded-lg transition-colors shrink-0"
-                    >
-                      <Eye size={14} />
-                    </Link>
-                  </div>
-                </div>
-              )
-            })
-          )}
-        </div>
-
-        {/* ─── VERSION DESKTOP : TABLEAU COMPLET ─── */}
-        <div className="hidden lg:block bg-white rounded-2xl border border-slate-200/60 shadow-sm overflow-hidden">
-          <table className="w-full text-left border-collapse">
-            <thead>
-              <tr className="bg-slate-50/70 border-b border-slate-200/60">
-                <th className="px-4 py-4 w-10">
-                  <button onClick={toggleSelectAll} className="text-slate-400">
-                    {selectedIds.length === paginatedData.length && paginatedData.length > 0 ? <CheckSquare size={16} className="text-indigo-600" /> : <Square size={16} />}
-                  </button>
-                </th>
-                <th className="px-4 py-4 text-[10px] font-black text-slate-400 uppercase tracking-wider">Pèlerin</th>
-                <th className="px-4 py-4 text-[10px] font-black text-slate-400 uppercase tracking-wider">Agence</th>
-                <th className="px-4 py-4 text-[10px] font-black text-slate-400 uppercase tracking-wider">Passeport</th>
-                <th className="px-4 py-4 text-[10px] font-black text-slate-400 uppercase tracking-wider text-center">Dossier</th>
-                <th className="px-4 py-4 text-[10px] font-black text-slate-400 uppercase tracking-wider text-center">Gouv. Mali</th>
-                <th className="px-4 py-4 text-[10px] font-black text-slate-400 uppercase tracking-wider text-center">Nusuk KSA</th>
-                {!isAdmin && <th className="px-4 py-4 text-[10px] font-black text-slate-400 uppercase tracking-wider text-right">Montant Versé</th>}
-                <th className="px-6 py-4 w-12 text-right">Fiche</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {isFirstLoad ? (
-                <tr><td colSpan={isAdmin ? 8 : 9} className="px-6 py-16 text-center font-bold text-slate-300 animate-pulse">CHARGEMENT DES REGISTRES...</td></tr>
-              ) : paginatedData.length === 0 ? (
-                <tr>
-                  <td colSpan={isAdmin ? 8 : 9} className="px-6 py-16 text-center">
-                    <p className="text-slate-400 font-bold mb-2">Aucun dossier ne correspond à vos filtres.</p>
-                    {activeFilterCount > 0 && (
-                      <button onClick={resetAllFilters} className="text-xs text-indigo-600 font-black underline underline-offset-2">Réinitialiser tous les filtres</button>
-                    )}
-                  </td>
-                </tr>
-              ) : (
-                paginatedData.map(p => {
-                  const isEligible = p.sur_plateforme_gouv && p.document_url
-                  return (
-                    <tr key={p.id} className="hover:bg-slate-50/50 transition-colors group">
-                      <td className="px-4 py-3.5">
-                        <button onClick={() => toggleSelectRow(p.id)} className="text-slate-400">
-                          {selectedIds.includes(p.id) ? <CheckSquare size={16} className="text-indigo-600" /> : <Square size={16} />}
-                        </button>
-                      </td>
-                      <td className="px-4 py-3.5">
-                        <p className="font-black text-slate-900 text-xs uppercase leading-tight">{p.prenom} {p.nom_complet}</p>
-                        <p className="text-[10px] text-slate-400 font-mono mt-0.5">{p.telephone_pelerin || 'Pas de numéro'}</p>
-                      </td>
-                      <td className="px-4 py-3.5 text-xs font-bold text-indigo-600 truncate max-w-[140px]">{p.agences?.nom_agence || '—'}</td>
-                      <td className="px-4 py-3.5 font-mono text-xs font-black text-slate-700">{p.num_passeport || '—'}</td>
-                      <td className="px-4 py-3.5 text-center">
-                        <span className={`mx-auto w-6 h-6 rounded-md flex items-center justify-center ${p.document_url ? 'bg-emerald-50 text-emerald-600' : 'bg-amber-50 text-amber-500'}`}>
-                          {p.document_url ? <FileCheck size={14} /> : <FileWarning size={14} />}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3.5 text-center">
-                        <span className={`mx-auto text-[10px] font-black uppercase px-2 py-0.5 rounded-md ${p.sur_plateforme_gouv ? 'bg-teal-50 text-teal-700' : 'bg-slate-100 text-slate-400'}`}>
-                          {p.sur_plateforme_gouv ? 'Validé' : 'À faire'}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3.5 text-center">
-                        <button 
-                          disabled={actionInProgressId === p.id}
-                          onClick={() => toggleNusukStatus(p.id, !!p.sur_plateforme_nusuk)}
-                          className={`mx-auto text-[10px] font-black uppercase px-2.5 py-0.5 rounded-md border flex items-center gap-1 transition-all ${
-                            p.sur_plateforme_nusuk ? 'bg-purple-100 text-purple-700 border-purple-200' : 'bg-slate-50 text-slate-400 border-slate-200 hover:border-indigo-300 hover:text-indigo-600'
-                          }`}
-                        >
-                          {p.sur_plateforme_nusuk ? 'Inscrit' : 'Valider'}
-                        </button>
-                      </td>
-                      {!isAdmin && (
-                        <td className="px-4 py-3.5 text-right font-black text-xs tabular-nums text-slate-800">
-                          {(p.total_paye || 0).toLocaleString('fr-FR')} CFA
-                        </td>
-                      )}
-                      <td className="px-6 py-3.5 text-right">
-                        <Link
-                          href={`/hajj/pelerin/${p.id}`}
-                          onClick={saveScrollPosition}
-                          className="w-7 h-7 inline-flex items-center justify-center bg-slate-50 border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-900 hover:text-white transition-all"
-                        >
-                          <Eye size={13} />
-                        </Link>
-                      </td>
-                    </tr>
-                  )
-                })
-              )}
-            </tbody>
-          </table>
-        </div>
-
-        {/* ─── PAGINATION ─── */}
-        {totalPages > 1 && (
-          <div className="mt-5 flex justify-between items-center bg-white p-3 rounded-xl border border-slate-200/60 shadow-sm">
-            <span className="text-xs font-bold text-slate-400">Page {currentPage} sur {totalPages} ({filteredData.length} lignes)</span>
-            <div className="flex gap-1.5">
-              <button disabled={currentPage === 1} onClick={() => setCurrentPage(prev => prev - 1)} className="p-1.5 bg-slate-50 border border-slate-200 rounded-lg disabled:opacity-40">
-                <ChevronLeft size={16} />
-              </button>
-              <button disabled={currentPage === totalPages} onClick={() => setCurrentPage(prev => prev + 1)} className="p-1.5 bg-slate-50 border border-slate-200 rounded-lg disabled:opacity-40">
-                <ChevronRight size={16} />
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* ─── BLOC EXPORTS DESKTOP HAUT DE GAMME ─── */}
-        <div className="hidden lg:flex mt-5 justify-end gap-2.5">
-          <button onClick={handleExcelExport} className="px-4 py-2.5 border border-slate-200 bg-white text-slate-700 font-black rounded-xl text-xs flex items-center gap-2 shadow-sm hover:bg-slate-50 active:scale-95 transition-all">
-            <FileSpreadsheet size={15} className="text-emerald-600" /> Exporter Excel
-          </button>
-          <button onClick={() => setPdfConfirmOpen(true)} className="px-4 py-2.5 bg-indigo-600 text-white font-black rounded-xl text-xs flex items-center gap-2 shadow-sm hover:bg-indigo-700 active:scale-95 transition-all">
-            <FileText size={15} /> Générer Rapport PDF
-          </button>
         </div>
       </div>
 
-      {/* ─── TIROIR FILTRES MOBILE PERSISTANTS ─── */}
-      {mobileFilterOpen && (
-        <div className="fixed inset-0 z-[1200] bg-slate-900/60 backdrop-blur-sm flex items-end justify-center animate-fade-in" onClick={() => setMobileFilterOpen(false)}>
-          <div className="bg-white w-full rounded-t-[2rem] p-6 space-y-4 max-h-[85vh] overflow-y-auto shadow-2xl animate-slide-up pb-safe-bottom" onClick={e => e.stopPropagation()}>
-            <div className="flex justify-between items-center border-b border-slate-100 pb-3">
-              <h3 className="font-black text-slate-800 text-sm uppercase tracking-wide">Filtres du Registre</h3>
-              <div className="flex items-center gap-2">
-                {activeFilterCount > 0 && (
-                  <button onClick={resetAllFilters} className="text-[10px] font-black text-rose-500 bg-rose-50 px-2.5 py-1 rounded-lg border border-rose-100">
-                    Tout effacer
-                  </button>
-                )}
-                <button onClick={() => setMobileFilterOpen(false)} className="p-1.5 bg-slate-100 rounded-xl text-slate-400"><X size={18} /></button>
+      <div className="mx-auto max-w-7xl px-4 py-5 md:px-8 md:py-6">
+        {/* Erreur de connexion */}
+        {connectionError && (
+          <div className="mb-4 rounded-2xl border border-rose-200 bg-rose-50 p-4 flex items-center gap-3">
+            <AlertCircle size={18} className="text-rose-600 flex-shrink-0" />
+            <div>
+              <p className="text-sm font-semibold text-rose-700">{connectionError}</p>
+              <p className="text-xs text-rose-600 mt-1">Tentative {retryCount}</p>
+            </div>
+          </div>
+        )}
+
+        {/* État de la session */}
+        <div className="mb-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm md:p-5">
+          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+            <div>
+              <p className="text-[10px] font-black uppercase tracking-[0.24em] text-slate-400">État de la session</p>
+              <div className="mt-1 flex items-center gap-2">
+                <span className={`inline-flex items-center gap-2 rounded-full px-2.5 py-1 text-[11px] font-black ${sessionSummary.session_open ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}`}>
+                  {sessionSummary.session_open ? <CheckCircle2 size={14} /> : <Lock size={14} />}
+                  {sessionSummary.session_open ? 'Session ouverte' : 'Session fermée'}
+                </span>
+                <span className="text-sm font-semibold text-slate-600">{sessionSummary.label}</span>
               </div>
             </div>
-
-            <div className="space-y-3.5">
-              <div className="flex flex-col gap-1">
-                <label className="text-[10px] font-black text-slate-400 uppercase">Agence</label>
-                <select value={selectedAgence} onChange={e => setSelectedAgence(e.target.value)} className="w-full bg-slate-50 border border-slate-200 p-2.5 rounded-xl text-xs font-bold">
-                  <option value="all">Toutes les agences</option>
-                  {agences.map(ag => <option key={ag} value={ag}>{ag}</option>)}
-                </select>
-              </div>
-
-              <div className="flex flex-col gap-1">
-                <label className="text-[10px] font-black text-slate-400 uppercase">Éligibilité Nusuk de base</label>
-                <select value={filterEligibility} onChange={e => setFilterEligibility(e.target.value as any)} className="w-full bg-slate-50 border border-slate-200 p-2.5 rounded-xl text-xs font-bold">
-                  <option value="all">Tous</option>
-                  <option value="eligible">Prêts / Éligibles</option>
-                  <option value="non-eligible">Incomplets</option>
-                </select>
-              </div>
-
-              <div className="flex flex-col gap-1">
-                <label className="text-[10px] font-black text-slate-400 uppercase">Plateforme Gouv</label>
-                <select value={filterGouv} onChange={e => setFilterGouv(e.target.value as any)} className="w-full bg-slate-50 border border-slate-200 p-2.5 rounded-xl text-xs font-bold">
-                  <option value="all">Tous</option>
-                  <option value="true">Inscrits Gouv</option>
-                  <option value="false">Non inscrits</option>
-                </select>
-              </div>
-
-              <div className="flex flex-col gap-1">
-                <label className="text-[10px] font-black text-slate-400 uppercase">Portail Nusuk</label>
-                <select value={filterNusuk} onChange={e => setFilterNusuk(e.target.value as any)} className="w-full bg-slate-50 border border-slate-200 p-2.5 rounded-xl text-xs font-bold">
-                  <option value="all">Tous</option>
-                  <option value="true">Inscrits Nusuk</option>
-                  <option value="false">Non inscrits</option>
-                </select>
-              </div>
-
-              {!isAdmin && (
-                <div className="flex flex-col gap-1">
-                  <label className="text-[10px] font-black text-slate-400 uppercase">Finances (Seuil 3M)</label>
-                  <select value={filterFinance} onChange={e => setFilterFinance(e.target.value as any)} className="w-full bg-slate-50 border border-slate-200 p-2.5 rounded-xl text-xs font-bold">
-                    <option value="all">Tous</option>
-                    <option value="full">Réglé Totalité</option>
-                    <option value="partial">Versement Partiel</option>
-                    <option value="none">Aucun paiement</option>
-                  </select>
-                </div>
-              )}
+            <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold text-slate-600">
+              {sessionSummary.session_open ? 'Les inscriptions Gouv restent ouvertes.' : 'Les inscriptions Gouv sont verrouillées.'}
             </div>
-
-            <button onClick={() => setMobileFilterOpen(false)} className="w-full py-3.5 bg-indigo-600 text-white font-black uppercase text-xs tracking-wider rounded-xl shadow-md mt-2">
-              Appliquer les filtres
-            </button>
           </div>
         </div>
-      )}
 
-      {/* CONFIRMATION EXPORT PDF */}
-      <PdfConfirmModal
-        isOpen={pdfConfirmOpen}
-        onClose={() => setPdfConfirmOpen(false)}
-        onConfirm={handlePdfConfirm}
-        title="Registre Général d'Enregistrement Nusuk"
-        count={filteredData.length}
-      />
+        {/* Statistiques quotas */}
+        <div className="mb-4 grid gap-3 md:grid-cols-4">
+          <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm hover:shadow-md transition">
+            <p className="text-[10px] font-black uppercase tracking-[0.24em] text-slate-400">Quota de session</p>
+            <p className="mt-2 text-2xl font-black text-slate-900">{sessionSummary.quota_total}</p>
+            <p className="text-sm text-slate-500">Total alloué</p>
+          </div>
+          <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm hover:shadow-md transition">
+            <p className="text-[10px] font-black uppercase tracking-[0.24em] text-slate-400">Utilisé</p>
+            <p className="mt-2 text-2xl font-black text-indigo-600">{sessionSummary.quota_utilise}</p>
+            <p className="text-sm text-slate-500">Pèlerins déjà enregistrés</p>
+          </div>
+          <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm hover:shadow-md transition">
+            <p className="text-[10px] font-black uppercase tracking-[0.24em] text-slate-400">Restant</p>
+            <p className="mt-2 text-2xl font-black text-emerald-600">{sessionSummary.quota_restant}</p>
+            <p className="text-sm text-slate-500">Places encore disponibles</p>
+          </div>
+          <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm hover:shadow-md transition">
+            <p className="text-[10px] font-black uppercase tracking-[0.24em] text-slate-400">Votre nombre Gouv</p>
+            <p className="mt-2 text-2xl font-black text-slate-900">{stats.gouvInscrits}</p>
+            <p className="text-sm text-slate-500">Sur la sélection actuelle</p>
+          </div>
+        </div>
+
+        {/* Messages */}
+        {message && (
+          <div className={`mb-4 rounded-2xl border px-4 py-3 text-sm font-semibold flex items-center gap-3 animate-in fade-in slide-in-from-top-2 ${message.type === 'success' ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-rose-200 bg-rose-50 text-rose-700'}`}>
+            {message.type === 'success' ? <CheckCircle2 size={18} /> : <AlertCircle size={18} />}
+            {message.text}
+          </div>
+        )}
+
+        {/* Filtres */}
+        <div className="mb-4 flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-3 shadow-sm md:flex-row md:items-center md:justify-between">
+          <div className="relative w-full md:max-w-md">
+            <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+            <input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Rechercher un pèlerin ou un passeport"
+              className="w-full rounded-xl border border-slate-200 bg-slate-50 py-2.5 pl-9 pr-9 text-sm font-semibold text-slate-700 outline-none focus:border-indigo-500 focus:bg-white focus:ring-2 focus:ring-indigo-100 transition"
+            />
+            {search && (
+              <button 
+                onClick={() => setSearch('')} 
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700 transition"
+              >
+                <X size={13} />
+              </button>
+            )}
+          </div>
+
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+            <label className="flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm font-semibold text-slate-700">
+              <input
+                type="checkbox"
+                checked={showEligibleOnly}
+                onChange={(e) => setShowEligibleOnly(e.target.checked)}
+                className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+              />
+              Éligibles Gouv
+            </label>
+
+            <select
+              value={selectedAgence}
+              onChange={(e) => setSelectedAgence(e.target.value)}
+              className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm font-semibold text-slate-700 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 transition"
+            >
+              <option value="all">Toutes les agences</option>
+              {agences.map((agence) => (
+                <option key={agence} value={agence}>{agence}</option>
+              ))}
+            </select>
+          </div>
+        </div>
+
+        {/* Statistiques filtrées */}
+        <div className="grid gap-3 md:grid-cols-3 mb-4">
+          <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm hover:shadow-md transition">
+            <p className="text-[10px] font-black uppercase tracking-[0.24em] text-slate-400">Pèlerins visibles</p>
+            <p className="mt-2 text-xl font-black text-slate-900">{stats.total}</p>
+          </div>
+          <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm hover:shadow-md transition">
+            <p className="text-[10px] font-black uppercase tracking-[0.24em] text-slate-400">Éligibles au Gouv</p>
+            <p className="mt-2 text-xl font-black text-emerald-600">{stats.eligiblesGouv}</p>
+          </div>
+          <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm hover:shadow-md transition">
+            <p className="text-[10px] font-black uppercase tracking-[0.24em] text-slate-400">Inscrits Nusuk</p>
+            <p className="mt-2 text-xl font-black text-purple-600">{stats.nusukInscrits}</p>
+          </div>
+        </div>
+
+        {/* Table responsive */}
+        <div className="mt-4 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+          <div className="overflow-x-auto">
+            <table className="min-w-full text-left">
+              <thead className="bg-slate-50 border-b border-slate-200">
+                <tr>
+                  <th className="px-4 py-3 text-[10px] font-black uppercase tracking-[0.24em] text-slate-400">Pèlerin</th>
+                  <th className="px-4 py-3 text-[10px] font-black uppercase tracking-[0.24em] text-slate-400 hidden sm:table-cell">Agence</th>
+                  <th className="px-4 py-3 text-[10px] font-black uppercase tracking-[0.24em] text-slate-400 hidden md:table-cell">Dossier</th>
+                  <th className="px-4 py-3 text-[10px] font-black uppercase tracking-[0.24em] text-slate-400">Gouv</th>
+                  <th className="px-4 py-3 text-[10px] font-black uppercase tracking-[0.24em] text-slate-400 hidden lg:table-cell">Nusuk</th>
+                  <th className="px-4 py-3 text-[10px] font-black uppercase tracking-[0.24em] text-slate-400">Action</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {loading ? (
+                  <tr>
+                    <td colSpan={6} className="px-4 py-12 text-center text-sm font-semibold text-slate-400">
+                      <div className="flex items-center justify-center gap-2">
+                        <RefreshCw size={16} className="animate-spin" />
+                        Chargement des dossiers Platforme MDH…
+                      </div>
+                    </td>
+                  </tr>
+                ) : filteredData.length === 0 ? (
+                  <tr>
+                    <td colSpan={6} className="px-4 py-12 text-center text-sm font-semibold text-slate-400">
+                      Aucun pèlerin ne correspond à votre recherche.
+                    </td>
+                  </tr>
+                ) : (
+                  filteredData.map((p) => {
+                    const isEligibleToGouv = Boolean(p.document_url)
+                    const isGouvRegistered = Boolean(p.sur_plateforme_gouv)
+                    const isNusukRegistered = Boolean(p.sur_plateforme_nusuk)
+                    const isDeleting = showDeleteConfirm === p.id
+
+                    return (
+                      <tr key={p.id} className="hover:bg-slate-50 transition">
+                        <td className="px-4 py-3">
+                          <div className="flex items-center gap-2.5">
+                            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-slate-900 text-xs font-black text-white flex-shrink-0">
+                              {p.prenom?.[0] || ''}{p.nom_complet?.[0] || ''}
+                            </div>
+                            <div className="min-w-0">
+                              <p className="text-sm font-black uppercase text-slate-900 truncate">{p.prenom} {p.nom_complet}</p>
+                              <p className="text-[11px] font-semibold text-slate-500 truncate">{p.num_passeport || 'Pas de passeport'}</p>
+                            </div>
+                          </div>
+                        </td>
+                        <td className="px-4 py-3 text-sm font-semibold text-slate-700 hidden sm:table-cell">{p.agences?.nom_agence || '—'}</td>
+                        <td className="px-4 py-3 hidden md:table-cell">
+                          <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-black whitespace-nowrap ${isEligibleToGouv ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}`}>
+                            {isEligibleToGouv ? <FileCheck size={13} /> : <FileWarning size={13} />}
+                            {isEligibleToGouv ? 'Complet' : 'Incomplet'}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3">
+                          <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-black whitespace-nowrap ${isGouvRegistered ? 'bg-indigo-50 text-indigo-700' : 'bg-slate-100 text-slate-600'}`}>
+                            <ShieldCheck size={12} />
+                            {isGouvRegistered ? 'Inscrit' : 'Non'}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 hidden lg:table-cell">
+                          <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-black whitespace-nowrap ${isNusukRegistered ? 'bg-purple-50 text-purple-700' : 'bg-slate-100 text-slate-600'}`}>
+                            <Globe size={12} />
+                            {isNusukRegistered ? 'Inscrit' : 'Non'}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3">
+                          <div className="flex flex-col gap-1.5">
+                            <button
+                              disabled={actionInProgressId === p.id || !sessionSummary.session_open || (isGouvRegistered && userRole !== 'admin')}
+                              onClick={() => toggleGouvStatus(p.id, isGouvRegistered)}
+                              className={`rounded-lg px-2.5 py-1.5 text-[10px] font-black uppercase tracking-[0.12em] transition whitespace-nowrap ${actionInProgressId === p.id ? 'cursor-wait bg-slate-100 text-slate-500' : !sessionSummary.session_open || (isGouvRegistered && userRole !== 'admin') ? 'cursor-not-allowed bg-slate-100 text-slate-400' : isGouvRegistered ? 'bg-emerald-600 text-white hover:bg-emerald-700 active:scale-95' : 'bg-indigo-600 text-white hover:bg-indigo-700 active:scale-95'}`}
+                            >
+                              {actionInProgressId === p.id ? '…' : isGouvRegistered ? (userRole === 'admin' ? 'Retirer' : 'Déjà inscrit') : 'Inscrire'}
+                            </button>
+                            {userRole === 'admin' && (
+                              <div>
+                                {!isDeleting ? (
+                                  <button
+                                    onClick={() => setShowDeleteConfirm(p.id)}
+                                    className="w-full rounded-lg border border-rose-200 bg-rose-50 px-2.5 py-1.5 text-[10px] font-black uppercase tracking-[0.12em] text-rose-600 hover:bg-rose-100 transition"
+                                  >
+                                    <Trash2 size={11} className="inline mr-1" /> Supprimer
+                                  </button>
+                                ) : (
+                                  <div className="flex gap-1">
+                                    <button
+                                      onClick={() => deletePelerin(p.id)}
+                                      disabled={actionInProgressId === p.id}
+                                      className="flex-1 rounded-lg bg-rose-600 px-2 py-1.5 text-[10px] font-black text-white hover:bg-rose-700 disabled:opacity-50 transition"
+                                    >
+                                      Confirmer
+                                    </button>
+                                    <button
+                                      onClick={() => setShowDeleteConfirm(null)}
+                                      disabled={actionInProgressId === p.id}
+                                      className="flex-1 rounded-lg border border-slate-200 bg-slate-50 px-2 py-1.5 text-[10px] font-black text-slate-600 hover:bg-slate-100 disabled:opacity-50 transition"
+                                    >
+                                      Annuler
+                                    </button>
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    )
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        {/* Dernière synchronisation */}
+        <div className="mt-4 text-center text-xs text-slate-500">
+          Dernière synchronisation: {sessionSummary.last_sync ? new Date(sessionSummary.last_sync).toLocaleTimeString('fr-FR') : '—'}
+        </div>
+      </div>
     </div>
   )
 }

@@ -98,6 +98,11 @@ export default function Navbar() {
     return () => window.removeEventListener('scroll', handleScroll)
   }, [lastScrollY, isMenuOpen])
 
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    window.dispatchEvent(new Event(isMenuOpen ? 'mobile-nav-open' : 'mobile-nav-close'))
+  }, [isMenuOpen])
+
   const handleLogout = async () => {
     await supabase.auth.signOut()
     router.push('/login')
@@ -109,7 +114,7 @@ export default function Navbar() {
     { name: 'Pèlerins', href: '/hajj/liste-pelerins', icon: Users },
     { name: 'Ajouter', href: '/hajj/ajouter-pelerin', icon: UserPlus },
     { name: 'Documents', href: '/hajj/documents', icon: FileText },
-    { name: 'Espace Nusuk', href: '/hajj/nusuk', icon: Globe }, 
+    { name: 'Plateforme MDH', href: '/hajj/nusuk', icon: Globe }, 
     { name: 'État général', href: '/hajj/etat-general', icon: BarChart3 },
     { name: 'Comptabilité', href: '/hajj/comptabilite', icon: PieChart },
     { name: 'Quitter', href: '/', icon: SquareArrowRight },

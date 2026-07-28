@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react'
 import { supabase, getUser } from '@/lib/supabase'
 import { ScanLine, Loader2, Save, Upload, RotateCcw, Smartphone, CalendarDays, UserRound } from 'lucide-react'
+import { uploadPassportFile } from '@/lib/hajjPassport'
 
 export default function AjouterPelerin() {
   // États des données
@@ -151,10 +152,8 @@ export default function AjouterPelerin() {
     try {
       let fileUrl = ''
       if (fileToUpload) {
-        const fileName = `${Date.now()}-${fileToUpload.name}`
-        const { error: upErr } = await supabase.storage.from('passeports').upload(fileName, fileToUpload)
-        if (upErr) throw upErr
-        fileUrl = fileName
+        const uploaded = await uploadPassportFile(fileToUpload)
+        fileUrl = uploaded.path
       }
 
       const { error } = await supabase.from('pelerins').insert([{

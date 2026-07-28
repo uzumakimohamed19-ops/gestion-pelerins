@@ -1,122 +1,956 @@
 'use client'
-import { useEffect, useState } from 'react'
-import { supabase } from '@/lib/supabase'
+
 import Link from 'next/link'
-import { Building2, ArrowRight, Search, ShieldAlert, Users, Activity } from 'lucide-react'
+import { useCallback, useEffect, useState } from 'react'
+import { supabase } from '@/lib/supabase'
+import {
+  Lock,
+  Unlock,
+  Save,
+  ShieldAlert,
+  Loader2,
+  RefreshCw,
+  TrendingUp,
+  Users,
+  Activity,
+  History,
+  Trash2,
+  Clock,
+  X,
+  PlusCircle,
+  Sliders,
+  Building2,
+  BarChart3,
+  CheckCircle2,
+  AlertTriangle
+} from 'lucide-react'
 
-export default function AdminPanel() {
-  const [agences, setAgences] = useState<any[]>([])
-  const [searchTerm, setSearchTerm] = useState('')
+interface SessionRecord {
+  id: string
+  nom_session: string
+  quota_alloue: number
+  quota_utilise: number
+  duree_heures: number | null
+  date_ouverture: string
+  date_expiration: string | null
+  date_fermeture: string | null
+  est_active: boolean
+  statut_fermeture: 'EN_COURS' | 'EXPIRE_QUOTA' | 'EXPIRE_TEMPS' | 'MANUEL'
+}
+
+interface AgenceStat {
+  id: string
+  nom_agence: string
+  pelerins_gouv_count: number
+  percentage: number
+}
+
+const defaultConfig = {
+  session_ouverte: false,
+  quota_total_global: 0,
+  quota_restant_global: 0,
+  quota_session_total: 0,
+  quota_session_restant: 0,
+  quota_max_par_agence: 0,
+  max_postulations_par_minute: 10
+}
+
+export default function AdminHajjControl() {
   const [loading, setLoading] = useState(true)
+  const [actionLoading, setActionLoading] = useState(false)
+  const [isLive, setIsLive] = useState(false)
+  const [config, setConfig] = useState(defaultConfig)
+  const [activeSession, setActiveSession] = useState<SessionRecord | null>(null)
+  const [sessionHistory, setSessionHistory] = useState<SessionRecord[]>([])
+  const [agenceStats, setAgenceStats] = useState<AgenceStat[]>([])
+  const [totalPelerinsGouv, setTotalPelerinsGouv] = useState(0)
 
-  useEffect(() => {
-    fetchAgences()
-  }, [])
+  // Formulaire d'ouverture de session
+  const [sessionNameInput, setSessionNameInput] = useState('')
+  const [quotaSessionInput, setQuotaSessionInput] = useState(100)
+  const [dureeHeuresInput, setDureeHeuresInput] = useState<number | ''>(1)
 
-  const fetchAgences = async () => {
-    setLoading(true)
-    const { data, error } = await supabase
-      .from('agences')
-      .select(`
-        *,
-        pelerins:pelerins(count)
-      `)
-      .order('nom_agence', { ascending: true })
-    
-    if (error) {
-      console.error("Erreur:", error.message)
-    } else {
-      setAgences(data || [])
-    }
-    setLoading(false)
+  // Minuteur d'expiration locale
+  const [timeLeftStr, setTimeLeftStr] = useState<string | null>(null)
+
+  // Fenêtres modales (Modals)
+  const [activeModal, setActiveModal] = useState<'OPEN_SESSION' | 'HISTORY' | 'AGRENCIES' | 'CONFIG' | null>(null)
+  const [notification, setNotification] = useState<{ text: string; type: 'success' | 'error' } | null>(null)
+
+  const isSessionOpen = Boolean(activeSession?.est_active ?? config.session_ouverte)
+
+  const showNotification = (text: string, type: 'success' | 'error') => {
+    setNotification({ text, type })
+    setTimeout(() => setNotification(null), 4000)
   }
 
-  const agencesFiltrees = agences.filter((agence) =>
-    agence.nom_agence?.toLowerCase().includes(searchTerm.toLowerCase())
-  )
+  const computeSessionUsage = useCallback((session: SessionRecord | null, pelerins: Array<{ created_at?: string; date_inscription?: string; hajj_session_id?: string | null; sur_plateforme_gouv?: boolean }>) => {
+    if (!session?.id) return 0
 
-  if (loading) return (
-    <div className="min-h-screen flex flex-col items-center justify-center gap-4">
-      <div className="w-12 h-12 border-4 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
-      <p className="font-black text-gray-400 uppercase tracking-widest text-xs">Chargement du Réseau...</p>
-    </div>
-  )
+    const sessionStart = session.date_ouverture ? new Date(session.date_ouverture).getTime() : null
+    if (sessionStart !== null && Number.isNaN(sessionStart)) return 0
+
+    return pelerins.filter((p) => {
+      if (!p.sur_plateforme_gouv) return false
+
+      const row = p as { created_at?: string; date_inscription?: string; hajj_session_id?: string | null; sur_plateforme_gouv?: boolean }
+      if (session.id && row.hajj_session_id && row.hajj_session_id === session.id) return true
+
+      const candidateDate = row.created_at || row.date_inscription
+      if (candidateDate) {
+        const createdAt = new Date(candidateDate).getTime()
+        if (Number.isFinite(createdAt)) {
+          if (sessionStart !== null) return createdAt >= sessionStart
+          return true
+        }
+      }
+
+      return true
+    }).length
+  }, [])
+
+  // Chargement global synchrone de l'état
+  const loadDashboardData = useCallback(async (showLoader = false) => {
+    if (showLoader) setLoading(true)
+    try {
+      // 1. Config globale
+      const { data: configData } = await supabase.from('hajj_campaign_config').select('*').eq('id', 1).single()
+
+      // 2. Session Active (la plus récente, même si le flag n’est pas exactement identique)
+      const { data: sessionData } = await supabase
+        .from('hajj_sessions')
+        .select('*')
+        .order('date_ouverture', { ascending: false })
+        .limit(1)
+        .maybeSingle()
+
+      const effectiveSessionOpen = Boolean(
+        sessionData?.id && (
+          sessionData?.est_active === true ||
+          sessionData?.session_ouverte === true ||
+          sessionData?.is_active === true ||
+          Boolean(configData?.session_ouverte)
+        )
+      )
+
+      if (configData) {
+        setConfig({
+          ...defaultConfig,
+          ...configData,
+          session_ouverte: effectiveSessionOpen || Boolean(configData.session_ouverte),
+          quota_total_global: Number(configData.quota_total_global || 0),
+          quota_restant_global: Number(configData.quota_restant_global || 0),
+          quota_session_total: Number(configData.quota_session_total || 0),
+          quota_session_restant: Number(configData.quota_session_restant || 0)
+        })
+      }
+
+      // 3. Historique complet
+      const { data: historyData } = await supabase
+        .from('hajj_sessions')
+        .select('*')
+        .order('date_ouverture', { ascending: false })
+        .limit(30)
+
+      setSessionHistory(historyData || [])
+
+      // 4. Statistiques Agences et logique de quota live
+      const [pelerinsRes, agencesRes] = await Promise.all([
+        supabase.from('pelerins').select('agence_id, created_at, date_inscription, hajj_session_id, sur_plateforme_gouv').eq('sur_plateforme_gouv', true),
+        supabase.from('agences').select('id, nom_agence')
+      ])
+
+      const { count: realGouvCount } = await supabase
+        .from('pelerins')
+        .select('*', { count: 'exact', head: true })
+        .eq('sur_plateforme_gouv', true)
+
+      const pelerins = pelerinsRes.data || []
+      const agences = agencesRes.data || []
+
+      const countMap = new Map<string, number>()
+      pelerins.forEach((p) => {
+        if (p.agence_id) countMap.set(p.agence_id, (countMap.get(p.agence_id) || 0) + 1)
+      })
+
+      const sessionTotal = sessionData?.quota_alloue || configData?.quota_session_total || 1
+      const resolvedQuotaUsed = computeSessionUsage(sessionData || null, pelerins)
+      const nextActiveSession = effectiveSessionOpen && sessionData ? { ...sessionData, quota_utilise: resolvedQuotaUsed } : null
+
+      setActiveSession(nextActiveSession)
+
+      if (nextActiveSession?.id && (sessionData?.quota_utilise ?? 0) !== resolvedQuotaUsed) {
+        await supabase
+          .from('hajj_sessions')
+          .update({ quota_utilise: resolvedQuotaUsed })
+          .eq('id', nextActiveSession.id)
+      }
+
+      if (configData) {
+        const nextSessionRemaining = nextActiveSession ? Math.max(0, nextActiveSession.quota_alloue - resolvedQuotaUsed) : 0
+        const shouldSyncConfigRemaining = (configData.quota_session_restant ?? 0) !== nextSessionRemaining
+        const shouldSyncSessionFlag = Boolean(configData.session_ouverte) !== effectiveSessionOpen
+
+        if (shouldSyncConfigRemaining || shouldSyncSessionFlag) {
+          await supabase
+            .from('hajj_campaign_config')
+            .update({
+              session_ouverte: effectiveSessionOpen,
+              quota_session_restant: nextSessionRemaining,
+              updated_at: new Date().toISOString()
+            })
+            .eq('id', 1)
+        }
+      }
+
+      const stats: AgenceStat[] = agences.map((ag) => {
+        const count = countMap.get(ag.id) || 0
+        return {
+          id: ag.id,
+          nom_agence: ag.nom_agence || 'Agence inconnue',
+          pelerins_gouv_count: count,
+          percentage: Math.min(100, Math.round((count / sessionTotal) * 100))
+        }
+      }).sort((a, b) => b.pelerins_gouv_count - a.pelerins_gouv_count)
+
+      setAgenceStats(stats)
+      setTotalPelerinsGouv(realGouvCount || 0)
+    } catch (err: any) {
+      console.error('Erreur chargement dashboard:', err)
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  // Auto-fermeture automatique côté client en cas de dépassement de timer
+  const autoCloseIfExpired = useCallback(async () => {
+    if (!activeSession || !activeSession.est_active) return
+
+    if (activeSession.date_expiration) {
+      const diff = new Date(activeSession.date_expiration).getTime() - new Date().getTime()
+      if (diff <= 0) {
+        // Déclencher fermeture pour cause de temps écoulé
+        await supabase
+          .from('hajj_sessions')
+          .update({
+            est_active: false,
+            date_fermeture: new Date().toISOString(),
+            statut_fermeture: 'EXPIRE_TEMPS'
+          })
+          .eq('id', activeSession.id)
+
+        await supabase
+          .from('hajj_campaign_config')
+          .update({ session_ouverte: false, quota_session_restant: 0, updated_at: new Date().toISOString() })
+          .eq('id', 1)
+
+        showNotification('La session a été automatiquement fermée : Temps imparti écoulé.', 'error')
+        await loadDashboardData()
+      }
+    }
+  }, [activeSession, loadDashboardData])
+
+  // Minuteur Temps Réel
+  useEffect(() => {
+    const interval = setInterval(() => {
+      if (activeSession?.date_expiration && activeSession.est_active) {
+        const remaining = new Date(activeSession.date_expiration).getTime() - new Date().getTime()
+        if (remaining <= 0) {
+          setTimeLeftStr('Expiré')
+          void autoCloseIfExpired()
+        } else {
+          const hours = Math.floor(remaining / (1000 * 60 * 60))
+          const minutes = Math.floor((remaining % (1000 * 60 * 60)) / (1000 * 60))
+          const seconds = Math.floor((remaining % (1000 * 60)) / 1000)
+          setTimeLeftStr(`${hours}h ${minutes}m ${seconds}s`)
+        }
+      } else {
+        setTimeLeftStr(null)
+      }
+    }, 1000)
+
+    return () => clearInterval(interval)
+  }, [activeSession, autoCloseIfExpired])
+
+  // Abonnements Temps Réel Supabase
+  useEffect(() => {
+    void loadDashboardData(true)
+    setIsLive(true)
+
+    const channel = supabase
+      .channel('hajj_realtime_control')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'hajj_campaign_config' }, () => loadDashboardData())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'hajj_sessions' }, () => loadDashboardData())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'pelerins' }, () => loadDashboardData())
+      .subscribe()
+
+    const pollInterval = window.setInterval(() => {
+      void loadDashboardData(false)
+    }, 2000)
+
+    return () => {
+      supabase.removeChannel(channel)
+      window.clearInterval(pollInterval)
+    }
+  }, [loadDashboardData])
+
+  // Ouvrir une nouvelle session
+  const handleOpenSession = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!sessionNameInput.trim()) {
+      showNotification('Veuillez spécifier un nom pour la session.', 'error')
+      return
+    }
+    if (quotaSessionInput <= 0) {
+      showNotification('Le quota attribué doit être supérieur à 0.', 'error')
+      return
+    }
+    if (quotaSessionInput > config.quota_restant_global) {
+      showNotification(`Impossible : le quota attribué (${quotaSessionInput}) dépasse la réserve globale (${config.quota_restant_global}).`, 'error')
+      return
+    }
+
+    setActionLoading(true)
+    try {
+      const { data, error } = await supabase.rpc('ouvrir_nouvelle_session_hajj', {
+        p_nom_session: sessionNameInput,
+        p_quota_attribue: quotaSessionInput,
+        p_duree_heures: dureeHeuresInput === '' ? null : Number(dureeHeuresInput)
+      })
+
+      if (error) throw error
+
+      await supabase
+        .from('hajj_campaign_config')
+        .update({
+          session_ouverte: true,
+          quota_session_total: quotaSessionInput,
+          quota_session_restant: quotaSessionInput,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', 1)
+
+      showNotification('Nouvelle session ouverte avec succès !', 'success')
+      setSessionNameInput('')
+      setActiveModal(null)
+      await loadDashboardData()
+    } catch (err: any) {
+      showNotification('Erreur : ' + err.message, 'error')
+    } finally {
+      setActionLoading(false)
+    }
+  }
+
+  // Fermer la session manuellement
+  const handleCloseSession = async () => {
+    if (!activeSession) return
+    setActionLoading(true)
+
+    try {
+      // 1. Fermer toutes les sessions actives pour verrouiller partout
+      await supabase
+        .from('hajj_sessions')
+        .update({
+          est_active: false,
+          date_fermeture: new Date().toISOString(),
+          statut_fermeture: 'MANUEL'
+        })
+        .eq('est_active', true)
+
+      // 2. Mettre à jour la configuration globale pour l’application entière
+      await supabase
+        .from('hajj_campaign_config')
+        .update({
+          session_ouverte: false,
+          quota_session_restant: 0,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', 1)
+
+      showNotification('Session fermée manuellement.', 'success')
+      await loadDashboardData()
+    } catch (err: any) {
+      showNotification('Erreur lors de la fermeture : ' + err.message, 'error')
+    } finally {
+      setActionLoading(false)
+    }
+  }
+
+  // Mettre à jour la configuration globale
+  const handleSaveConfig = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setActionLoading(true)
+    try {
+      const { error } = await supabase
+        .from('hajj_campaign_config')
+        .update({
+          quota_total_global: config.quota_total_global,
+          quota_max_par_agence: config.quota_max_par_agence,
+          max_postulations_par_minute: config.max_postulations_par_minute,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', 1)
+
+      if (error) throw error
+      showNotification('Configuration globale enregistrée !', 'success')
+      setActiveModal(null)
+      await loadDashboardData()
+    } catch (err: any) {
+      showNotification('Erreur : ' + err.message, 'error')
+    } finally {
+      setActionLoading(false)
+    }
+  }
+
+  // Supprimer une session de l'historique
+  const handleDeleteSessionRecord = async (id: string) => {
+    try {
+      await supabase.from('hajj_sessions').delete().eq('id', id)
+      showNotification('Enregistrement supprimé.', 'success')
+      await loadDashboardData()
+    } catch (err: any) {
+      showNotification('Erreur lors de la suppression : ' + err.message, 'error')
+    }
+  }
+
+  if (loading) {
+    return (
+      <div className="flex h-screen w-full items-center justify-center bg-slate-900 text-white">
+        <div className="text-center space-y-4">
+          <Loader2 className="mx-auto h-12 w-12 animate-spin text-emerald-400" />
+          <p className="text-sm font-bold uppercase tracking-widest text-slate-400">Initialisation du Centre du Quota Hajj...</p>
+        </div>
+      </div>
+    )
+  }
 
   return (
-    <div className="max-w-7xl mx-auto px-4 md:px-6 py-6 md:py-12">
-      
-      {/* SECTION ENTÊTE */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 md:gap-8 mb-10 md:mb-16">
-        <div>
-          <div className="flex items-center gap-3 mb-2">
-            <Activity className="text-blue-600" size={20} />
-            <span className="text-blue-600 font-black text-[10px] tracking-[0.3em] uppercase">Super Admin Control</span>
-          </div>
-          <h1 className="text-2xl md:text-4xl font-black text-gray-900 uppercase tracking-tighter">Gestion du Réseau</h1>
-          <p className="text-gray-400 font-bold text-xs md:text-sm mt-1">{agences.length} agences partenaires enregistrées</p>
+    <div className="min-h-screen bg-slate-100 p-4 sm:p-6 lg:p-8 space-y-6 text-slate-800">
+      {/* Toast Notification */}
+      {notification && (
+        <div className={`fixed top-5 right-5 z-50 flex items-center gap-3 rounded-2xl px-5 py-4 shadow-2xl border ${
+          notification.type === 'success' ? 'bg-emerald-900 text-emerald-100 border-emerald-500' : 'bg-rose-900 text-rose-100 border-rose-500'
+        }`}>
+          {notification.type === 'success' ? <CheckCircle2 size={20} /> : <AlertTriangle size={20} />}
+          <span className="text-sm font-black uppercase tracking-wide">{notification.text}</span>
         </div>
+      )}
 
-        {/* BARRE DE RECHERCHE */}
-        <div className="relative w-full md:w-96">
-          <Search className="absolute left-5 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
-          <input
-            type="text"
-            placeholder="Rechercher une agence..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-full pl-14 pr-6 py-4 bg-white border-2 border-gray-100 rounded-2xl shadow-sm outline-none focus:border-blue-600 focus:ring-4 focus:ring-blue-50 transition-all font-bold text-gray-700 text-sm md:text-base"
-          />
+      {/* En-tête Général */}
+      <div className="rounded-[32px] border border-slate-800 bg-slate-950 p-6 sm:p-8 shadow-2xl text-white">
+        <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6">
+          <div className="space-y-2">
+            <div className="flex items-center gap-2 text-xs font-black uppercase tracking-[0.3em] text-emerald-400">
+              <ShieldAlert size={18} /> Centre Neuro-Stratégique des Quotas
+            </div>
+            <h1 className="text-3xl font-black uppercase tracking-wider">Maison du Hajj — Pilotage</h1>
+            <p className="text-sm text-slate-400 max-w-2xl">
+              Contrôle dynamique des quotas d'enregistrement, respect absolu de la réserve nationale globale et verrouillage temporel automatique.
+            </p>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-3">
+            <div className={`flex items-center gap-2 rounded-2xl px-4 py-2 text-xs font-black uppercase ${
+              isSessionOpen ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' : 'bg-rose-500/20 text-rose-300 border border-rose-500/30'
+            }`}>
+              <span className={`h-2.5 w-2.5 rounded-full ${isSessionOpen ? 'bg-emerald-400 animate-ping' : 'bg-rose-500'}`} />
+              {isSessionOpen ? 'Session Ouverte' : 'Session Fermée'}
+            </div>
+
+            <button
+              onClick={() => void loadDashboardData(true)}
+              className="flex items-center gap-2 rounded-2xl bg-slate-800 hover:bg-slate-700 px-4 py-2 text-xs font-bold uppercase text-slate-200 transition border border-slate-700"
+            >
+              <RefreshCw size={14} className={loading ? 'animate-spin' : ''} /> Actualiser
+            </button>
+          </div>
         </div>
       </div>
 
-      {/* GRILLE DES AGENCES RESONSIVE (2 BLOCS SUR MOBILE) */}
-      <div className="grid grid-cols-2 md:grid-cols-2 lg:grid-cols-3 gap-3 md:gap-8">
-        {agencesFiltrees.map((agence) => (
-          <div key={agence.id} className="bg-white rounded-[1.8rem] md:rounded-[2.5rem] p-4 md:p-8 border border-gray-100 shadow-sm flex flex-col justify-between hover:shadow-xl hover:shadow-blue-900/5 transition-all group">
-            
+      {/* Cartes de Synthèse Principales */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+        {/* Réserve Globale */}
+        <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm space-y-2">
+          <div className="flex items-center justify-between text-slate-500">
+            <span className="text-[11px] font-black uppercase tracking-wider">Réserve Globale</span>
+            <TrendingUp size={18} className="text-sky-600" />
+          </div>
+          <div className="flex items-baseline gap-2">
+            <span className="text-3xl font-black text-slate-900">{config.quota_restant_global}</span>
+            <span className="text-xs font-bold text-slate-400">/ {config.quota_total_global} restant</span>
+          </div>
+          <div className="w-full bg-slate-100 rounded-full h-2 overflow-hidden">
+            <div
+              className="bg-sky-500 h-full transition-all duration-500"
+              style={{ width: `${Math.min(100, (config.quota_restant_global / (config.quota_total_global || 1)) * 100)}%` }}
+            />
+          </div>
+        </div>
+
+        {/* Quota Session Active */}
+        <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm space-y-2">
+          <div className="flex items-center justify-between text-slate-500">
+            <span className="text-[11px] font-black uppercase tracking-wider">Quota Session</span>
+            <Activity size={18} className="text-emerald-600" />
+          </div>
+          <div className="flex items-baseline gap-2">
+            <span className="text-3xl font-black text-slate-900">
+              {activeSession ? activeSession.quota_alloue - activeSession.quota_utilise : 0}
+            </span>
+            <span className="text-xs font-bold text-slate-400">
+              / {activeSession ? activeSession.quota_alloue : 0} dispo
+            </span>
+          </div>
+          <div className="w-full bg-slate-100 rounded-full h-2 overflow-hidden">
+            <div
+              className="bg-emerald-500 h-full transition-all duration-500"
+              style={{
+                width: `${activeSession ? Math.min(100, ((activeSession.quota_alloue - activeSession.quota_utilise) / activeSession.quota_alloue) * 100) : 0}%`
+              }}
+            />
+          </div>
+        </div>
+
+        {/* Minuteur Temps Restant */}
+        <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm space-y-2">
+          <div className="flex items-center justify-between text-slate-500">
+            <span className="text-[11px] font-black uppercase tracking-wider">Temps Restant</span>
+            <Clock size={18} className="text-amber-600" />
+          </div>
+          <div className="text-2xl font-black text-slate-900 truncate">
+            {timeLeftStr ? timeLeftStr : activeSession ? 'Illimité' : 'Aucun'}
+          </div>
+          <p className="text-[11px] font-bold text-slate-400">
+            {activeSession?.duree_heures ? `Durée fixée : ${activeSession.duree_heures}h` : 'Pas de limite de temps'}
+          </p>
+        </div>
+
+        {/* Inscriptions Validées GOUV */}
+        <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm space-y-2">
+          <div className="flex items-center justify-between text-slate-500">
+            <span className="text-[11px] font-black uppercase tracking-wider">Pèlerins GOUV</span>
+            <Users size={18} className="text-purple-600" />
+          </div>
+          <div className="text-3xl font-black text-slate-900">{totalPelerinsGouv}</div>
+          <p className="text-[11px] font-bold text-slate-400">Inscrits officiellement</p>
+        </div>
+      </div>
+
+      {/* Zone Actionneur Principal et Boutons vers les Fenêtres/Modales */}
+      <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm space-y-6">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 pb-4">
+          <div>
+            <h2 className="text-lg font-black uppercase text-slate-900">Centre d'Actions & Fenêtres de Gestion</h2>
+            <p className="text-xs text-slate-500">Ouvre chaque panneau dédié pour orchestrer les sessions et la configuration.</p>
+          </div>
+
+          {/* Bouton direct d'arrêt d'urgence si une session est active */}
+          {activeSession && activeSession.est_active && (
+            <button
+              onClick={handleCloseSession}
+              disabled={actionLoading}
+              className="flex items-center justify-center gap-2 rounded-2xl bg-rose-600 hover:bg-rose-700 text-white font-black text-xs uppercase px-5 py-3 transition shadow-lg shadow-rose-600/20"
+            >
+              {actionLoading ? <Loader2 size={16} className="animate-spin" /> : <Lock size={16} />}
+              Fermer Immédiatement la Session ({activeSession.nom_session})
+            </button>
+          )}
+        </div>
+
+        {/* Grill des Boutons d'Ouverture des Fenêtres */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-4">
+          {/* Bouton Modal Nouvelle Session */}
+          <button
+            onClick={() => setActiveModal('OPEN_SESSION')}
+            className="flex flex-col items-start p-5 rounded-2xl border border-slate-200 bg-gradient-to-br from-emerald-50 to-white hover:border-emerald-500 hover:shadow-md transition text-left space-y-3 group"
+          >
+            <div className="p-3 rounded-xl bg-emerald-500 text-white group-hover:scale-110 transition">
+              <PlusCircle size={22} />
+            </div>
             <div>
-              {/* Entête du bloc agence */}
-              <div className="flex justify-between items-start mb-4 md:mb-6">
-                <div className="w-10 h-10 md:w-14 md:h-14 bg-blue-50 text-blue-600 rounded-xl md:rounded-2xl flex items-center justify-center group-hover:bg-blue-600 group-hover:text-white transition-colors">
-                  <Building2 className="w-5 h-5 md:w-7 md:h-7" />
+              <h3 className="font-black text-sm uppercase text-slate-900">Ouvrir une Session</h3>
+              <p className="text-xs text-slate-500">Attribuer nom, quota précis et durée en heure(s).</p>
+            </div>
+          </button>
+
+          {/* Bouton Modal Historique */}
+          <button
+            onClick={() => setActiveModal('HISTORY')}
+            className="flex flex-col items-start p-5 rounded-2xl border border-slate-200 bg-gradient-to-br from-blue-50 to-white hover:border-blue-500 hover:shadow-md transition text-left space-y-3 group"
+          >
+            <div className="p-3 rounded-xl bg-blue-600 text-white group-hover:scale-110 transition">
+              <History size={22} />
+            </div>
+            <div>
+              <h3 className="font-black text-sm uppercase text-slate-900">Historique des Ouvertures</h3>
+              <p className="text-xs text-slate-500">Consulter l'utilisation exacte de chaque session passée.</p>
+            </div>
+          </button>
+
+          {/* Bouton Modal Quotas Agences */}
+          <button
+            onClick={() => setActiveModal('AGRENCIES')}
+            className="flex flex-col items-start p-5 rounded-2xl border border-slate-200 bg-gradient-to-br from-purple-50 to-white hover:border-purple-500 hover:shadow-md transition text-left space-y-3 group"
+          >
+            <div className="p-3 rounded-xl bg-purple-600 text-white group-hover:scale-110 transition">
+              <Building2 size={22} />
+            </div>
+            <div>
+              <h3 className="font-black text-sm uppercase text-slate-900">Statistiques par Agence</h3>
+              <p className="text-xs text-slate-500">Suivi détaillé de la consommation par agence.</p>
+            </div>
+          </button>
+
+          {/* Bouton Modal Paramètres */}
+          <button
+            onClick={() => setActiveModal('CONFIG')}
+            className="flex flex-col items-start p-5 rounded-2xl border border-slate-200 bg-gradient-to-br from-slate-100 to-white hover:border-slate-800 hover:shadow-md transition text-left space-y-3 group"
+          >
+            <div className="p-3 rounded-xl bg-slate-900 text-white group-hover:scale-110 transition">
+              <Sliders size={22} />
+            </div>
+            <div>
+              <h3 className="font-black text-sm uppercase text-slate-900">Réserve & Paramètres</h3>
+              <p className="text-xs text-slate-500">Modifier le stock global et plafonds anti-triche.</p>
+            </div>
+          </button>
+
+          {/* Lien vers la vue Agences 2 */}
+          <Link
+            href="/hajj/admin/agences2"
+            className="flex flex-col items-start p-5 rounded-2xl border border-slate-200 bg-gradient-to-br from-amber-50 to-white hover:border-amber-500 hover:shadow-md transition text-left space-y-3 group"
+          >
+            <div className="p-3 rounded-xl bg-amber-600 text-white group-hover:scale-110 transition">
+              <Building2 size={22} />
+            </div>
+            <div>
+              <h3 className="font-black text-sm uppercase text-slate-900">Agences 2</h3>
+              <p className="text-xs text-slate-500">Ouvrir la vue détaillée des agences et pèlerins GOUV.</p>
+            </div>
+          </Link>
+        </div>
+      </div>
+
+      {/* Information sur la Session Active en Cours */}
+      {activeSession && activeSession.est_active ? (
+        <div className="rounded-3xl border border-emerald-300 bg-emerald-50/50 p-6 shadow-sm space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <span className="flex h-3 w-3 rounded-full bg-emerald-500 animate-ping" />
+              <h3 className="text-base font-black uppercase text-emerald-950">
+                Session Active : <span className="underline">{activeSession.nom_session}</span>
+              </h3>
+            </div>
+            <span className="text-xs font-bold text-emerald-700 bg-emerald-100 px-3 py-1 rounded-full">
+              Ouverte le {new Date(activeSession.date_ouverture).toLocaleString('fr-FR')}
+            </span>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 bg-white p-4 rounded-2xl border border-emerald-200">
+            <div>
+              <p className="text-[10px] font-black uppercase text-slate-400">Quota Attribué</p>
+              <p className="text-xl font-black text-slate-900">{activeSession.quota_alloue}</p>
+            </div>
+            <div>
+              <p className="text-[10px] font-black uppercase text-slate-400">Quota Consommé</p>
+              <p className="text-xl font-black text-emerald-600">{activeSession.quota_utilise}</p>
+            </div>
+            <div>
+              <p className="text-[10px] font-black uppercase text-slate-400">Quota Restant Session</p>
+              <p className="text-xl font-black text-amber-600">{activeSession.quota_alloue - activeSession.quota_utilise}</p>
+            </div>
+          </div>
+        </div>
+      ) : (
+        <div className="rounded-3xl border border-dashed border-slate-300 bg-white p-8 text-center space-y-2">
+          <Lock className="mx-auto text-slate-400" size={32} />
+          <h3 className="text-base font-black uppercase text-slate-700">Aucune Session Ouverte</h3>
+          <p className="text-xs text-slate-500 max-w-md mx-auto">
+            Les agences ne peuvent pas inscrire de nouveaux pèlerins sur GOUV pour le moment. Cliquez sur "Ouvrir une Session" pour démarrer.
+          </p>
+        </div>
+      )}
+
+      {/* -------------------------------------------------------------------------------- */}
+      {/* FENÊTRES MODALES SÉPARÉES */}
+      {/* -------------------------------------------------------------------------------- */}
+
+      {/* 1. MODAL : OUVRIR UNE NOUVELLE SESSION */}
+      {activeModal === 'OPEN_SESSION' && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 backdrop-blur-sm p-4">
+          <div className="w-full max-w-lg rounded-3xl bg-white p-6 sm:p-8 shadow-2xl border border-slate-200 space-y-6">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-4">
+              <div className="flex items-center gap-2 text-emerald-600">
+                <Unlock size={22} />
+                <h2 className="text-lg font-black uppercase text-slate-900">Ouvrir une nouvelle Session</h2>
+              </div>
+              <button onClick={() => setActiveModal(null)} className="p-2 rounded-full hover:bg-slate-100 text-slate-400">
+                <X size={20} />
+              </button>
+            </div>
+
+            <form onSubmit={handleOpenSession} className="space-y-4">
+              <div>
+                <label className="block text-[11px] font-black uppercase tracking-wider text-slate-600 mb-2">
+                  Nom de l'Ouverture / Description
+                </label>
+                <input
+                  type="text"
+                  required
+                  placeholder="Ex: Session du Matin - Phase 1"
+                  value={sessionNameInput}
+                  onChange={(e) => setSessionNameInput(e.target.value)}
+                  className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-bold text-slate-900 outline-none focus:border-emerald-500 focus:bg-white transition"
+                />
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-[11px] font-black uppercase tracking-wider text-slate-600 mb-2">
+                    Quota pour cette session
+                  </label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={config.quota_restant_global}
+                    required
+                    value={quotaSessionInput}
+                    onChange={(e) => setQuotaSessionInput(Number(e.target.value))}
+                    className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-bold text-slate-900 outline-none focus:border-emerald-500 focus:bg-white transition"
+                  />
+                  <p className="text-[10px] text-slate-400 mt-1">Max disponible : {config.quota_restant_global}</p>
                 </div>
-                <div className="flex flex-col items-end">
-                  <div className="flex items-center gap-1 text-gray-400 font-bold text-[8px] md:text-[10px] uppercase bg-gray-50 px-2 md:px-3 py-1 md:py-1.5 rounded-full whitespace-nowrap">
-                    <Users size={10} className="md:w-3 md:h-3" />
-                    {agence.pelerins?.[0]?.count || 0} pél
-                  </div>
+
+                <div>
+                  <label className="block text-[11px] font-black uppercase tracking-wider text-slate-600 mb-2">
+                    Durée d'ouverture (Heures)
+                  </label>
+                  <input
+                    type="number"
+                    step="0.5"
+                    min="0.1"
+                    placeholder="Ex: 2 pour 2 heures (Optionnel)"
+                    value={dureeHeuresInput}
+                    onChange={(e) => setDureeHeuresInput(e.target.value === '' ? '' : Number(e.target.value))}
+                    className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-bold text-slate-900 outline-none focus:border-emerald-500 focus:bg-white transition"
+                  />
+                  <p className="text-[10px] text-slate-400 mt-1">Vide = Illimité en temps</p>
                 </div>
               </div>
-              
-              {/* Informations textuelles */}
-              <h2 className="text-sm md:text-xl font-black text-gray-900 uppercase mb-0.5 md:mb-1 truncate" title={agence.nom_agence}>
-                {agence.nom_agence}
-              </h2>
-              <p className="text-gray-400 text-[8px] md:text-[10px] font-mono mb-4 md:mb-8 uppercase tracking-tighter">
-                UID: {agence.id.substring(0, 8)}...
-              </p>
+
+              <div className="pt-4 flex gap-3">
+                <button
+                  type="button"
+                  onClick={() => setActiveModal(null)}
+                  className="w-1/2 rounded-2xl border border-slate-200 px-4 py-3 text-xs font-black uppercase text-slate-600 hover:bg-slate-50 transition"
+                >
+                  Annuler
+                </button>
+                <button
+                  type="submit"
+                  disabled={actionLoading}
+                  className="w-1/2 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs uppercase px-4 py-3 transition shadow-lg shadow-emerald-600/20 flex items-center justify-center gap-2"
+                >
+                  {actionLoading ? <Loader2 size={16} className="animate-spin" /> : <Unlock size={16} />}
+                  Confirmer Ouverture
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* 2. MODAL : HISTORIQUE DES SESSIONS */}
+      {activeModal === 'HISTORY' && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 backdrop-blur-sm p-4">
+          <div className="w-full max-w-4xl max-h-[85vh] rounded-3xl bg-white p-6 sm:p-8 shadow-2xl border border-slate-200 flex flex-col">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-4">
+              <div className="flex items-center gap-2 text-blue-600">
+                <History size={22} />
+                <h2 className="text-lg font-black uppercase text-slate-900">Historique Précis des Ouvertures</h2>
+              </div>
+              <button onClick={() => setActiveModal(null)} className="p-2 rounded-full hover:bg-slate-100 text-slate-400">
+                <X size={20} />
+              </button>
             </div>
 
-            {/* Actions */}
-            <div className="mt-2 md:mt-4">
-              <Link 
-                href={`/hajj/admin/agence/${agence.id}`}
-                className="flex items-center justify-center gap-1 md:gap-2 w-full py-3 md:py-4 bg-gray-900 text-white rounded-xl md:rounded-2xl font-black text-[9px] md:text-[11px] uppercase hover:bg-blue-600 transition-all active:scale-95 shadow-lg shadow-gray-200"
-              >
-                <span className="hidden xs:inline">Superviser</span>
-                <span className="xs:hidden">Gérer</span>
-                <ArrowRight size={12} className="md:w-3.5 md:h-3.5" />
-              </Link>
+            <div className="overflow-y-auto flex-1 mt-4 space-y-3 pr-2">
+              {sessionHistory.length > 0 ? (
+                sessionHistory.map((s) => (
+                  <div key={s.id} className="rounded-2xl border border-slate-200 bg-slate-50 p-4 space-y-3">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-200/60 pb-2">
+                      <div className="flex items-center gap-3">
+                        <span className={`px-2.5 py-1 rounded-full text-[10px] font-black uppercase ${
+                          s.est_active ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-200 text-slate-700'
+                        }`}>
+                          {s.est_active ? 'En cours' : s.statut_fermeture}
+                        </span>
+                        <h4 className="font-black text-sm text-slate-900">{s.nom_session}</h4>
+                      </div>
+                      <span className="text-xs font-bold text-slate-400">
+                        Ouv. {new Date(s.date_ouverture).toLocaleString('fr-FR')}
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+                      <div>
+                        <span className="text-slate-400 font-bold block">Quota Alloué</span>
+                        <span className="font-black text-slate-800">{s.quota_alloue}</span>
+                      </div>
+                      <div>
+                        <span className="text-slate-400 font-bold block">Quota Utilisé</span>
+                        <span className="font-black text-emerald-600">{s.quota_utilise}</span>
+                      </div>
+                      <div>
+                        <span className="text-slate-400 font-bold block">Durée Prévue</span>
+                        <span className="font-black text-slate-800">{s.duree_heures ? `${s.duree_heures}h` : 'N/A'}</span>
+                      </div>
+                      <div className="flex items-center justify-end">
+                        <button
+                          onClick={() => void handleDeleteSessionRecord(s.id)}
+                          className="p-2 text-slate-400 hover:text-rose-600 transition"
+                          title="Supprimer l'enregistrement"
+                        >
+                          <Trash2 size={16} />
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ))
+              ) : (
+                <p className="text-center text-sm font-bold text-slate-400 py-8">Aucun historique disponible.</p>
+              )}
             </div>
           </div>
-        ))}
-      </div>
+        </div>
+      )}
 
-      {/* ÉTAT VIDE */}
-      {agencesFiltrees.length === 0 && (
-        <div className="text-center py-16 md:py-24 bg-gray-50 rounded-[2rem] md:rounded-[3rem] border-2 border-dashed border-gray-200">
-          <ShieldAlert className="mx-auto text-gray-200 mb-4" size={48} />
-          <p className="text-gray-400 font-black uppercase italic tracking-widest text-xs md:text-sm">Aucune agence trouvée</p>
+      {/* 3. MODAL : STATISTIQUES DES AGENCES */}
+      {activeModal === 'AGRENCIES' && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 backdrop-blur-sm p-4">
+          <div className="w-full max-w-3xl max-h-[85vh] rounded-3xl bg-white p-6 sm:p-8 shadow-2xl border border-slate-200 flex flex-col">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-4">
+              <div className="flex items-center gap-2 text-purple-600">
+                <BarChart3 size={22} />
+                <h2 className="text-lg font-black uppercase text-slate-900">Consommation par Agence</h2>
+              </div>
+              <button onClick={() => setActiveModal(null)} className="p-2 rounded-full hover:bg-slate-100 text-slate-400">
+                <X size={20} />
+              </button>
+            </div>
+
+            <div className="overflow-y-auto flex-1 mt-4">
+              <table className="w-full text-left text-sm">
+                <thead>
+                  <tr className="border-b border-slate-200 text-[10px] font-black uppercase tracking-wider text-slate-400">
+                    <th className="py-3 px-2">Agence</th>
+                    <th className="py-3 px-2 text-center">Pèlerins Inscrits</th>
+                    <th className="py-3 px-2 text-right">Part (%)</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {agenceStats.map((ag) => (
+                    <tr key={ag.id} className="hover:bg-slate-50 transition">
+                      <td className="py-3 px-2 font-bold text-slate-800">{ag.nom_agence}</td>
+                      <td className="py-3 px-2 text-center">
+                        <span className="inline-flex px-3 py-1 rounded-full bg-purple-50 text-purple-700 font-black text-xs">
+                          {ag.pelerins_gouv_count}
+                        </span>
+                      </td>
+                      <td className="py-3 px-2 text-right font-black text-slate-700">{ag.percentage}%</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 4. MODAL : PARAMÈTRES ET RÉSERVE GLOBALE */}
+      {activeModal === 'CONFIG' && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 backdrop-blur-sm p-4">
+          <div className="w-full max-w-lg rounded-3xl bg-white p-6 sm:p-8 shadow-2xl border border-slate-200 space-y-6">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-4">
+              <div className="flex items-center gap-2 text-slate-900">
+                <Sliders size={22} />
+                <h2 className="text-lg font-black uppercase text-slate-900">Réserve & Sécurité Globale</h2>
+              </div>
+              <button onClick={() => setActiveModal(null)} className="p-2 rounded-full hover:bg-slate-100 text-slate-400">
+                <X size={20} />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveConfig} className="space-y-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-[10px] font-black uppercase tracking-wider text-slate-600 mb-2">
+                    Quota Total Global (Plafond National)
+                  </label>
+                  <input
+                    type="number"
+                    value={config.quota_total_global}
+                    onChange={(e) => setConfig({ ...config, quota_total_global: Number(e.target.value) })}
+                    className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-bold text-slate-900 outline-none focus:border-slate-800 focus:bg-white transition"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] font-black uppercase tracking-wider text-slate-400 mb-2">
+                    Réserve Globale Restante (Calculé Automatiquement)
+                  </label>
+                  <input
+                    type="number"
+                    disabled
+                    value={config.quota_restant_global}
+                    className="w-full rounded-2xl border border-slate-200 bg-slate-100 px-4 py-3 text-sm font-black text-emerald-600 outline-none cursor-not-allowed"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-[10px] font-black uppercase tracking-wider text-slate-600 mb-2">
+                    Max / Agence
+                  </label>
+                  <input
+                    type="number"
+                    value={config.quota_max_par_agence}
+                    onChange={(e) => setConfig({ ...config, quota_max_par_agence: Number(e.target.value) })}
+                    className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-bold text-slate-900 outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] font-black uppercase tracking-wider text-slate-600 mb-2">
+                    Max postulations / Min
+                  </label>
+                  <input
+                    type="number"
+                    value={config.max_postulations_par_minute}
+                    onChange={(e) => setConfig({ ...config, max_postulations_par_minute: Number(e.target.value) })}
+                    className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-bold text-slate-900 outline-none"
+                  />
+                </div>
+              </div>
+
+              <div className="pt-4 flex gap-3">
+                <button
+                  type="button"
+                  onClick={() => setActiveModal(null)}
+                  className="w-1/2 rounded-2xl border border-slate-200 px-4 py-3 text-xs font-black uppercase text-slate-600 hover:bg-slate-50 transition"
+                >
+                  Annuler
+                </button>
+                <button
+                  type="submit"
+                  disabled={actionLoading}
+                  className="w-1/2 rounded-2xl bg-slate-900 hover:bg-black text-white font-black text-xs uppercase px-4 py-3 transition shadow-lg flex items-center justify-center gap-2"
+                >
+                  {actionLoading ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />}
+                  Enregistrer
+                </button>
+              </div>
+            </form>
+          </div>
         </div>
       )}
     </div>

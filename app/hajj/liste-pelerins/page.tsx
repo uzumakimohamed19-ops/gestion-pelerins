@@ -31,6 +31,7 @@ interface Pelerin {
   prix_package: number
   sur_plateforme_gouv: boolean
   sur_plateforme_nusuk: boolean
+  hajj_session_id?: string | null
   campagne?: number
   date_depart?: string
   date_retour?: string
@@ -247,6 +248,7 @@ export default function ListePelerins() {
   // Export dropdown
   const [showExportMenu, setShowExportMenu] = useState(false)
   const exportRef = useRef<HTMLDivElement>(null)
+  const [sessionLocked, setSessionLocked] = useState(false)
 
   // ── FIX 2: Restaurer les filtres depuis sessionStorage au montage
   useEffect(() => {
@@ -329,6 +331,56 @@ export default function ListePelerins() {
   }, [selectedYear, fetchPelerins])
 
   useEffect(() => {
+    let active = true
+
+    const loadSessionState = async () => {
+      const [{ data: configData }, { data: sessionData }] = await Promise.all([
+        supabase
+          .from('hajj_campaign_config')
+          .select('session_ouverte')
+          .eq('id', 1)
+          .maybeSingle(),
+        supabase
+          .from('hajj_sessions')
+          .select('*')
+          .eq('est_active', true)
+          .order('date_ouverture', { ascending: false })
+          .limit(1)
+          .maybeSingle()
+      ])
+
+      if (!active) return
+
+      const isSessionOpenInDb = Boolean(
+        sessionData?.id && (
+          sessionData?.est_active === true ||
+          sessionData?.session_ouverte === true ||
+          sessionData?.is_active === true
+        )
+      )
+
+      setSessionLocked(!(isSessionOpenInDb || Boolean(configData?.session_ouverte)))
+    }
+
+    void loadSessionState()
+
+    const channel = supabase
+      .channel('session_lock_hajj_list')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'hajj_campaign_config' }, () => {
+        void loadSessionState()
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'hajj_sessions' }, () => {
+        void loadSessionState()
+      })
+      .subscribe()
+
+    return () => {
+      active = false
+      void supabase.removeChannel(channel)
+    }
+  }, [])
+
+  useEffect(() => {
     const checkUser = async () => {
       try {
         const { data: { user } } = await getUser()
@@ -353,10 +405,33 @@ export default function ListePelerins() {
   }, [])
 
   const toggleFastStatus = async (id: string, field: string, currentValue: boolean) => {
+    if (field === 'sur_plateforme_gouv' && sessionLocked) return
     setUpdatingId(id + field)
     const newValue = !currentValue
-    const { error } = await supabase.from('pelerins').update({ [field]: newValue }).eq('id', id)
-    if (!error) setPelerins(prev => prev.map(p => p.id === id ? { ...p, [field]: newValue } : p))
+
+    let updatePayload: Record<string, unknown> = { [field]: newValue }
+    if (field === 'sur_plateforme_gouv') {
+      if (newValue) {
+        const { data: sessionData } = await supabase
+          .from('hajj_sessions')
+          .select('id')
+          .order('date_ouverture', { ascending: false })
+          .limit(1)
+          .maybeSingle()
+        updatePayload = {
+          [field]: newValue,
+          hajj_session_id: sessionData?.id ?? null
+        }
+      } else {
+        updatePayload = {
+          [field]: newValue,
+          hajj_session_id: null
+        }
+      }
+    }
+
+    const { error } = await supabase.from('pelerins').update(updatePayload).eq('id', id)
+    if (!error) setPelerins(prev => prev.map(p => p.id === id ? { ...p, [field]: newValue, hajj_session_id: field === 'sur_plateforme_gouv' ? (newValue ? (updatePayload.hajj_session_id as string | null) : null) : p.hajj_session_id } : p))
     setUpdatingId(null)
   }
 
@@ -1078,7 +1153,14 @@ export default function ListePelerins() {
                             {(p.prenom || p.nom_complet).charAt(0).toUpperCase()}
                           </div>
                           <div className="flex-1 min-w-0">
-                            <h3 className="font-black text-gray-900 text-sm sm:text-base leading-tight truncate">{p.prenom} {p.nom_complet}</h3>
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <h3 className="font-black text-gray-900 text-sm sm:text-base leading-tight truncate">{p.prenom} {p.nom_complet}</h3>
+                              {p.sur_plateforme_gouv && (
+                                <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-[9px] font-black uppercase tracking-wider text-emerald-700 border border-emerald-200">
+                                  <CheckCircle2 size={10} /> GOUV
+                                </span>
+                              )}
+                            </div>
                             <div className="flex items-center gap-2 mt-0.5 flex-wrap">
                               <span className="font-mono text-[9px] sm:text-[10px] bg-gray-100 px-2 py-0.5 rounded-lg text-gray-600 font-bold">{p.num_passeport}</span>
                               {p.telephone_pelerin && (
@@ -1111,22 +1193,14 @@ export default function ListePelerins() {
                       <div className="border-t border-gray-50 px-3 sm:px-4 py-2.5 sm:py-3 flex items-center justify-between gap-2 sm:gap-3 flex-wrap">
                         <div className="flex items-center gap-2 sm:gap-3">
                           <div className="flex gap-1.5 sm:gap-2">
-                            <button
-                              onClick={() => toggleFastStatus(p.id, 'sur_plateforme_gouv', p.sur_plateforme_gouv)}
-                              disabled={updatingId === p.id + 'sur_plateforme_gouv'}
-                              className={`flex items-center gap-1 px-2 py-1 rounded-lg text-[8px] sm:text-[9px] font-black transition-all active:scale-90 border ${p.sur_plateforme_gouv ? 'bg-green-50 border-green-200 text-green-700' : 'bg-gray-50 border-gray-200 text-gray-400'}`}
-                            >
-                              {updatingId === p.id + 'sur_plateforme_gouv' ? <Loader2 size={9} className="animate-spin" /> : <div className={`w-1.5 h-1.5 rounded-full ${p.sur_plateforme_gouv ? 'bg-green-500' : 'bg-gray-300'}`} />}
+                            <span className={`inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[8px] sm:text-[9px] font-black border ${p.sur_plateforme_gouv ? 'bg-green-50 border-green-200 text-green-700' : 'bg-gray-50 border-gray-200 text-gray-400'}`}>
+                              <div className={`w-1.5 h-1.5 rounded-full ${p.sur_plateforme_gouv ? 'bg-green-500' : 'bg-gray-300'}`} />
                               GOUV
-                            </button>
-                            <button
-                              onClick={() => toggleFastStatus(p.id, 'sur_plateforme_nusuk', p.sur_plateforme_nusuk)}
-                              disabled={updatingId === p.id + 'sur_plateforme_nusuk'}
-                              className={`flex items-center gap-1 px-2 py-1 rounded-lg text-[8px] sm:text-[9px] font-black transition-all active:scale-90 border ${p.sur_plateforme_nusuk ? 'bg-blue-50 border-blue-200 text-blue-700' : 'bg-gray-50 border-gray-200 text-gray-400'}`}
-                            >
-                              {updatingId === p.id + 'sur_plateforme_nusuk' ? <Loader2 size={9} className="animate-spin" /> : <div className={`w-1.5 h-1.5 rounded-full ${p.sur_plateforme_nusuk ? 'bg-blue-500' : 'bg-gray-300'}`} />}
+                            </span>
+                            <span className={`inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[8px] sm:text-[9px] font-black border ${p.sur_plateforme_nusuk ? 'bg-blue-50 border-blue-200 text-blue-700' : 'bg-gray-50 border-gray-200 text-gray-400'}`}>
+                              <div className={`w-1.5 h-1.5 rounded-full ${p.sur_plateforme_nusuk ? 'bg-blue-500' : 'bg-gray-300'}`} />
                               NUSUK
-                            </button>
+                            </span>
                           </div>
 
                           <div className="flex items-center gap-1">
@@ -1202,7 +1276,14 @@ export default function ListePelerins() {
                                 {(p.prenom || p.nom_complet).charAt(0).toUpperCase()}
                               </div>
                               <div>
-                                <div className="font-black text-gray-900 text-base group-hover:text-blue-900 transition-colors duration-150">{p.prenom} {p.nom_complet}</div>
+                                <div className="font-black text-gray-900 text-base group-hover:text-blue-900 transition-colors duration-150 flex items-center gap-2">
+                                  {p.prenom} {p.nom_complet}
+                                  {p.sur_plateforme_gouv && (
+                                    <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-[9px] font-black uppercase tracking-wider text-emerald-700 border border-emerald-200">
+                                      <CheckCircle2 size={10} /> GOUV
+                                    </span>
+                                  )}
+                                </div>
                                 <div className="text-xs text-gray-400 font-medium">{p.telephone_pelerin || 'Aucun numéro'}</div>
                               </div>
                             </div>
@@ -1216,22 +1297,14 @@ export default function ListePelerins() {
 
                           <td className="px-4 lg:px-6 py-4 lg:py-5">
                             <div className="flex gap-2">
-                              <button
-                                onClick={() => toggleFastStatus(p.id, 'sur_plateforme_gouv', p.sur_plateforme_gouv)}
-                                disabled={updatingId === p.id + 'sur_plateforme_gouv'}
-                                className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-[10px] font-black transition-all hover:scale-105 active:scale-90 border ${p.sur_plateforme_gouv ? 'bg-green-50 border-green-200 text-green-700 shadow-sm' : 'bg-gray-50 border-gray-200 text-gray-400'}`}
-                              >
-                                {updatingId === p.id + 'sur_plateforme_gouv' ? <Loader2 size={10} className="animate-spin" /> : <div className={`w-2 h-2 rounded-full ${p.sur_plateforme_gouv ? 'bg-green-500' : 'bg-gray-300'}`} />}
+                              <span className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-[10px] font-black border ${p.sur_plateforme_gouv ? 'bg-emerald-600 text-white shadow-sm' : 'bg-gray-50 border-gray-200 text-gray-400'}`}>
+                                <div className={`w-2 h-2 rounded-full ${p.sur_plateforme_gouv ? 'bg-green-500' : 'bg-gray-300'}`} />
                                 Gouv
-                              </button>
-                              <button
-                                onClick={() => toggleFastStatus(p.id, 'sur_plateforme_nusuk', p.sur_plateforme_nusuk)}
-                                disabled={updatingId === p.id + 'sur_plateforme_nusuk'}
-                                className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-[10px] font-black transition-all hover:scale-105 active:scale-90 border ${p.sur_plateforme_nusuk ? 'bg-blue-50 border-blue-200 text-blue-700 shadow-sm' : 'bg-gray-50 border-gray-200 text-gray-400'}`}
-                              >
-                                {updatingId === p.id + 'sur_plateforme_nusuk' ? <Loader2 size={10} className="animate-spin" /> : <div className={`w-2 h-2 rounded-full ${p.sur_plateforme_nusuk ? 'bg-blue-500' : 'bg-gray-300'}`} />}
+                              </span>
+                              <span className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-[10px] font-black border ${p.sur_plateforme_nusuk ? 'bg-blue-50 border-blue-200 text-blue-700 shadow-sm' : 'bg-gray-50 border-gray-200 text-gray-400'}`}>
+                                <div className={`w-2 h-2 rounded-full ${p.sur_plateforme_nusuk ? 'bg-blue-500' : 'bg-gray-300'}`} />
                                 Nusuk
-                              </button>
+                              </span>
                             </div>
                           </td>
 

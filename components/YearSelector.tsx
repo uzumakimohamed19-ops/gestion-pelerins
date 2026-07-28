@@ -16,8 +16,20 @@ export function YearSelector() {
         setIsOpen(false)
       }
     }
+
+    function handleMobileNavChange() {
+      setIsOpen(false)
+    }
+
     document.addEventListener('mousedown', handleClickOutside)
-    return () => document.removeEventListener('mousedown', handleClickOutside)
+    window.addEventListener('mobile-nav-open', handleMobileNavChange)
+    window.addEventListener('mobile-nav-close', handleMobileNavChange)
+
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside)
+      window.removeEventListener('mobile-nav-open', handleMobileNavChange)
+      window.removeEventListener('mobile-nav-close', handleMobileNavChange)
+    }
   }, [])
 
   const labelText = scope === 'agence' ? 'Exercice' : 'Année'
@@ -25,7 +37,7 @@ export function YearSelector() {
   const currentLabel = selectedYear === 'all' ? 'Toutes les années' : `${optionPrefix} ${selectedYear}`
 
   return (
-    <div className="relative z-[1200] inline-block text-left select-none" ref={dropdownRef}>
+    <div className="relative z-[70] lg:z-[1200] inline-block text-left select-none" ref={dropdownRef}>
       {/* Bouton Principal de l'UI */}
       <button
         onClick={() => setIsOpen(!isOpen)}
@@ -50,7 +62,7 @@ export function YearSelector() {
 
       {/* Menu Déroulant (Dropdown Premium) */}
       {isOpen && (
-        <div className="absolute right-0 mt-2 w-56 bg-white/98 backdrop-blur-xl border border-slate-200 rounded-2xl shadow-[0_20px_50px_-16px_rgba(15,23,42,0.28)] z-[1300] overflow-hidden origin-top-right animate-fadeIn p-1.5 focus:outline-none">
+        <div className="absolute right-0 mt-2 w-56 bg-white/98 backdrop-blur-xl border border-slate-200 rounded-2xl shadow-[0_20px_50px_-16px_rgba(15,23,42,0.28)] z-[80] lg:z-[1300] overflow-hidden origin-top-right animate-fadeIn p-1.5 focus:outline-none">
           
           {/* Option : Toutes les années */}
           <button

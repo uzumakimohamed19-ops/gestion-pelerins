@@ -13,6 +13,7 @@ import {
 import Link from 'next/link'
 
 import { useUI } from '@/lib/UIContext'
+import { getPassportPublicUrl, uploadPassportFile } from '@/lib/hajjPassport'
 
 // ─── AVATARS PÈLERINS AFRICAINS DYNAMIQUES (SVG) ─────────────────────────────
 
@@ -224,32 +225,42 @@ export default function DetailsPelerin() {
   const saveAdvancedData = async () => {
     if (!p?.id) return
     setUpdating(true)
-    const { error } = await supabase
-      .from('pelerins')
-      .update({
-        reference: p.reference || null,
-        agence_ou_personne_associee: p.agence_ou_personne_associee || null,
-        vacciné: p.vacciné,
-        visite_medicale: p.visite_medicale,
-        formation_suivie: p.formation_suivie,
-        date_formation: p.date_formation || null,
-        groupe_formation: p.groupe_formation || null,
-        hotel_mecque: p.hotel_mecque || null,
-        hotel_medine: p.hotel_medine || null,
-        hotel_statut: p.hotel_statut,
-        groupe_encadrement: p.groupe_encadrement || null,
-        date_depart: p.date_depart || null,
-        date_retour: p.date_retour || null,
-        visa_obtenu: p.visa_obtenu,
-        document_url: p.document_url || p.scan_passeport || null,
-        scan_passeport: p.document_url || p.scan_passeport || null,
-      
-      })
-      .eq('id', p.id)
 
-    if (!error) alert("🚀 Dossier mis à jour avec succès !")
-    else alert("Erreur : " + error.message)
-    setUpdating(false)
+    try {
+      const nextDocumentUrl = p.document_url || null
+      const { error } = await supabase
+        .from('pelerins')
+        .update({
+          reference: p.reference || null,
+          agence_ou_personne_associee: p.agence_ou_personne_associee || null,
+          vacciné: p.vacciné,
+          visite_medicale: p.visite_medicale,
+          formation_suivie: p.formation_suivie,
+          date_formation: p.date_formation || null,
+          groupe_formation: p.groupe_formation || null,
+          hotel_mecque: p.hotel_mecque || null,
+          hotel_medine: p.hotel_medine || null,
+          hotel_statut: p.hotel_statut,
+          groupe_encadrement: p.groupe_encadrement || null,
+          date_depart: p.date_depart || null,
+          date_retour: p.date_retour || null,
+          visa_obtenu: p.visa_obtenu,
+          document_url: nextDocumentUrl,
+        })
+        .eq('id', p.id)
+
+      if (!error) {
+        setPelerin({ ...p, document_url: nextDocumentUrl })
+        alert("🚀 Dossier mis à jour avec succès !")
+      } else {
+        alert("Erreur : " + error.message)
+      }
+    } catch (error) {
+      console.error(error)
+      alert("Erreur lors de l'enregistrement du document")
+    } finally {
+      setUpdating(false)
+    }
   }
 
   useEffect(() => {
@@ -292,7 +303,7 @@ export default function DetailsPelerin() {
       <div className="p-10 text-center font-black text-red-400 bg-white rounded-3xl shadow-xl border border-red-100">PÈLERIN INTROUVABLE.</div>
     </div>
   )
-   const scanUrl = p.document_url ? `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/passeports/${p.document_url}` : p.scan_passeport || null
+   const scanUrl = getPassportPublicUrl(p.document_url)
 
   // --- LOGIQUE MÉTIER & CALCULS INTELLIGENTS ---
   const totalDue = p.prix_package || 0
@@ -753,7 +764,7 @@ export default function DetailsPelerin() {
                       ⬇ Télécharger
                     </a>
                     <button 
-                      onClick={() => { handleChange('document_url', ''); handleChange('scan_passeport', ''); }}
+                      onClick={() => { handleChange('document_url', ''); }}
                       className="bg-red-50 text-red-600 border border-red-100 px-4 py-2 rounded-xl text-xs font-black uppercase hover:bg-red-100 transition-all flex items-center gap-1.5 cursor-pointer"
                     >
                       ✕ Supprimer le scan
@@ -791,14 +802,16 @@ export default function DetailsPelerin() {
                       <input 
                         type="file" 
                         accept="image/*, application/pdf" 
-                        onChange={(e) => {
+                        onChange={async (e) => {
                           const file = e.target.files?.[0];
-                          if (file) {
-                            const reader = new FileReader();
-                            reader.onloadend = () => {
-                              handleChange('document_url', reader.result);
-                            };
-                            reader.readAsDataURL(file);
+                          if (!file) return;
+
+                          try {
+                            const uploaded = await uploadPassportFile(file)
+                            handleChange('document_url', uploaded.path)
+                          } catch (error) {
+                            console.error(error)
+                            alert('Échec de l’upload du document')
                           }
                         }}
                         className="hidden" 

@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react'
 import { useParams } from 'next/navigation' 
 import { supabase } from '@/lib/supabase'
 import { cacheFirstFetch } from '@/lib/cacheFirst'
-import { Search, Globe, ShieldCheck, Eye, CreditCard, AlertCircle, ArrowLeft } from 'lucide-react'
+import { Search, Globe, ShieldCheck, Eye, CreditCard, AlertCircle, ArrowLeft, Lock } from 'lucide-react'
 import Link from 'next/link'
 import { useYear } from '@/lib/YearContext'
 import { YearSelector } from '@/components/YearSelector'
@@ -15,6 +15,7 @@ export default function ListeAdminPelerins() {
   const [search, setSearch] = useState('')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [sessionLocked, setSessionLocked] = useState(false)
 
   useEffect(() => {
     async function fetchPelerins() {
@@ -39,11 +40,77 @@ export default function ListeAdminPelerins() {
     fetchPelerins()
   }, [id])
 
+  useEffect(() => {
+    let active = true
+
+    const loadSessionState = async () => {
+      const [{ data: configData }, { data: sessionData }] = await Promise.all([
+        supabase
+          .from('hajj_campaign_config')
+          .select('session_ouverte')
+          .eq('id', 1)
+          .maybeSingle(),
+        supabase
+          .from('hajj_sessions')
+          .select('*')
+          .eq('est_active', true)
+          .order('date_ouverture', { ascending: false })
+          .limit(1)
+          .maybeSingle()
+      ])
+
+      if (!active) return
+
+      const isSessionOpenInDb = Boolean(
+        sessionData?.id && (
+          sessionData?.est_active === true ||
+          sessionData?.session_ouverte === true ||
+          sessionData?.is_active === true
+        )
+      )
+
+      setSessionLocked(!(isSessionOpenInDb || Boolean(configData?.session_ouverte)))
+    }
+
+    void loadSessionState()
+
+    const channel = supabase
+      .channel('session_lock_admin_agence')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'hajj_campaign_config' }, () => {
+        void loadSessionState()
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'hajj_sessions' }, () => {
+        void loadSessionState()
+      })
+      .subscribe()
+
+    return () => {
+      active = false
+      supabase.removeChannel(channel)
+    }
+  }, [])
+
   const toggleStatus = async (pelerinId: string, field: 'sur_plateforme_gouv' | 'sur_plateforme_nusuk', value: boolean) => {
+    if (field === 'sur_plateforme_gouv' && sessionLocked) return
     try {
+      const updatePayload: Record<string, unknown> = { [field]: value }
+      if (field === 'sur_plateforme_gouv') {
+        if (value) {
+          const { data: sessionData } = await supabase
+            .from('hajj_sessions')
+            .select('id')
+            .order('date_ouverture', { ascending: false })
+            .limit(1)
+            .maybeSingle()
+          updatePayload.hajj_session_id = sessionData?.id ?? null
+        } else {
+          updatePayload.hajj_session_id = null
+        }
+      }
+
       const { error } = await supabase
         .from('pelerins')
-        .update({ [field]: value })
+        .update(updatePayload)
         .eq('id', pelerinId)
 
       if (error) {
@@ -115,6 +182,12 @@ export default function ListeAdminPelerins() {
         </div>
       )}
 
+      {sessionLocked && (
+        <div className="mb-6 flex items-center gap-2 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-bold text-amber-700">
+          <Lock size={16} /> La session GOUV est fermée : les agences ne peuvent plus valider de nouveaux pèlerins ici.
+        </div>
+      )}
+
       {/* --- RESPONSIVE MOBILE: 2 BLOCS PAR LIGNE --- */}
       <div className="md:hidden">
         {loading ? (
@@ -161,10 +234,11 @@ export default function ListeAdminPelerins() {
                   <div className="flex flex-col gap-2 mt-auto pt-2 border-t border-gray-50">
                     <button
                       onClick={() => toggleStatus(p.id, 'sur_plateforme_gouv', !p.sur_plateforme_gouv)}
-                      className={`w-full px-2 py-1.5 rounded-xl flex items-center justify-center gap-1 ${p.sur_plateforme_gouv ? 'bg-green-100 text-green-700' : 'bg-gray-50 text-gray-400 opacity-80'}`}
+                      disabled={sessionLocked}
+                      className={`w-full px-2 py-1.5 rounded-xl flex items-center justify-center gap-1 ${sessionLocked ? 'bg-gray-100 text-gray-500 cursor-not-allowed' : p.sur_plateforme_gouv ? 'bg-green-100 text-green-700' : 'bg-gray-50 text-gray-400 opacity-80'}`}
                     >
-                      <ShieldCheck size={12} />
-                      <span className="text-[8px] font-black uppercase tracking-tighter">Gouv</span>
+                      {sessionLocked ? <Lock size={12} /> : <ShieldCheck size={12} />}
+                      <span className="text-[8px] font-black uppercase tracking-tighter">{sessionLocked ? 'Verrouillé' : 'Gouv'}</span>
                     </button>
 
                     <button
@@ -235,11 +309,12 @@ export default function ListeAdminPelerins() {
                       <td className="px-6 py-6 text-center">
                         <button
                           onClick={() => toggleStatus(p.id, 'sur_plateforme_gouv', !p.sur_plateforme_gouv)}
-                          className={`mx-auto w-fit px-3 py-1.5 rounded-full flex items-center gap-1.5 ${p.sur_plateforme_gouv ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-400 opacity-60 hover:bg-gray-200'} transition-all`}
-                          title={p.sur_plateforme_gouv ? 'Désactiver statuts gouv' : 'Valider sur gouv'}
+                          disabled={sessionLocked}
+                          className={`mx-auto w-fit px-3 py-1.5 rounded-full flex items-center gap-1.5 ${sessionLocked ? 'bg-gray-100 text-gray-500 cursor-not-allowed' : p.sur_plateforme_gouv ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-400 opacity-60 hover:bg-gray-200'} transition-all`}
+                          title={sessionLocked ? 'Verrouillé par l’admin' : p.sur_plateforme_gouv ? 'Désactiver statuts gouv' : 'Valider sur gouv'}
                         >
-                          <ShieldCheck size={14} />
-                          <span className="text-[9px] font-black uppercase tracking-tighter">{p.sur_plateforme_gouv ? 'Validé' : 'À faire'}</span>
+                          {sessionLocked ? <Lock size={14} /> : <ShieldCheck size={14} />}
+                          <span className="text-[9px] font-black uppercase tracking-tighter">{sessionLocked ? 'Verrouillé' : p.sur_plateforme_gouv ? 'Validé' : 'À faire'}</span>
                         </button>
                       </td>
 
