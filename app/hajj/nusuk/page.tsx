@@ -76,11 +76,11 @@ export default function PagePlatformeMdh() {
     last_sync: 0
   })
   const [messages, setMessages] = useState<Message[]>([])
-  
+
   // Verrou ultra-rapide pour bloquer immédiatement les multi-clics
   const [pendingIds, setPendingIds] = useState<Set<string>>(new Set())
   const pendingIdsRef = useRef<Set<string>>(new Set())
-  
+
   const [syncStatus, setSyncStatus] = useState<SyncStatus>('syncing')
   const [connectionError, setConnectionError] = useState<string | null>(null)
   const [userRole, setUserRole] = useState<'admin' | 'user' | null>(null)
@@ -142,32 +142,6 @@ export default function PagePlatformeMdh() {
     getUserRole()
   }, [])
 
-  const syncQuotaToSession = useCallback(async (rows: Pelerin[], sessionId: string | null, quotaTotal: number) => {
-    if (!sessionId) return 0
-
-    const quotaUsed = rows.filter((p) => {
-      if (!p.sur_plateforme_gouv) return false
-
-      const row = p as Pelerin & { hajj_session_id?: string | null }
-      return Boolean(row.hajj_session_id && row.hajj_session_id === sessionId)
-    }).length
-
-    await supabase
-      .from('hajj_sessions')
-      .update({ quota_utilise: quotaUsed })
-      .eq('id', sessionId)
-
-    await supabase
-      .from('hajj_campaign_config')
-      .update({
-        quota_session_restant: Math.max(0, quotaTotal - quotaUsed),
-        updated_at: new Date().toISOString()
-      })
-      .eq('id', 1)
-
-    return quotaUsed
-  }, [])
-
   const setPendingIdState = useCallback((id: string, isPending: boolean) => {
     const next = new Set(pendingIdsRef.current)
     if (isPending) next.add(id)
@@ -177,32 +151,29 @@ export default function PagePlatformeMdh() {
     setPendingIds(next)
   }, [])
 
-  const refreshQuotaFromServer = useCallback(async (sessionId: string | null, quotaTotal: number) => {
-    if (!sessionId) {
-      setSessionSummary((prev) => ({
-        ...prev,
-        quota_utilise: 0,
-        quota_restant: Math.max(0, quotaTotal - 0)
-      }))
-      return 0
-    }
+  // Rafraîchir les quotas globaux directement depuis la session Supabase
+  const refreshQuotaFromServer = useCallback(async (sessionId: string | null) => {
+    if (!sessionId) return
 
-    const { data, error } = await supabase
-      .from('pelerins')
-      .select('id, hajj_session_id')
-      .eq('sur_plateforme_gouv', true)
+    const { data: sessionData, error } = await supabase
+      .from('hajj_sessions')
+      .select('quota_alloue, quota_utilise, est_active, statut_fermeture, nom_session')
+      .eq('id', sessionId)
+      .single()
 
-    if (error) throw error
+    if (error || !sessionData) return
 
-    const quotaUsed = data?.filter((row) => row.hajj_session_id === sessionId).length ?? 0
+    const quotaTotal = sessionData.quota_alloue || 0
+    const quotaUsed = sessionData.quota_utilise || 0
 
     setSessionSummary((prev) => ({
       ...prev,
+      label: sessionData.nom_session || prev.label,
+      quota_total: quotaTotal,
       quota_utilise: quotaUsed,
-      quota_restant: Math.max(0, quotaTotal - quotaUsed)
+      quota_restant: Math.max(0, quotaTotal - quotaUsed),
+      session_open: sessionData.est_active === true && sessionData.statut_fermeture === 'EN_COURS'
     }))
-
-    return quotaUsed
   }, [])
 
   // 2. Chargement unique des données
@@ -213,12 +184,7 @@ export default function PagePlatformeMdh() {
       setSyncStatus('syncing')
       setConnectionError(null)
 
-      const [configRes, sessionRes, pelerinsRes] = await Promise.all([
-        supabase
-          .from('hajj_campaign_config')
-          .select('*')
-          .eq('id', 1)
-          .maybeSingle(),
+      const [sessionRes, pelerinsRes] = await Promise.all([
         supabase
           .from('hajj_sessions')
           .select('*')
@@ -233,22 +199,18 @@ export default function PagePlatformeMdh() {
 
       if (!isMountedRef.current) return
 
-      if (configRes.error && configRes.error.code !== 'PGRST116') throw configRes.error
       if (sessionRes.error && sessionRes.error.code !== 'PGRST116') throw sessionRes.error
       if (pelerinsRes.error) throw pelerinsRes.error
 
-      const configData = configRes.data
       const sessionData = sessionRes.data
       const rawPelerins = pelerinsRes.data || []
 
       const activeSessionId = sessionData?.id ?? null
       const isSessionOpen = Boolean(
-        activeSessionId && (
-          sessionData?.est_active === true ||
-          sessionData?.session_ouverte === true ||
-          sessionData?.is_active === true
-        )
-      ) || Boolean(configData?.session_ouverte)
+        activeSessionId &&
+        sessionData?.est_active === true &&
+        sessionData?.statut_fermeture === 'EN_COURS'
+      )
 
       if (activeSessionId && isSessionOpen) {
         await supabase
@@ -285,8 +247,8 @@ export default function PagePlatformeMdh() {
       )] as string[]
       setAgences(agencyList.sort())
 
-      const quotaTotal = Number(sessionData?.quota_alloue || configData?.quota_session_total || configData?.quota_total_global || 0)
-      const quotaUsed = await syncQuotaToSession(rawPelerins, activeSessionId, quotaTotal)
+      const quotaTotal = Number(sessionData?.quota_alloue || 0)
+      const quotaUsed = Number(sessionData?.quota_utilise || 0)
 
       setSessionSummary({
         id: activeSessionId,
@@ -307,7 +269,7 @@ export default function PagePlatformeMdh() {
     } finally {
       if (isMountedRef.current) setLoading(false)
     }
-  }, [selectedYear, syncQuotaToSession])
+  }, [selectedYear])
 
   // 3. Chargement initial
   useEffect(() => {
@@ -319,17 +281,33 @@ export default function PagePlatformeMdh() {
     }
   }, [loadData])
 
-  // 4. Ecoute Temps Réel Optimisée (Realtime)
+  // 4. Ecoute Temps Réel Optimisée (Realtime sur Pèlerins ET hajj_sessions)
   useEffect(() => {
     const channel = supabase
       .channel('schema-db-changes')
       .on(
         'postgres_changes',
+        { event: '*', schema: 'public', table: 'hajj_sessions' },
+        (payload) => {
+          const updatedSession = payload.new as any
+          if (updatedSession && updatedSession.id === sessionSummaryRef.current.id) {
+            const quotaTotal = updatedSession.quota_alloue || 0
+            const quotaUsed = updatedSession.quota_utilise || 0
+            setSessionSummary((prev) => ({
+              ...prev,
+              quota_total: quotaTotal,
+              quota_utilise: quotaUsed,
+              quota_restant: Math.max(0, quotaTotal - quotaUsed),
+              session_open: updatedSession.est_active === true && updatedSession.statut_fermeture === 'EN_COURS'
+            }))
+          }
+        }
+      )
+      .on(
+        'postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'pelerins' },
         (payload) => {
           const newPelerin = payload.new as Pelerin
-          const session = sessionSummaryRef.current
-
           setPelerins((prev) => [newPelerin, ...prev])
 
           if (newPelerin.agences?.nom_agence) {
@@ -340,14 +318,6 @@ export default function PagePlatformeMdh() {
               return prev
             })
           }
-
-          if (newPelerin.sur_plateforme_gouv && session?.id && newPelerin.hajj_session_id === session.id) {
-            setSessionSummary((prev) => ({
-              ...prev,
-              quota_utilise: prev.quota_utilise + 1,
-              quota_restant: Math.max(0, prev.quota_total - (prev.quota_utilise + 1))
-            }))
-          }
         }
       )
       .on(
@@ -355,32 +325,11 @@ export default function PagePlatformeMdh() {
         { event: 'UPDATE', schema: 'public', table: 'pelerins' },
         (payload) => {
           const updatedPelerin = payload.new as Pelerin
-          const session = sessionSummaryRef.current
-
-          // Protection contre l'écrasement temps réel si une mise à jour locale est pending
           if (pendingIdsRef.current.has(updatedPelerin.id)) return
 
           setPelerins((prev) =>
             prev.map((p) => (p.id === updatedPelerin.id ? { ...p, ...updatedPelerin, agences: p.agences } : p))
           )
-
-          const wasGouv = Boolean((payload.old as Pelerin)?.sur_plateforme_gouv)
-          const isNowGouv = Boolean(updatedPelerin.sur_plateforme_gouv)
-          const belongsToSession = session?.id && updatedPelerin.hajj_session_id === session.id
-
-          if (!wasGouv && isNowGouv && belongsToSession) {
-            setSessionSummary((prev) => ({
-              ...prev,
-              quota_utilise: prev.quota_utilise + 1,
-              quota_restant: Math.max(0, prev.quota_total - (prev.quota_utilise + 1))
-            }))
-          } else if (wasGouv && !isNowGouv && belongsToSession) {
-            setSessionSummary((prev) => ({
-              ...prev,
-              quota_utilise: Math.max(0, prev.quota_utilise - 1),
-              quota_restant: Math.max(0, prev.quota_total - Math.max(0, prev.quota_utilise - 1))
-            }))
-          }
         }
       )
       .on(
@@ -388,17 +337,7 @@ export default function PagePlatformeMdh() {
         { event: 'DELETE', schema: 'public', table: 'pelerins' },
         (payload) => {
           const deletedPelerin = payload.old as Pelerin
-          const session = sessionSummaryRef.current
-
           setPelerins((prev) => prev.filter((p) => p.id !== deletedPelerin.id))
-
-          if (deletedPelerin.sur_plateforme_gouv && session?.id && deletedPelerin.hajj_session_id === session.id) {
-            setSessionSummary((prev) => ({
-              ...prev,
-              quota_utilise: Math.max(0, prev.quota_utilise - 1),
-              quota_restant: Math.max(0, prev.quota_total - Math.max(0, prev.quota_utilise - 1))
-            }))
-          }
         }
       )
       .subscribe((status) => {
@@ -435,9 +374,8 @@ export default function PagePlatformeMdh() {
     return { total, gouvInscrits, nusukInscrits, eligiblesGouv }
   }, [filteredData])
 
-  // Action d'inscription/Désinscription ultra-optimisée (Anti-échec réseau + Multi-clic instantané)
+  // Action d'inscription/Désinscription avec mise à jour du quota global
   const toggleGouvStatus = async (id: string, currentStatus: boolean) => {
-    // 1. Bloquer immédiatement en utilisant le Ref synchrone (anti-double-clic absolu)
     if (pendingIdsRef.current.has(id)) return
 
     if (!sessionSummary.session_open) {
@@ -466,7 +404,7 @@ export default function PagePlatformeMdh() {
     const nextValue = !currentStatus
     setPendingIdState(id, true)
 
-    // 2. Mise à jour optimiste ultra-rapide de l'UI
+    // Mise à jour optimiste UI
     setPelerins((prev) => prev.map((item) => item.id === id ? { ...item, sur_plateforme_gouv: nextValue } : item))
     setSessionSummary((prev) => {
       const diff = nextValue ? 1 : -1
@@ -478,7 +416,6 @@ export default function PagePlatformeMdh() {
       }
     })
 
-    // 3. Boucle de tentative automatique (Retry avec Backoff pour connexion instable)
     let retries = 3
     let success = false
     let lastError = null
@@ -501,23 +438,33 @@ export default function PagePlatformeMdh() {
           throw new Error('Mise à jour ignorée : Le statut a déjà été modifié.')
         }
 
+        // Mise à jour synchrone du quota global dans hajj_sessions
+        if (sessionSummary.id) {
+          const delta = nextValue ? 1 : -1
+          const updatedQuotaUsed = Math.max(0, sessionSummary.quota_utilise + delta)
+          await supabase
+            .from('hajj_sessions')
+            .update({ quota_utilise: updatedQuotaUsed })
+            .eq('id', sessionSummary.id)
+        }
+
         success = true
       } catch (err: any) {
         lastError = err
         retries--
         if (retries > 0) {
-          await new Promise((res) => setTimeout(res, 800)) // Attendre 800ms avant re-tentative
+          await new Promise((res) => setTimeout(res, 800))
         }
       }
     }
 
     if (success) {
-      refreshQuotaFromServer(sessionSummary.id ?? null, sessionSummary.quota_total).catch(() => {})
+      refreshQuotaFromServer(sessionSummary.id ?? null).catch(() => {})
       addMessage('success', nextValue ? 'Pèlerin inscrit sur la plateforme Gouv.' : 'Inscription Gouv retirée.')
     } else {
       console.error('Erreur finale mise à jour Gouv', lastError)
 
-      // Annulation optimiste (Rollback) si échec total après les re-tentatives
+      // Rollback
       setPelerins((prev) => prev.map((item) => item.id === id ? { ...item, sur_plateforme_gouv: currentStatus } : item))
       setSessionSummary((prev) => {
         const revertDelta = nextValue ? -1 : 1
@@ -541,8 +488,17 @@ export default function PagePlatformeMdh() {
 
     setPendingIdState(id, true)
     try {
+      const pToDelete = pelerins.find((p) => p.id === id)
       const { error } = await supabase.from('pelerins').delete().eq('id', id)
       if (error) throw error
+
+      if (pToDelete?.sur_plateforme_gouv && sessionSummary.id) {
+        const updatedQuotaUsed = Math.max(0, sessionSummary.quota_utilise - 1)
+        await supabase
+          .from('hajj_sessions')
+          .update({ quota_utilise: updatedQuotaUsed })
+          .eq('id', sessionSummary.id)
+      }
 
       setPelerins((prev) => prev.filter((item) => item.id !== id))
       addMessage('success', 'Pèlerin supprimé.')
@@ -655,11 +611,11 @@ export default function PagePlatformeMdh() {
                 </div>
               </div>
 
-              {/* Card Quota Temps Réel PC (Identique à l'entête mobile) */}
+              {/* Card Quota Temps Réel PC */}
               <div className="hidden md:flex items-center justify-between rounded-xl border border-indigo-100 bg-gradient-to-r from-indigo-50/90 via-slate-50 to-emerald-50/90 px-3.5 py-1.5 shadow-sm ml-4">
                 <div className="flex items-center gap-2 mr-3">
                   <PieChart size={16} className="text-indigo-600" />
-                  <span className="text-[11px] font-black uppercase tracking-wider text-slate-600">Quotas :</span>
+                  <span className="text-[11px] font-black uppercase tracking-wider text-slate-600">Quotas Nationaux :</span>
                 </div>
                 <div className="flex items-center gap-3 text-xs font-black">
                   <span className="text-indigo-600">Utilisés: {sessionSummary.quota_utilise}</span>
@@ -685,11 +641,11 @@ export default function PagePlatformeMdh() {
             </div>
           </div>
 
-          {/* Mini Card Quota Mobile (Uniquement sur smartphones) */}
+          {/* Mini Card Quota Mobile */}
           <div className="md:hidden flex items-center justify-between rounded-xl border border-indigo-100 bg-gradient-to-r from-indigo-50/90 via-slate-50 to-emerald-50/90 px-3 py-1.5 shadow-sm">
             <div className="flex items-center gap-2">
               <PieChart size={15} className="text-indigo-600" />
-              <span className="text-[11px] font-black uppercase tracking-wider text-slate-600">Quotas :</span>
+              <span className="text-[11px] font-black uppercase tracking-wider text-slate-600">Quotas Nationaux :</span>
             </div>
             <div className="flex items-center gap-3 text-xs font-black">
               <span className="text-indigo-600">Utilisés: {sessionSummary.quota_utilise}</span>
@@ -697,7 +653,7 @@ export default function PagePlatformeMdh() {
             </div>
           </div>
 
-          {/* Filtres affichés dans l'entête fixe UNIQUEMENT sur Desktop */}
+          {/* Filtres sur Desktop */}
           <div className="hidden md:block">
             <SearchAndFilters />
           </div>
@@ -708,7 +664,7 @@ export default function PagePlatformeMdh() {
       {/* Contenu principal de la page */}
       <div className="mx-auto max-w-7xl px-4 pt-4 md:px-8">
 
-        {/* Filtres affichés dans la page (non fixe) UNIQUEMENT sur Mobile */}
+        {/* Filtres sur Mobile */}
         <div className="mb-4 md:hidden">
           <SearchAndFilters />
         </div>
@@ -721,19 +677,19 @@ export default function PagePlatformeMdh() {
             <p className="text-xs text-slate-500">Pèlerins affichés</p>
           </div>
           <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-            <p className="text-[10px] font-black uppercase tracking-[0.24em] text-slate-400">Utilisé</p>
+            <p className="text-[10px] font-black uppercase tracking-[0.24em] text-slate-400">Quota National Utilisé</p>
             <p className="mt-2 text-2xl font-black text-indigo-600">{sessionSummary.quota_utilise}</p>
-            <p className="text-xs text-slate-500">Inscriptions effectives</p>
+            <p className="text-xs text-slate-500">Inscriptions globales</p>
           </div>
           <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-            <p className="text-[10px] font-black uppercase tracking-[0.24em] text-slate-400">Disponible</p>
+            <p className="text-[10px] font-black uppercase tracking-[0.24em] text-slate-400">Quota National Restant</p>
             <p className="mt-2 text-2xl font-black text-emerald-600">{sessionSummary.quota_restant}</p>
-            <p className="text-xs text-slate-500">Places attribuables</p>
+            <p className="text-xs text-slate-500">Places globales disponibles</p>
           </div>
           <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-            <p className="text-[10px] font-black uppercase tracking-[0.24em] text-slate-400">Inscrits Gouv</p>
+            <p className="text-[10px] font-black uppercase tracking-[0.24em] text-slate-400">Mes pèlerins Gouv</p>
             <p className="mt-2 text-2xl font-black text-slate-900">{stats.gouvInscrits}</p>
-            <p className="text-xs text-slate-500">Sur la sélection actuelle</p>
+            <p className="text-xs text-slate-500">Sur l'affichage actuel</p>
           </div>
         </div>
 
