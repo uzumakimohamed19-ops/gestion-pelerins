@@ -1,7 +1,7 @@
 'use client'
 
 import Link from 'next/link'
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useState, useRef } from 'react'
 import { supabase } from '@/lib/supabase'
 import {
   Lock,
@@ -76,6 +76,12 @@ export default function AdminHajjControl() {
   const [activeModal, setActiveModal] = useState<'OPEN_SESSION' | 'HISTORY' | 'AGRENCIES' | 'CONFIG' | null>(null)
   const [notification, setNotification] = useState<{ text: string; type: 'success' | 'error' } | null>(null)
 
+  // Ref pour éviter les closures périmées dans le Realtime
+  const activeSessionRef = useRef<SessionRecord | null>(null)
+  useEffect(() => {
+    activeSessionRef.current = activeSession
+  }, [activeSession])
+
   const isSessionOpen = Boolean(activeSession?.est_active ?? config.session_ouverte)
 
   const showNotification = (text: string, type: 'success' | 'error') => {
@@ -107,7 +113,7 @@ export default function AdminHajjControl() {
     }).length
   }, [])
 
-  // Chargement des données optimisé (Requêtes groupées en parallèle)
+  // Chargement des données optimisé
   const loadDashboardData = useCallback(async (showLoader = false) => {
     if (showLoader) setLoading(true)
     try {
@@ -124,7 +130,6 @@ export default function AdminHajjControl() {
       const realGouvCount = pelerinsRes.count || 0
       const agences = agencesRes.data || []
 
-      // On déduit la session active depuis l'historique récupéré
       const sessionData = historyData.length > 0 ? historyData[0] : null
 
       const effectiveSessionOpen = Boolean(
@@ -150,7 +155,6 @@ export default function AdminHajjControl() {
 
       setSessionHistory(historyData)
 
-      // Calcul local
       const countMap = new Map<string, number>()
       pelerins.forEach((p) => {
         if (p.agence_id) countMap.set(p.agence_id, (countMap.get(p.agence_id) || 0) + 1)
@@ -181,7 +185,7 @@ export default function AdminHajjControl() {
     }
   }, [computeSessionUsage])
 
-  // Auto-fermeture automatique si le timer expire
+  // Auto-fermeture automatique
   const autoCloseIfExpired = useCallback(async () => {
     if (!activeSession || !activeSession.est_active) return
 
@@ -229,7 +233,7 @@ export default function AdminHajjControl() {
     return () => clearInterval(interval)
   }, [activeSession, autoCloseIfExpired])
 
-  // Abonnement Realtime pur (sans polling setInterval)
+  // Abonnement Realtime Hautement Optimisé
   useEffect(() => {
     void loadDashboardData(true)
 
@@ -237,7 +241,49 @@ export default function AdminHajjControl() {
       .channel('hajj_realtime_control')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'hajj_campaign_config' }, () => loadDashboardData())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'hajj_sessions' }, () => loadDashboardData())
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'pelerins' }, () => loadDashboardData())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'pelerins' }, (payload) => {
+        const session = activeSessionRef.current;
+        
+        // Helper pour vérifier si un pèlerin appartient à la session active
+        const isGouv = (record: any) => record?.sur_plateforme_gouv === true;
+        const belongsToSession = (record: any) => {
+          if (!session?.id || !record) return false;
+          if (record.hajj_session_id === session.id) return true;
+          const sessionStart = new Date(session.date_ouverture).getTime();
+          const createdAt = new Date(record.created_at || record.date_inscription).getTime();
+          return !isNaN(createdAt) && createdAt >= sessionStart;
+        };
+
+        // 1. Mise à jour du Total Global (Pèlerins GOUV)
+        if (payload.eventType === 'INSERT' && isGouv(payload.new)) {
+          setTotalPelerinsGouv(prev => prev + 1);
+        } else if (payload.eventType === 'DELETE' && isGouv(payload.old)) {
+          setTotalPelerinsGouv(prev => Math.max(0, prev - 1));
+        } else if (payload.eventType === 'UPDATE') {
+          const wasGouv = isGouv(payload.old);
+          const isNowGouv = isGouv(payload.new);
+          if (!wasGouv && isNowGouv) setTotalPelerinsGouv(prev => prev + 1);
+          else if (wasGouv && !isNowGouv) setTotalPelerinsGouv(prev => Math.max(0, prev - 1));
+        }
+
+        // 2. Mise à jour du Quota Consommé (Session Active) en temps réel
+        if (session?.est_active) {
+          if (payload.eventType === 'INSERT' && isGouv(payload.new) && belongsToSession(payload.new)) {
+            setActiveSession(prev => prev ? { ...prev, quota_utilise: prev.quota_utilise + 1 } : null);
+          } else if (payload.eventType === 'DELETE' && isGouv(payload.old) && belongsToSession(payload.old)) {
+            setActiveSession(prev => prev ? { ...prev, quota_utilise: Math.max(0, prev.quota_utilise - 1) } : null);
+          } else if (payload.eventType === 'UPDATE') {
+            const wasGouvInSession = isGouv(payload.old) && belongsToSession(payload.old);
+            const isGouvInSession = isGouv(payload.new) && belongsToSession(payload.new);
+            
+            if (!wasGouvInSession && isGouvInSession) {
+              setActiveSession(prev => prev ? { ...prev, quota_utilise: prev.quota_utilise + 1 } : null);
+            } else if (wasGouvInSession && !isGouvInSession) {
+              setActiveSession(prev => prev ? { ...prev, quota_utilise: Math.max(0, prev.quota_utilise - 1) } : null);
+            }
+          }
+        }
+      })
       .subscribe()
 
     return () => {
@@ -364,7 +410,7 @@ export default function AdminHajjControl() {
         </div>
       )}
 
-      {/* En-tête */}
+      {/* En-tête (Design d'origine restauré) */}
       <div className="rounded-[32px] border border-slate-800 bg-slate-950 p-6 sm:p-8 shadow-2xl text-white">
         <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6">
           <div className="space-y-2">
@@ -395,7 +441,7 @@ export default function AdminHajjControl() {
         </div>
       </div>
 
-      {/* Synthèse */}
+      {/* Synthèse (Design d'origine restauré) */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm space-y-2">
           <div className="flex items-center justify-between text-slate-500">
@@ -460,7 +506,7 @@ export default function AdminHajjControl() {
         </div>
       </div>
 
-      {/* Actions */}
+      {/* Actions (Design d'origine restauré) */}
       <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm space-y-6">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 pb-4">
           <div>
@@ -548,7 +594,7 @@ export default function AdminHajjControl() {
         </div>
       </div>
 
-      {/* Détail Session Active */}
+      {/* Détail Session Active (Design d'origine restauré) */}
       {activeSession && activeSession.est_active ? (
         <div className="rounded-3xl border border-emerald-300 bg-emerald-50/50 p-6 shadow-sm space-y-4">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
@@ -588,7 +634,7 @@ export default function AdminHajjControl() {
         </div>
       )}
 
-      {/* Modales */}
+      {/* Modales (Restaurées) */}
       {activeModal === 'OPEN_SESSION' && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 backdrop-blur-sm p-4">
           <div className="w-full max-w-lg rounded-3xl bg-white p-6 sm:p-8 shadow-2xl border border-slate-200 space-y-6">

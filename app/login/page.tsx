@@ -3,17 +3,26 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { useRouter } from 'next/navigation'
-import { Lock, Mail, Loader2, AlertCircle, ShieldCheck } from 'lucide-react'
+import { Lock, Mail, Loader2, AlertCircle, ShieldCheck, CheckSquare, Square } from 'lucide-react'
 
 export default function LoginPage() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [rememberMe, setRememberMe] = useState(true)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const router = useRouter()
 
-  // 1. Redirection automatique si une session est déjà active au chargement
+  // 1. Charger les identifiants sauvegardés si présents + Check de session
   useEffect(() => {
+    // Pré-remplissage depuis le LocalStorage
+    const savedEmail = localStorage.getItem('remembered_email')
+    const savedPassword = localStorage.getItem('remembered_password')
+
+    if (savedEmail) setEmail(savedEmail)
+    if (savedPassword) setPassword(savedPassword)
+
+    // Vérification de la session active Supabase
     async function checkSession() {
       const { data: { session } } = await supabase.auth.getSession()
       if (session) {
@@ -26,12 +35,21 @@ export default function LoginPage() {
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault()
-    setLoading(true) // 🟩 CORRECTION ICI : loading(true) -> setLoading(true)
+    setLoading(true)
     setError('')
     
     console.log("--- Début tentative de connexion ---")
 
     try {
+      // GESTION DU MEMORISATION DES IDENTIFIANTS
+      if (rememberMe) {
+        localStorage.setItem('remembered_email', email)
+        localStorage.setItem('remembered_password', password)
+      } else {
+        localStorage.removeItem('remembered_email')
+        localStorage.removeItem('remembered_password')
+      }
+
       // ÉTAPE A : Authentification Supabase
       const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
         email,
@@ -147,6 +165,21 @@ export default function LoginPage() {
             </div>
           </div>
 
+          {/* Option Se Souvenir de Moi */}
+          <div 
+            onClick={() => setRememberMe(!rememberMe)}
+            className="flex items-center gap-3 cursor-pointer select-none px-2 py-1 hover:opacity-80 transition-opacity"
+          >
+            {rememberMe ? (
+              <CheckSquare className="text-blue-600" size={20} />
+            ) : (
+              <Square className="text-gray-300" size={20} />
+            )}
+            <span className="text-xs font-bold text-gray-600 tracking-wide">
+              Mémoriser mes identifiants
+            </span>
+          </div>
+
           {error && (
             <div className="p-4 bg-red-50 rounded-2xl flex items-center gap-3 text-red-600 font-bold text-sm border border-red-100">
               <AlertCircle size={18} />
@@ -171,11 +204,10 @@ export default function LoginPage() {
         </form>
 
         <div className="mt-10 pt-6 border-t border-gray-50 flex justify-center items-center gap-2">
-           <div className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse" />
-           <p className="text-gray-400 text-[10px] font-bold uppercase tracking-widest">
+            <div className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse" />
+            <p className="text-gray-400 text-[10px] font-bold uppercase tracking-widest">
               Système de connexion sécurisé par Supabase Auth
-
-           </p>
+            </p>
         </div>
       </div>
     </div>
