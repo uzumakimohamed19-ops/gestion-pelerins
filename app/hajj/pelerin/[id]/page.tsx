@@ -209,6 +209,20 @@ export default function DetailsPelerin() {
   const [showScanModal, setShowScanModal] = useState(false)
   const [role, setRole] = useState<string>('staff')
   const [avatarImgError, setAvatarImgError] = useState({ female: false, male: false })
+  const [paymentForm, setPaymentForm] = useState({
+    amount: '',
+    paymentMode: 'ESPECES',
+    paymentDate: new Date().toISOString().slice(0, 10),
+    notes: ''
+  })
+
+  const formatAmountInput = (value: string) => {
+    const digits = value.replace(/\D/g, '')
+    if (!digits) return ''
+    return Number(digits).toLocaleString('fr-FR')
+  }
+  const [payments, setPayments] = useState<any[]>([])
+  const [savingPayment, setSavingPayment] = useState(false)
 
   const { setHideNavbar } = useUI()
 
@@ -220,6 +234,82 @@ export default function DetailsPelerin() {
   const handleChange = (field: string, value: any) => {
     if (!p) return
     setPelerin({ ...p, [field]: value })
+  }
+
+  const loadPayments = async (pelerinId: string) => {
+    try {
+      const { data, error } = await supabase
+        .from('pelerin_payments')
+        .select('*')
+        .eq('pelerin_id', pelerinId)
+        .order('payment_date', { ascending: false })
+
+      if (error) {
+        if (error.code === '42P01' || /relation .* does not exist/i.test(error.message)) {
+          setPayments([])
+          return
+        }
+        throw error
+      }
+
+      setPayments(data || [])
+    } catch (error) {
+      console.error('Erreur chargement historique de paiement', error)
+      setPayments([])
+    }
+  }
+
+  const handleRecordPayment = async (e?: any) => {
+    e?.preventDefault()
+    if (!p?.id) return
+
+    const amount = Number(paymentForm.amount.replace(/\s/g, '').replace(/,/g, '').replace(/\./g, ''))
+    if (!amount || amount <= 0) {
+      alert('Veuillez saisir un montant de paiement valide.')
+      return
+    }
+
+    setSavingPayment(true)
+
+    try {
+      const { data: insertedPayment, error: insertError } = await supabase
+        .from('pelerin_payments')
+        .insert({
+          pelerin_id: p.id,
+          amount,
+          payment_date: paymentForm.paymentDate || new Date().toISOString().slice(0, 10),
+          payment_mode: paymentForm.paymentMode,
+          notes: paymentForm.notes.trim() || null,
+        })
+        .select('*')
+        .single()
+
+      if (insertError) {
+        if (insertError.code === '42P01' || /relation .* does not exist/i.test(insertError.message)) {
+          throw new Error('La table d’historique de paiement n’existe pas encore. Veuillez créer la table pelerin_payments avec le SQL fourni.')
+        }
+        throw insertError
+      }
+
+      const nextTotalPaid = (p.total_paye || 0) + amount
+
+      const { error: updateError } = await supabase
+        .from('pelerins')
+        .update({ total_paye: nextTotalPaid })
+        .eq('id', p.id)
+
+      if (updateError) throw updateError
+
+      setPelerin({ ...p, total_paye: nextTotalPaid })
+      setPayments((prev) => [insertedPayment, ...prev])
+      setPaymentForm({ amount: '', paymentMode: 'ESPECES', paymentDate: new Date().toISOString().slice(0, 10), notes: '' })
+      alert('✅ Paiement enregistré avec succès.')
+    } catch (error: any) {
+      console.error('Erreur enregistrement paiement', error)
+      alert(error.message || 'Impossible d’enregistrer le paiement.')
+    } finally {
+      setSavingPayment(false)
+    }
   }
 
   const saveAdvancedData = async () => {
@@ -280,6 +370,8 @@ export default function DetailsPelerin() {
         onRemote: (data) => setPelerin(data),
       })
 
+      await loadPayments(cleanId)
+
       try {
         const { data: userData } = await getUser()
         if (userData?.user?.id) {
@@ -307,7 +399,9 @@ export default function DetailsPelerin() {
 
   // --- LOGIQUE MÉTIER & CALCULS INTELLIGENTS ---
   const totalDue = p.prix_package || 0
-  const totalPaid = p.total_paye || 0
+  const totalPaid = payments.length > 0
+    ? payments.reduce((sum, item) => sum + Number(item.amount || 0), 0)
+    : (p.total_paye || 0)
   const resteAPayer = totalDue - totalPaid
   const paiementTermine = totalDue > 0 && resteAPayer <= 0
 
@@ -627,39 +721,134 @@ export default function DetailsPelerin() {
           <div className="space-y-6">
             
             {/* COMPTABILITÉ */}
-            {role !== 'admin' && (
-              <div className="bg-gradient-to-br from-slate-900 via-indigo-950 to-slate-900 text-white p-6 rounded-[2rem] shadow-xl shadow-slate-900/10 space-y-6 transition-all duration-300 hover:shadow-2xl hover:scale-[1.01]">
-                <div>
-                  <h3 className="text-[10px] font-black text-cyan-400 uppercase tracking-wider flex items-center gap-2">
-                    <CreditCard size={14} /> Balance Comptable / Reste à recouvrer
-                  </h3>
-                  <p className="text-4xl font-black text-transparent bg-clip-text bg-gradient-to-r from-cyan-300 via-teal-200 to-blue-300 tracking-tight mt-2">
-                    {resteAPayer.toLocaleString()} <span className="text-xs text-white/50 uppercase">cfa</span>
-                  </p>
-                </div>
+            <div className="bg-gradient-to-br from-slate-900 via-indigo-950 to-slate-900 text-white p-6 rounded-[2rem] shadow-xl shadow-slate-900/10 space-y-6 transition-all duration-300 hover:shadow-2xl hover:scale-[1.01]">
+              <div>
+                <h3 className="text-[10px] font-black text-cyan-400 uppercase tracking-wider flex items-center gap-2">
+                  <CreditCard size={14} /> Balance Comptable / Reste à recouvrer
+                </h3>
+                <p className="text-4xl font-black text-transparent bg-clip-text bg-gradient-to-r from-cyan-300 via-teal-200 to-blue-300 tracking-tight mt-2">
+                  {resteAPayer.toLocaleString()} <span className="text-xs text-white/50 uppercase">cfa</span>
+                </p>
+              </div>
 
-                <div className="space-y-1.5">
-                  <div className="flex justify-between text-[10px] font-black text-slate-400 uppercase tracking-wide">
-                    <span>Taux d'encaissement</span>
-                    <span className="text-cyan-300">{totalDue > 0 ? Math.round((totalPaid / totalDue) * 100) : 0}%</span>
-                  </div>
-                  <div className="w-full bg-white/10 h-2 rounded-full overflow-hidden p-[1px]">
-                    <div className="bg-gradient-to-r from-cyan-400 to-blue-500 h-full rounded-full transition-all duration-700" style={{ width: `${totalDue > 0 ? (totalPaid / totalDue) * 100 : 0}%` }}></div>
-                  </div>
+              <div className="space-y-1.5">
+                <div className="flex justify-between text-[10px] font-black text-slate-400 uppercase tracking-wide">
+                  <span>Taux d'encaissement</span>
+                  <span className="text-cyan-300">{totalDue > 0 ? Math.round((totalPaid / totalDue) * 100) : 0}%</span>
                 </div>
-
-                <div className="grid grid-cols-2 gap-2 text-xs border-t border-white/10 pt-4">
-                  <div>
-                    <span className="block text-[9px] text-slate-400 uppercase">Frais Package Fixés</span>
-                    <span className="font-bold text-slate-200">{totalDue.toLocaleString()} F</span>
-                  </div>
-                  <div>
-                    <span className="block text-[9px] text-emerald-400 uppercase">Acomptes Versés</span>
-                    <span className="font-bold text-emerald-400">{totalPaid.toLocaleString()} F</span>
-                  </div>
+                <div className="w-full bg-white/10 h-2 rounded-full overflow-hidden p-[1px]">
+                  <div className="bg-gradient-to-r from-cyan-400 to-blue-500 h-full rounded-full transition-all duration-700" style={{ width: `${totalDue > 0 ? (totalPaid / totalDue) * 100 : 0}%` }}></div>
                 </div>
               </div>
-            )}
+
+              <div className="grid grid-cols-2 gap-2 text-xs border-t border-white/10 pt-4">
+                <div>
+                  <span className="block text-[9px] text-slate-400 uppercase">Frais Package Fixés</span>
+                  <span className="font-bold text-slate-200">{totalDue.toLocaleString()} F</span>
+                </div>
+                <div>
+                  <span className="block text-[9px] text-emerald-400 uppercase">Acomptes Versés</span>
+                  <span className="font-bold text-emerald-400">{totalPaid.toLocaleString()} F</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="bg-white p-6 rounded-[2rem] shadow-xl shadow-slate-200/50 border border-slate-100 space-y-4">
+              <h3 className="text-[10px] font-black text-slate-600 uppercase tracking-wider flex items-center gap-2">
+                <CreditCard size={14} className="text-indigo-600" /> Enregistrer un paiement
+              </h3>
+
+              <form onSubmit={handleRecordPayment} className="space-y-3">
+                <div>
+                  <label className="mb-1 block text-[10px] font-black uppercase tracking-wider text-slate-500">Montant</label>
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    value={paymentForm.amount}
+                    onChange={(e) => setPaymentForm({ ...paymentForm, amount: formatAmountInput(e.target.value) })}
+                    placeholder="Ex : 500 000"
+                    className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm font-semibold text-slate-800 outline-none focus:border-indigo-500 focus:bg-white"
+                  />
+                </div>
+
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div>
+                    <label className="mb-1 block text-[10px] font-black uppercase tracking-wider text-slate-500">Mode</label>
+                    <select
+                      value={paymentForm.paymentMode}
+                      onChange={(e) => setPaymentForm({ ...paymentForm, paymentMode: e.target.value })}
+                      className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm font-semibold text-slate-800 outline-none focus:border-indigo-500 focus:bg-white"
+                    >
+                      <option value="ESPECES">Espèces</option>
+                      <option value="VIREMENT">Virement</option>
+                      <option value="CARTE">Carte</option>
+                      <option value="AUTRE">Autre</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="mb-1 block text-[10px] font-black uppercase tracking-wider text-slate-500">Date</label>
+                    <input
+                      type="date"
+                      value={paymentForm.paymentDate}
+                      onChange={(e) => setPaymentForm({ ...paymentForm, paymentDate: e.target.value })}
+                      className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm font-semibold text-slate-800 outline-none focus:border-indigo-500 focus:bg-white"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="mb-1 block text-[10px] font-black uppercase tracking-wider text-slate-500">Note</label>
+                  <textarea
+                    rows={3}
+                    value={paymentForm.notes}
+                    onChange={(e) => setPaymentForm({ ...paymentForm, notes: e.target.value })}
+                    placeholder="Ex: Acompte reçu à l’inscription"
+                    className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm font-semibold text-slate-800 outline-none focus:border-indigo-500 focus:bg-white"
+                  />
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={savingPayment}
+                  className="flex w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-emerald-600 to-green-600 px-4 py-3 text-sm font-black uppercase tracking-wider text-white shadow-lg shadow-emerald-500/20 transition hover:scale-[1.01] disabled:opacity-60"
+                >
+                  {savingPayment ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />}
+                  Enregistrer le paiement
+                </button>
+              </form>
+            </div>
+
+            <div className="bg-white p-6 rounded-[2rem] shadow-xl shadow-slate-200/50 border border-slate-100 space-y-4">
+              <h3 className="text-[10px] font-black text-slate-600 uppercase tracking-wider flex items-center gap-2">
+                <Clock size={14} className="text-slate-500" /> Historique de paiement
+              </h3>
+
+              {payments.length === 0 ? (
+                <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-4 text-sm font-semibold text-slate-500">
+                  Aucun versement enregistré pour le moment.
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {payments.map((item) => (
+                    <div key={item.id} className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
+                      <div className="flex items-center justify-between gap-3">
+                        <div>
+                          <p className="text-sm font-black text-slate-800">{Number(item.amount || 0).toLocaleString('fr-FR')} CFA</p>
+                          <p className="text-xs font-semibold text-slate-500">
+                            {item.payment_mode || 'Autre'} • {item.payment_date ? new Date(item.payment_date).toLocaleDateString('fr-FR') : 'Date non précisée'}
+                          </p>
+                        </div>
+                        <span className="rounded-full bg-emerald-50 px-2.5 py-1 text-[10px] font-black uppercase tracking-wider text-emerald-700">
+                          Enregistré
+                        </span>
+                      </div>
+                      {item.notes && <p className="mt-2 text-xs font-semibold text-slate-600">{item.notes}</p>}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
 
             {/* VOLS */}
             <div className="bg-gradient-to-br from-indigo-50/60 via-cyan-50/40 to-white border border-indigo-100/70 p-6 rounded-3xl shadow-xl space-y-6 transition-all hover:shadow-2xl">
