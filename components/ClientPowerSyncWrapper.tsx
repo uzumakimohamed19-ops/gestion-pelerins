@@ -51,10 +51,8 @@ export default function PowerSyncProviderWrapper({
     const init = async () => {
       try {
         await powersync.init();
-        if (isMounted) {
-          setReady(true);
-          await connectToPowerSync();
-        }
+        if (isMounted) setReady(true);
+        void connectToPowerSync();
       } catch (err) {
         console.error("🔴 Erreur initialisation SQLite locale :", err);
         if (isMounted) setReady(true);

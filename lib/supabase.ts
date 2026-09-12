@@ -25,6 +25,13 @@ export function getUser() {
   if (!supabaseUserPromise) {
     supabaseUserPromise = (async () => {
       try {
+        // Hors-ligne, getUser() tente un appel réseau et peut rester en attente.
+        // La session Supabase persistée est la source fiable disponible localement.
+        if (typeof navigator !== 'undefined' && !navigator.onLine) {
+          const { data: sessionData } = await supabase.auth.getSession()
+          return { data: { user: sessionData.session?.user ?? null }, error: null }
+        }
+
         const result = await supabase.auth.getUser()
         if (result.data?.user || !result.error) return result
 

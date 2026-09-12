@@ -75,7 +75,10 @@ export default function EtatGeneralHajj() {
   useEffect(() => {
     const checkUserAndFetch = async () => {
       const { data: { user } } = await getUser()
-      if (!user) { router.push('/login'); return }
+      if (!user) {
+        if (navigator.onLine) router.push('/login')
+        return
+      }
 
     }
 
