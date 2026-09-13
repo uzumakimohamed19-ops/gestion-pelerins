@@ -1,4 +1,5 @@
-import { PowerSyncDatabase } from '@powersync/web';
+import { Capacitor } from '@capacitor/core';
+import { PowerSyncDatabase } from '@powersync/capacitor';
 import { AppSchema } from './schema';
 
 export const powersync = new PowerSyncDatabase({
@@ -6,7 +7,7 @@ export const powersync = new PowerSyncDatabase({
   database: {
     dbFilename: 'gestion_pelerins.db',
     disableSSRWarning: true,
-    enableMultiTabs: true
+    enableMultiTabs: Capacitor.getPlatform() === 'web'
   }
 });
 

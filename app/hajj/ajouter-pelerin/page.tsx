@@ -6,8 +6,57 @@ import { supabase, getUser } from '@/lib/supabase'
 import { ScanLine, Loader2, Save, Upload, RotateCcw, Smartphone, CalendarDays, UserRound } from 'lucide-react'
 import { uploadPassportFile } from '@/lib/hajjPassport'
 
+// Prétraitement d'image pour optimiser la lecture OCR même sur photo floue ou sombre
+function preparePassportImage(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => {
+      const img = new Image()
+      img.onload = () => {
+        const canvas = document.createElement('canvas')
+        const ctx = canvas.getContext('2d', { willReadFrequently: true })
+        if (!ctx) {
+          resolve(reader.result as string)
+          return
+        }
+
+        // 1. Normalisation de la résolution : largeur idéale entre 1600px et 2000px
+        const targetWidth = Math.min(2000, Math.max(1600, img.width))
+        const scale = targetWidth / img.width
+        const targetHeight = Math.round(img.height * scale)
+
+        canvas.width = targetWidth
+        canvas.height = targetHeight
+
+        ctx.drawImage(img, 0, 0, targetWidth, targetHeight)
+
+        // 2. Rehaussement agressif du contraste sur les canaux RVB
+        const imgData = ctx.getImageData(0, 0, targetWidth, targetHeight)
+        const d = imgData.data
+        const contrast = 40 // Augmentation nette du contraste (+40%)
+        const factor = (259 * (contrast + 255)) / (255 * (259 - contrast))
+
+        for (let i = 0; i < d.length; i += 4) {
+          d[i] = factor * (d[i] - 128) + 128         // R
+          d[i + 1] = factor * (d[i + 1] - 128) + 128 // V
+          d[i + 2] = factor * (d[i + 2] - 128) + 128 // B
+        }
+        ctx.putImageData(imgData, 0, 0)
+
+        // 3. Export JPEG haute définition pour préserver le tracé des chevrons '<'
+        resolve(canvas.toDataURL('image/jpeg', 0.92))
+      }
+      img.onerror = () => resolve(reader.result as string)
+      img.src = reader.result as string
+    }
+    reader.onerror = reject
+    reader.readAsDataURL(file)
+  })
+}
+
 export default function AjouterPelerin() {
   const db = usePowerSync()
+
   // États des données
   const [nom, setNom] = useState('')
   const [prenom, setPrenom] = useState('')
@@ -56,11 +105,11 @@ export default function AjouterPelerin() {
   }, [])
 
   const resetForm = () => {
-    setNom(''); setPrenom(''); setReference(''); setPasseport(''); setPhone(''); setSexe(''); setDateNaissance('');
-    setDateExpiration(''); setDateInscription(new Date().toISOString().split('T')[0]); 
+    setNom(''); setPrenom(''); setReference(''); setPasseport(''); setPhone(''); setSexe(''); setDateNaissance('')
+    setDateExpiration(''); setDateInscription(new Date().toISOString().split('T')[0])
     setCampagne(new Date().getFullYear())
-    setAssocie(''); setTotal(0); setTotalInput(''); setPaye(0); setPayeInput(''); setNomPackage(''); setFileToUpload(null);
-    setMessage({ text: '', type: '' });
+    setAssocie(''); setTotal(0); setTotalInput(''); setPaye(0); setPayeInput(''); setNomPackage(''); setFileToUpload(null)
+    setMessage({ text: '', type: '' })
   }
 
   const sanitizeAmount = (value: string) => value.replace(/\D/g, '')
@@ -73,75 +122,47 @@ export default function AjouterPelerin() {
     return digits === '' ? '' : Number(digits).toLocaleString('fr-FR')
   }
 
-  const parseMRZDate = (dateStr: string, isExpiry: boolean = false) => {
-    if (!dateStr || dateStr.length !== 6) return '';
-    const yearPart = dateStr.substring(0, 2);
-    const month = dateStr.substring(2, 4);
-    const day = dateStr.substring(4, 6);
-    
-    let yearPrefix = '20';
-    if (!isExpiry) {
-      yearPrefix = parseInt(yearPart) > 26 ? '19' : '20';
-    }
-    return `${yearPrefix}${yearPart}-${month}-${day}`;
-  }
-
   const handleAutoFill = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const scanFile = e.target.files?.[0]
     if (!scanFile) return
     setIsScanning(true)
-    setMessage({ text: "ANALYSE DU PASSEPORT EN COURS...", type: 'info' })
+    setMessage({ text: "⚡ PRÉTRAITEMENT DE L'IMAGE ET SCAN EN COURS...", type: 'info' })
 
     try {
-      const Tesseract = await import('tesseract.js')
-      const result = await Tesseract.recognize(scanFile, 'fra+eng', { logger: m => console.log(m) })
-      const text = result.data.text.toUpperCase()
-      const lines = text.split('\n').map(l => l.trim()).filter(l => l.length > 0)
-      const mrzLines = lines.filter(l => l.includes('<<') || (l.length > 30 && /[A-Z0-9<]{30,}/.test(l)))
-      
-      if (mrzLines.length >= 2) {
-        const line1 = mrzLines[mrzLines.length - 2].replace(/\s/g, '')
-        const line2 = mrzLines[mrzLines.length - 1].replace(/\s/g, '')
-        const namePart = line1.substring(5)
-        const parts = namePart.split('<<')
-        const lastName = parts[0]?.replace(/</g, ' ').trim() || ''
-        const firstName = parts[1]?.split('<')[0].replace(/</g, ' ').trim() || ''
-        
-        setNom(lastName)
-        setPrenom(firstName)
+      // 1. Optimisation du contraste et de la résolution côté client
+      const optimizedImageUrl = await preparePassportImage(scanFile)
 
-        const sexPart = line2.substring(20, 21)
-        if (sexPart === 'M') setSexe('HOMME')
-        if (sexPart === 'F') setSexe('FEMME')
+      // 2. Appel de la route API serveur
+      const res = await fetch('/api/scan-mrz', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ imageBase64: optimizedImageUrl }),
+      })
 
-        const passNum = line2.substring(0, 9).replace(/</g, '')
-        setPasseport(passNum)
-
-        const dobRaw = line2.substring(13, 19)
-        const expRaw = line2.substring(21, 27)
-        
-        setDateNaissance(parseMRZDate(dobRaw, false))
-        setDateExpiration(parseMRZDate(expRaw, true))
-        setMessage({ text: "✅ SCAN RÉUSSI (MODE MRZ)", type: 'success' })
-      } else {
-        let detectedNom = ''
-        let detectedPass = ''
-        lines.forEach((line, index) => {
-          if (line.includes("NOM") || line.includes("SURNAME") || line.includes("NAME")) {
-            const nextLine = lines[index + 1] || ""
-            if (nextLine.length > 2 && !detectedNom) detectedNom = nextLine.trim()
-          }
-          const passportMatch = line.match(/[A-Z][0-9]{7,8}/)
-          if (passportMatch && !detectedPass) detectedPass = passportMatch[0]
-        })
-        if (detectedNom) setNom(detectedNom)
-        if (detectedPass) setPasseport(detectedPass)
-        setMessage({ text: "✅ LECTURE TERMINÉE (MODE TEXTE)", type: 'success' })
+      const data = await res.json()
+      if (!res.ok) {
+        throw new Error(data.error || 'Échec de la lecture du passeport.')
       }
-    } catch (err) {
+
+      // 3. Remplissage automatique des champs extraits
+      if (data.nom) setNom(data.nom)
+      if (data.prenom) setPrenom(data.prenom)
+      if (data.numPasseport) setPasseport(data.numPasseport)
+      if (data.sexe) setSexe(data.sexe)
+      if (data.dateNaissance) setDateNaissance(data.dateNaissance)
+      if (data.dateExpiration) setDateExpiration(data.dateExpiration)
+
+      // Conserver le fichier original pour l'enregistrement ultérieur dans le dossier
+      setFileToUpload(scanFile)
+
+      setMessage({ text: "✅ PASSEPORT DÉTECTÉ ET CHAMPS PRÉ-REMPLIS !", type: 'success' })
+    } catch (err: unknown) {
       console.error(err)
-      setMessage({ text: "❌ ERREUR LORS DU SCAN.", type: 'error' })
-    } finally { setIsScanning(false) }
+      const errMsg = err instanceof Error ? err.message : String(err)
+      setMessage({ text: `❌ ERREUR LORS DU SCAN : ${errMsg}`, type: 'error' })
+    } finally {
+      setIsScanning(false)
+    }
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -164,12 +185,14 @@ export default function AjouterPelerin() {
       )
       setMessage({ text: "✅ ENREGISTRÉ AVEC SUCCÈS !", type: 'success' })
       setTimeout(resetForm, 2000)
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error(err)
-      // Affiche le message d'erreur brut de Supabase (ex: contrainte de clé, colonne manquante, etc.)
-      const errMsg = err?.message || err?.details || 'Erreur inconnue'
+      const errObj = err as { message?: string; details?: string }
+      const errMsg = errObj?.message || errObj?.details || 'Erreur inconnue'
       setMessage({ text: `❌ ERREUR : ${errMsg}`, type: 'error' })
-    } finally { setLoading(false) }
+    } finally { 
+      setLoading(false) 
+    }
   }
 
   return (
@@ -235,7 +258,7 @@ export default function AjouterPelerin() {
                   <input 
                     type="text" value={prenom} onChange={(e) => setPrenom(e.target.value)}
                     className="w-full px-5 py-4 rounded-2xl border-2 border-gray-100 bg-gray-50 text-gray-900 text-base font-bold focus:border-blue-600 outline-none transition-all uppercase"
-                    placeholder="PRÉNOM" required
+                    placeholder="PRÉNOM" required 
                   />
                 </div>
               </div>
