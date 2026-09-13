@@ -7,7 +7,13 @@ import NativeBackButton from '@/components/NativeBackButton'
 import ClientPowerSyncWrapper from '@/components/ClientPowerSyncWrapper'
 
 export const metadata = {
+  title: 'Agence Pro',
+  description: 'Gestion des opérations et des pèlerins',
   manifest: '/manifest.json',
+  icons: {
+    icon: '/icon-192x192.png',
+    apple: '/icon-192x192.png',
+  },
   appleWebApp: {
     capable: true,
     statusBarStyle: 'black-translucent', 

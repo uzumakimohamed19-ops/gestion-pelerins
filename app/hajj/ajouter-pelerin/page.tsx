@@ -5,6 +5,33 @@ import { usePowerSync } from '@powersync/react'
 import { supabase, getUser } from '@/lib/supabase'
 import { ScanLine, Loader2, Save, Upload, RotateCcw, Smartphone, CalendarDays, UserRound } from 'lucide-react'
 import { uploadPassportFile } from '@/lib/hajjPassport'
+import { Capacitor } from '@capacitor/core'
+
+// Résolution de l'URL backend pour Web, Capacitor (Android/iOS) et Tauri (Desktop)
+function getApiUrl(): string {
+  // 1. Détection prioritaire de l'application native mobile (Android / iOS)
+  if (Capacitor.isNativePlatform()) {
+    return 'https://gestion-pelerins.vercel.app'
+  }
+
+  // 2. Détection pour Tauri Desktop ou WebView locale
+  if (typeof window !== 'undefined') {
+    const origin = window.location.origin
+    const protocol = window.location.protocol
+
+    if (
+      protocol.startsWith('tauri') ||
+      protocol.startsWith('capacitor') ||
+      origin.includes('tauri.localhost') ||
+      (origin.includes('localhost') && !origin.includes('localhost:3000'))
+    ) {
+      return 'https://gestion-pelerins.vercel.app'
+    }
+  }
+
+  // 3. Navigateur Web (Vercel ou Dev local standard)
+  return process.env.NEXT_PUBLIC_API_URL || ''
+}
 
 // Prétraitement d'image pour optimiser la lecture OCR même sur photo floue ou sombre
 function preparePassportImage(file: File): Promise<string> {
@@ -20,8 +47,8 @@ function preparePassportImage(file: File): Promise<string> {
           return
         }
 
-        // 1. Normalisation de la résolution : largeur idéale entre 1600px et 2000px
-        const targetWidth = Math.min(2000, Math.max(1600, img.width))
+        // 1. Normalisation de la résolution : largeur entre 1400px et 1800px (idéale pour OCR-B < 700 Ko)
+        const targetWidth = Math.min(1800, Math.max(1400, img.width))
         const scale = targetWidth / img.width
         const targetHeight = Math.round(img.height * scale)
 
@@ -30,10 +57,10 @@ function preparePassportImage(file: File): Promise<string> {
 
         ctx.drawImage(img, 0, 0, targetWidth, targetHeight)
 
-        // 2. Rehaussement agressif du contraste sur les canaux RVB
+        // 2. Rehaussement du contraste sur les canaux RVB
         const imgData = ctx.getImageData(0, 0, targetWidth, targetHeight)
         const d = imgData.data
-        const contrast = 40 // Augmentation nette du contraste (+40%)
+        const contrast = 35 // Augmentation nette du contraste (+35%)
         const factor = (259 * (contrast + 255)) / (255 * (259 - contrast))
 
         for (let i = 0; i < d.length; i += 4) {
@@ -43,8 +70,8 @@ function preparePassportImage(file: File): Promise<string> {
         }
         ctx.putImageData(imgData, 0, 0)
 
-        // 3. Export JPEG haute définition pour préserver le tracé des chevrons '<'
-        resolve(canvas.toDataURL('image/jpeg', 0.92))
+        // 3. Export JPEG optimisé
+        resolve(canvas.toDataURL('image/jpeg', 0.85))
       }
       img.onerror = () => resolve(reader.result as string)
       img.src = reader.result as string
@@ -132,19 +159,41 @@ export default function AjouterPelerin() {
       // 1. Optimisation du contraste et de la résolution côté client
       const optimizedImageUrl = await preparePassportImage(scanFile)
 
-      // 2. Appel de la route API serveur
-      const res = await fetch('/api/scan-mrz', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ imageBase64: optimizedImageUrl }),
-      })
+      // 2. Détermination de l'URL backend (gère Web, Capacitor et Tauri)
+      const baseUrl = getApiUrl()
+      const targetEndpoint = `${baseUrl}/api/scan-mrz`
 
-      const data = await res.json()
+      // 3. Appel de la route API serveur
+      let res: Response
+      try {
+        res = await fetch(targetEndpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ imageBase64: optimizedImageUrl }),
+        })
+      } catch (fetchErr) {
+        throw new Error(
+          "Impossible de joindre le serveur de scan (Failed to fetch). Vérifiez la connexion Internet de l'appareil."
+        )
+      }
+
+      // 4. Lecture sécurisée pour éviter le crash SyntaxError si une page d'erreur est reçue
+      const rawText = await res.text()
+      let data: any
+      try {
+        data = JSON.parse(rawText)
+      } catch {
+        if (res.status === 404) {
+          throw new Error("Route d'analyse introuvable (404). Vérifiez le déploiement sur Vercel.")
+        }
+        throw new Error(`Réponse inattendue du serveur (${res.status}).`)
+      }
+
       if (!res.ok) {
         throw new Error(data.error || 'Échec de la lecture du passeport.')
       }
 
-      // 3. Remplissage automatique des champs extraits
+      // 5. Remplissage automatique des champs extraits
       if (data.nom) setNom(data.nom)
       if (data.prenom) setPrenom(data.prenom)
       if (data.numPasseport) setPasseport(data.numPasseport)
