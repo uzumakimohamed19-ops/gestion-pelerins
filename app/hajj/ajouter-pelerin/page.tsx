@@ -5,16 +5,14 @@ import { usePowerSync } from '@powersync/react'
 import { supabase, getUser } from '@/lib/supabase'
 import { ScanLine, Loader2, Save, Upload, RotateCcw, Smartphone, CalendarDays, UserRound } from 'lucide-react'
 import { uploadPassportFile } from '@/lib/hajjPassport'
-import { Capacitor } from '@capacitor/core'
+import { Capacitor, CapacitorHttp } from '@capacitor/core'
 
 // Résolution de l'URL backend pour Web, Capacitor (Android/iOS) et Tauri (Desktop)
 function getApiUrl(): string {
-  // 1. Détection prioritaire de l'application native mobile (Android / iOS)
   if (Capacitor.isNativePlatform()) {
     return 'https://gestion-pelerins.vercel.app'
   }
 
-  // 2. Détection pour Tauri Desktop ou WebView locale
   if (typeof window !== 'undefined') {
     const origin = window.location.origin
     const protocol = window.location.protocol
@@ -29,7 +27,6 @@ function getApiUrl(): string {
     }
   }
 
-  // 3. Navigateur Web (Vercel ou Dev local standard)
   return process.env.NEXT_PUBLIC_API_URL || ''
 }
 
@@ -163,37 +160,55 @@ export default function AjouterPelerin() {
       const baseUrl = getApiUrl()
       const targetEndpoint = `${baseUrl}/api/scan-mrz`
 
-      // 3. Appel de la route API serveur
-      let res: Response
-      try {
-        res = await fetch(targetEndpoint, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ imageBase64: optimizedImageUrl }),
-        })
-      } catch (fetchErr) {
-        throw new Error(
-          "Impossible de joindre le serveur de scan (Failed to fetch). Vérifiez la connexion Internet de l'appareil."
-        )
-      }
-
-      // 4. Lecture sécurisée pour éviter le crash SyntaxError si une page d'erreur est reçue
-      const rawText = await res.text()
       let data: any
-      try {
-        data = JSON.parse(rawText)
-      } catch {
-        if (res.status === 404) {
-          throw new Error("Route d'analyse introuvable (404). Vérifiez le déploiement sur Vercel.")
+
+      // 3. Requête native sous Capacitor pour éviter les restrictions WebView Android
+      if (Capacitor.isNativePlatform()) {
+        const nativeResponse = await CapacitorHttp.post({
+          url: targetEndpoint,
+          headers: { 'Content-Type': 'application/json' },
+          data: { imageBase64: optimizedImageUrl },
+          connectTimeout: 30000,
+          readTimeout: 30000,
+        })
+
+        if (nativeResponse.status !== 200) {
+          const errData = typeof nativeResponse.data === 'object' ? nativeResponse.data : {}
+          throw new Error(errData?.error || `Erreur serveur (${nativeResponse.status})`)
         }
-        throw new Error(`Réponse inattendue du serveur (${res.status}).`)
+
+        data = typeof nativeResponse.data === 'string' ? JSON.parse(nativeResponse.data) : nativeResponse.data
+      } else {
+        // Mode Web standard et Tauri Desktop
+        let res: Response
+        try {
+          res = await fetch(targetEndpoint, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ imageBase64: optimizedImageUrl }),
+          })
+        } catch {
+          throw new Error(
+            "Impossible de joindre le serveur de scan. Vérifiez la connexion Internet de l'appareil."
+          )
+        }
+
+        const rawText = await res.text()
+        try {
+          data = JSON.parse(rawText)
+        } catch {
+          if (res.status === 404) {
+            throw new Error("Route d'analyse introuvable (404). Vérifiez le déploiement sur Vercel.")
+          }
+          throw new Error(`Réponse inattendue du serveur (${res.status}).`)
+        }
+
+        if (!res.ok) {
+          throw new Error(data.error || 'Échec de la lecture du passeport.')
+        }
       }
 
-      if (!res.ok) {
-        throw new Error(data.error || 'Échec de la lecture du passeport.')
-      }
-
-      // 5. Remplissage automatique des champs extraits
+      // 4. Remplissage automatique des champs extraits
       if (data.nom) setNom(data.nom)
       if (data.prenom) setPrenom(data.prenom)
       if (data.numPasseport) setPasseport(data.numPasseport)

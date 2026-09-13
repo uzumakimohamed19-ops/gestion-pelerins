@@ -11,7 +11,12 @@ const config: CapacitorConfig = {
       'gestion-pelerins.vercel.app',
       'api.ocr.space'
     ]
-  }
+  },
+  plugins: {
+    CapacitorHttp: {
+      enabled: true,
+    },
+  },
 };
 
 export default config;
