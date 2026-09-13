@@ -1,14 +1,8 @@
 // Fichier public/sw.js
-const CACHE_NAME = 'hajj-v2'; // Version incrémentée pour invalider l'ancien cache
-const OFFLINE_URL = '/offline.html';
+const CACHE_NAME = 'hajj-v3'; // Invalide le cache qui servait offline.html
 
-// 1. Mise en cache de la page hors-ligne à l'installation
+// 1. Initialisation du cache PWA sans écran offline de remplacement.
 self.addEventListener('install', (event) => {
-  event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => {
-      return cache.add(new Request(OFFLINE_URL, { cache: 'reload' }));
-    })
-  );
   self.skipWaiting();
 });
 
@@ -29,6 +23,11 @@ self.addEventListener('activate', (event) => {
 self.addEventListener('fetch', (event) => {
   const url = event.request.url;
 
+  // Tauri doit fonctionner avec PowerSync et ne doit jamais recevoir offline.html.
+  if (url.includes('tauri.localhost') || url.startsWith('tauri://')) {
+    return;
+  }
+
   // 🔴 RÈGLE CRITIQUE : Ne jamais intercepter ni cacher :
   // - Les requêtes non-GET (POST, PUT, DELETE...)
   // - Les requêtes Supabase
@@ -47,10 +46,19 @@ self.addEventListener('fetch', (event) => {
   // Traitement des pages de navigation HTML
   if (event.request.mode === 'navigate') {
     event.respondWith(
-      fetch(event.request).catch(() => {
-        // En cas de panne de réseau sur une page non mise en cache
-        return caches.open(CACHE_NAME).then((cache) => {
-          return cache.match(OFFLINE_URL);
+      fetch(event.request).then((networkResponse) => {
+        if (networkResponse.ok && networkResponse.type === 'basic') {
+          const responseToCache = networkResponse.clone();
+          void caches.open(CACHE_NAME).then((cache) => {
+            void cache.put(event.request, responseToCache);
+          });
+        }
+        return networkResponse;
+      }).catch(() => {
+        // Servir le shell déjà visité: PowerSync fournit ensuite les données locales.
+        return caches.match(event.request).then((cachedPage) => {
+          if (cachedPage) return cachedPage;
+          return caches.match('/').then((cachedHome) => cachedHome || Response.error());
         });
       })
     );

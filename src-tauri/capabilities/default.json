@@ -6,13 +6,6 @@
     "main"
   ],
   "permissions": [
-    "core:default",
-    {
-      "identifier": "http:default",
-      "allow": [
-        { "url": "https://gestion-pelerins.vercel.app/*" },
-        { "url": "https://api.ocr.space/*" }
-      ]
-    }
+    "core:default"
   ]
 }

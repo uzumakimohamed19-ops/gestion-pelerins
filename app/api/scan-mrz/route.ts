@@ -1,6 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { parse as parseMRZ } from 'mrz'
 
+const corsHeaders = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Methods': 'POST, OPTIONS',
+  'Access-Control-Allow-Headers': 'Content-Type',
+}
+
+export function OPTIONS() {
+  return new NextResponse(null, { status: 204, headers: corsHeaders })
+}
+
 // Nettoyage OCR agressif pour isoler la bande MRZ
 function sanitizeMRZ(raw: string): string {
   return raw
@@ -35,7 +45,7 @@ export async function POST(req: NextRequest) {
   try {
     const { imageBase64 } = await req.json()
     if (!imageBase64) {
-      return NextResponse.json({ error: 'Image manquante' }, { status: 400 })
+      return NextResponse.json({ error: 'Image manquante' }, { status: 400, headers: corsHeaders })
     }
 
     const base64Data = imageBase64.replace(/^data:image\/\w+;base64,/, '')
@@ -63,7 +73,7 @@ export async function POST(req: NextRequest) {
     if (!parsedText.trim()) {
       return NextResponse.json({ 
         error: 'Texte illisible sur cette photo. Ajustez la luminosité ou le cadrage.' 
-      }, { status: 422 })
+      }, { status: 422, headers: corsHeaders })
     }
 
     // Récupération de toutes les lignes brutes
@@ -188,7 +198,7 @@ export async function POST(req: NextRequest) {
     if (!nom && !numPasseport) {
       return NextResponse.json({
         error: "Bande MRZ trop dégradée. Essayez avec un meilleur éclairage ou sans reflet.",
-      }, { status: 422 })
+      }, { status: 422, headers: corsHeaders })
     }
 
     return NextResponse.json({
@@ -198,10 +208,10 @@ export async function POST(req: NextRequest) {
       dateNaissance,
       dateExpiration,
       sexe,
-    })
+    }, { headers: corsHeaders })
   } catch (err: unknown) {
     console.error('Erreur API Scan MRZ:', err)
     const msg = err instanceof Error ? err.message : 'Erreur interne'
-    return NextResponse.json({ error: msg }, { status: 500 })
+    return NextResponse.json({ error: msg }, { status: 500, headers: corsHeaders })
   }
 }

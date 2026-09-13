@@ -12,9 +12,22 @@ export default function PwaInstaller() {
   const [showPopUp, setShowPopUp] = useState(false)
 
   useEffect(() => {
+    const isTauri =
+      window.location.protocol.startsWith('tauri') ||
+      window.location.hostname === 'tauri.localhost' ||
+      '__TAURI_INTERNALS__' in window ||
+      '__TAURI__' in window
     if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('/sw.js', { scope: '/' })
+      if (isTauri) {
+        void navigator.serviceWorker.getRegistrations().then((registrations) => {
+          registrations.forEach((registration) => void registration.unregister())
+        })
+      } else {
+        void navigator.serviceWorker.register('/sw.js', { scope: '/' })
+      }
     }
+
+    if (isTauri) return
 
     const handleBeforeInstallPrompt = (e: Event) => {
       e.preventDefault()
