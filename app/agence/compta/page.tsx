@@ -1,7 +1,7 @@
 'use client'
 import { useEffect, useState, useCallback } from 'react'
 import { usePowerSync, useQuery } from '@powersync/react'
-import { supabase } from '../../../lib/supabase'
+import { supabase, getUser } from '../../../lib/supabase'
 import { useYear } from '@/lib/YearContext'
 import { YearSelector } from '@/components/YearSelector'
 import {
@@ -114,7 +114,7 @@ async function setCacheLocal(key: string, data: any): Promise<void> {
 function useAgenceId() {
   const [id, setId] = useState<string | null>(null)
   useEffect(() => {
-    supabase.auth.getUser().then(async ({ data: { user } }) => {
+    getUser().then(async ({ data: { user } }) => {
       if (!user) return
       const m = user.user_metadata?.agence_id ?? user.app_metadata?.agence_id
       if (m) { setId(m); return }

@@ -4,6 +4,24 @@ import { createClient } from '@supabase/supabase-js'
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
 
+const SUPABASE_REQUEST_TIMEOUT_MS = 15000
+const AUTH_LOOKUP_TIMEOUT_MS = 4000
+
+const fetchWithTimeout: typeof fetch = async (input, init = {}) => {
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), SUPABASE_REQUEST_TIMEOUT_MS)
+  const signal = init.signal
+  const abortFromCaller = () => controller.abort()
+  signal?.addEventListener('abort', abortFromCaller, { once: true })
+
+  try {
+    return await fetch(input, { ...init, signal: controller.signal })
+  } finally {
+    clearTimeout(timeout)
+    signal?.removeEventListener('abort', abortFromCaller)
+  }
+}
+
 // Petite vérification de sécurité pour éviter l'erreur "undefined"
 if (!supabaseUrl || !supabaseAnonKey) {
   console.error("Attention : Les clés Supabase ne sont pas configurées dans .env.local")
@@ -12,7 +30,8 @@ if (!supabaseUrl || !supabaseAnonKey) {
 // On exporte la constante pour qu'elle soit visible ailleurs
 export const supabase = createClient(
   supabaseUrl || '', 
-  supabaseAnonKey || ''
+  supabaseAnonKey || '',
+  { global: { fetch: fetchWithTimeout } },
 )
 
 let supabaseUserPromise: Promise<any> | null = null
@@ -25,19 +44,24 @@ export function getUser() {
   if (!supabaseUserPromise) {
     supabaseUserPromise = (async () => {
       try {
-        // Hors-ligne, getUser() tente un appel réseau et peut rester en attente.
-        // La session Supabase persistée est la source fiable disponible localement.
-        if (typeof navigator !== 'undefined' && !navigator.onLine) {
-          const { data: sessionData } = await supabase.auth.getSession()
-          return { data: { user: sessionData.session?.user ?? null }, error: null }
+        const { data: sessionData } = await supabase.auth.getSession()
+        const localSession = sessionData.session
+
+        // Sur Android, ne pas bloquer l'interface sur la validation réseau du token.
+        if (!localSession || (typeof navigator !== 'undefined' && !navigator.onLine)) {
+          return { data: { user: localSession?.user ?? null }, error: null }
         }
 
-        const result = await supabase.auth.getUser()
+        const result = await Promise.race([
+          supabase.auth.getUser(),
+          new Promise<never>((_, reject) => {
+            setTimeout(() => reject(new Error('AUTH_LOOKUP_TIMEOUT')), AUTH_LOOKUP_TIMEOUT_MS)
+          }),
+        ])
         if (result.data?.user || !result.error) return result
 
-        const { data: sessionData } = await supabase.auth.getSession()
-        if (sessionData.session?.user) {
-          return { data: { user: sessionData.session.user }, error: null }
+        if (localSession?.user) {
+          return { data: { user: localSession.user }, error: null }
         }
 
         return result

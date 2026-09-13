@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react'
-import { supabase } from '@/lib/supabase'
+import { supabase, getUser } from '@/lib/supabase'
 import { useYear } from '@/lib/YearContext'
 import {
   ArrowLeft,
@@ -123,7 +123,7 @@ export default function PagePlatformeMdh() {
   useEffect(() => {
     const getUserRole = async () => {
       try {
-        const { data: { user } } = await supabase.auth.getUser()
+        const { data: { user } } = await getUser()
         if (user) {
           const { data } = await supabase
             .from('user_roles')

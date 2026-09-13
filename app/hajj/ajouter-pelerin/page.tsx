@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { usePowerSync } from '@powersync/react'
+import { usePowerSync, useQuery } from '@powersync/react'
 import { supabase, getUser } from '@/lib/supabase'
 import { ScanLine, Loader2, Save, Upload, RotateCcw, Smartphone, CalendarDays, UserRound } from 'lucide-react'
 import { uploadPassportFile } from '@/lib/hajjPassport'
@@ -9,24 +9,32 @@ import { Capacitor, CapacitorHttp } from '@capacitor/core'
 
 // Résolution de l'URL backend pour Web, Capacitor (Android/iOS) et Tauri (Desktop)
 function getApiUrl(): string {
+  // 1. Détection prioritaire de l'application native mobile (Android / iOS)
   if (Capacitor.isNativePlatform()) {
     return 'https://gestion-pelerins.vercel.app'
   }
 
+  // 2. Détection fiable pour Tauri Desktop ou environnement local exporté
   if (typeof window !== 'undefined') {
     const origin = window.location.origin
     const protocol = window.location.protocol
 
-    if (
+    const isTauriEnv =
       protocol.startsWith('tauri') ||
-      protocol.startsWith('capacitor') ||
       origin.includes('tauri.localhost') ||
+      '__TAURI_INTERNALS__' in window ||
+      '__TAURI__' in window
+
+    if (
+      isTauriEnv ||
+      protocol.startsWith('capacitor') ||
       (origin.includes('localhost') && !origin.includes('localhost:3000'))
     ) {
       return 'https://gestion-pelerins.vercel.app'
     }
   }
 
+  // 3. Navigateur Web (Vercel ou Dev local standard)
   return process.env.NEXT_PUBLIC_API_URL || ''
 }
 
@@ -107,26 +115,43 @@ export default function AjouterPelerin() {
   
   // États automatiques
   const [agenceId, setAgenceId] = useState<string | null>(null)
+  const [userId, setUserId] = useState<string | null>(null)
+  const [profileReady, setProfileReady] = useState(false)
+
+  const { data: localProfiles } = useQuery<{ agence_id: string | null }>(
+    'SELECT agence_id FROM profiles WHERE id = ?',
+    [userId ?? ''],
+  )
 
   useEffect(() => {
     async function fetchUserAgence() {
       try {
         const { data: { user } } = await getUser()
         if (user) {
+          setUserId(user.id)
+          setProfileReady(true)
           const { data: profile } = await supabase
             .from('profiles')
             .select('agence_id')
             .eq('id', user.id)
             .single()
           
-          if (profile) setAgenceId(profile.agence_id)
+          if (profile?.agence_id) setAgenceId(profile.agence_id)
         }
       } catch (error) {
         console.error('[AjouterPelerin] getUser error', error)
+        setProfileReady(true)
+      } finally {
+        setProfileReady(true)
       }
     }
     fetchUserAgence()
   }, [])
+
+  useEffect(() => {
+    const localAgenceId = localProfiles?.[0]?.agence_id
+    if (localAgenceId) setAgenceId(localAgenceId)
+  }, [localProfiles])
 
   const resetForm = () => {
     setNom(''); setPrenom(''); setReference(''); setPasseport(''); setPhone(''); setSexe(''); setDateNaissance('')
@@ -231,8 +256,9 @@ export default function AjouterPelerin() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
+    if (loading) return
     if (!agenceId) {
-      setMessage({ text: "❌ ERREUR : AUCUNE AGENCE LIÉE À VOTRE COMPTE.", type: 'error' })
+      setMessage({ text: profileReady ? "❌ ERREUR : AUCUNE AGENCE LIÉE À VOTRE COMPTE." : "⏳ CHARGEMENT DU PROFIL EN COURS...", type: 'error' })
       return
     }
     setLoading(true)
@@ -245,7 +271,7 @@ export default function AjouterPelerin() {
 
       await db.execute(
         `INSERT INTO pelerins (id, nom_complet, prenom, reference, num_passeport, telephone_pelerin, sexe, date_naissance, date_expiration, date_inscription, campagne, prix_package, total_paye, nom_package, document_url, agence_id, agence_ou_personne_associee, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [crypto.randomUUID(), `${nom}`.trim(), prenom.trim(), reference || null, passeport || null, phone || null, sexe || null, dateNaissance || null, dateExpiration || null, dateInscription || null, campagne || null, total, paye, nomPackage || null, fileUrl || null, agenceId, associe || null, new Date().toISOString()],
+        [crypto.randomUUID(), nom.trim(), prenom.trim(), reference.trim() || null, passeport.trim() || null, phone.trim() || null, sexe || null, dateNaissance || null, dateExpiration || null, dateInscription || null, campagne || null, total, paye, nomPackage.trim() || null, fileUrl || null, agenceId, associe.trim() || null, new Date().toISOString()],
       )
       setMessage({ text: "✅ ENREGISTRÉ AVEC SUCCÈS !", type: 'success' })
       setTimeout(resetForm, 2000)
@@ -476,11 +502,11 @@ export default function AjouterPelerin() {
               </div>
 
               <button 
-                type="submit" disabled={loading || !agenceId}
-                className={`w-full py-5 rounded-2xl text-white font-black text-lg shadow-lg active:scale-95 transition-all flex items-center justify-center gap-3 ${loading || !agenceId ? 'bg-gray-400 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700 shadow-blue-600/20'}`}
+                type="submit" disabled={loading || !agenceId || !profileReady}
+                className={`w-full py-5 rounded-2xl text-white font-black text-lg shadow-lg active:scale-95 transition-all flex items-center justify-center gap-3 ${loading || !agenceId || !profileReady ? 'bg-gray-400 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700 shadow-blue-600/20'}`}
               >
                 {loading ? <Loader2 className="animate-spin" /> : <Save size={20} />}
-                {loading ? "ENREGISTREMENT..." : "VALIDER LE DOSSIER"}
+                {loading ? "ENREGISTREMENT..." : !profileReady ? "CHARGEMENT DU PROFIL..." : "VALIDER LE DOSSIER"}
               </button>
 
               {message.text && (

@@ -1,6 +1,6 @@
 'use client'
 import { useEffect, useState } from 'react'
-import { supabase } from '@/lib/supabase'
+import { supabase, getUser } from '@/lib/supabase'
 import { cacheFirstFetch } from '@/lib/cacheFirst'
 import { 
   FileText, Upload, Trash2, FolderPlus, Loader2, 
@@ -37,8 +37,11 @@ export default function PageDocuments() {
 
   async function fetchData() {
     setLoading(true)
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user) return
+    const { data: { user } } = await getUser()
+    if (!user) {
+      setLoading(false)
+      return
+    }
 
     const { data: profile } = await supabase
       .from('profiles')

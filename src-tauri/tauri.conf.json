@@ -7,7 +7,7 @@
     "frontendDist": "../out",
     "devUrl": "http://localhost:3000",
     "beforeDevCommand": "npm run dev",
-    "beforeBuildCommand": "npm run build"
+    "beforeBuildCommand": "npm run build:static"
   },
   "app": {
     "windows": [
@@ -20,7 +20,7 @@
       }
     ],
     "security": {
-      "csp": null
+      "csp": "default-src 'self' ipc: http: https: data: blob:; connect-src 'self' ipc: http: https: https://gestion-pelerins.vercel.app https://api.ocr.space;"
     }
   },
   "bundle": {

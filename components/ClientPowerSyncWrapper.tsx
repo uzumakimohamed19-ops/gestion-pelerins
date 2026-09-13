@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useEffect, useState, useRef } from "react";
+import { App } from "@capacitor/app";
 import { PowerSyncContext } from "@powersync/react";
 import { powersync } from "@/lib/powersync/db";
 import { SupabaseConnector } from "@/lib/powersync/SupabaseConnector";
@@ -24,8 +25,7 @@ export default function PowerSyncProviderWrapper({
     const connector = connectorRef.current;
 
     const connectToPowerSync = async () => {
-      if (isConnectingRef.current || powersync.connected) return;
-      if (!navigator.onLine) return;
+      if (!isMounted || isConnectingRef.current || powersync.connected) return;
 
       try {
         isConnectingRef.current = true;
@@ -36,16 +36,28 @@ export default function PowerSyncProviderWrapper({
           return;
         }
 
+        if (typeof navigator !== "undefined" && !navigator.onLine) return;
+
         console.log("🔵 PowerSync : Connexion en cours avec le token Supabase...");
         await powersync.connect(connector);
         console.log("🟢 PowerSync : Connecté avec succès au Cloud !");
-      } catch (err: any) {
-        if (err?.name !== "AbortOperation") {
+      } catch (err: unknown) {
+        if (!(err instanceof Error && err.name === "AbortOperation")) {
           console.error("🔴 Erreur connexion PowerSync :", err);
         }
       } finally {
         isConnectingRef.current = false;
       }
+    };
+
+    const reconnectAfterNetworkRecovery = () => {
+      if (!isMounted || isConnectingRef.current || powersync.connected) return;
+
+      // Le réseau natif peut être rétabli avant que le navigateur WebView
+      // ne déclenche l'événement "online".
+      void connectToPowerSync();
+      window.setTimeout(() => void connectToPowerSync(), 1500);
+      window.setTimeout(() => void connectToPowerSync(), 5000);
     };
 
     const init = async () => {
@@ -62,9 +74,24 @@ export default function PowerSyncProviderWrapper({
     init();
 
     const handleOnline = () => {
-      void connectToPowerSync();
+      reconnectAfterNetworkRecovery();
+    };
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') void connectToPowerSync();
     };
     window.addEventListener('online', handleOnline);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    let appStateListener: { remove: () => Promise<void> } | undefined;
+    void App.addListener('appStateChange', ({ isActive }) => {
+      if (isActive) reconnectAfterNetworkRecovery();
+    }).then((listener) => {
+      if (isMounted) {
+        appStateListener = listener;
+      } else {
+        void listener.remove();
+      }
+    });
 
     // Écouter INITIAL_SESSION, SIGNED_IN et TOKEN_REFRESHED
     const { data: authListener } = supabase.auth.onAuthStateChange(async (event, session) => {
@@ -77,7 +104,7 @@ export default function PowerSyncProviderWrapper({
         try {
           await powersync.disconnect();
           console.log("⚪ PowerSync : Déconnecté");
-        } catch (e) {
+        } catch {
           /* ignore */
         }
       }
@@ -87,6 +114,8 @@ export default function PowerSyncProviderWrapper({
       isMounted = false;
       authListener.subscription.unsubscribe();
       window.removeEventListener('online', handleOnline);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      void appStateListener?.remove();
     };
   }, []);
 
