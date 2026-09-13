@@ -2,6 +2,7 @@
 import { useEffect, useState, useMemo, type ElementType } from 'react'
 import { useQuery } from '@powersync/react'
 import { useYear } from '@/lib/YearContext'
+import { useWorkProfile } from '@/lib/ProfileContext'
 import Header from '@/components/Header'
 import {
   Users, FileCheck, FileWarning, ArrowRight, Wallet,
@@ -425,6 +426,7 @@ function AlertPill({ alert, onClick }: { alert: AlertItem; onClick: () => void }
 // ─── Dashboard Principal ─────────────────────────────────────────────────────
 export default function Dashboard() {
   const { selectedYear, setSelectedYear, availableYears } = useYear()
+  const { canViewAmounts } = useWorkProfile()
 
   const [stats, setStats] = useState({
     total: 0, avecDoc: 0, sansDoc: 0,
@@ -444,12 +446,17 @@ export default function Dashboard() {
   const [activeTab, setActiveTab] = useState('all')
   const [nusukPaymentFilter, setNusukPaymentFilter] = useState('all')
   const [showAmount, setShowAmount] = useState(true)
+  const financialVisible = canViewAmounts && showAmount
   const [pdfConfirmOpen, setPdfConfirmOpen] = useState(false)
   const [pdfExportTarget, setPdfExportTarget] = useState<{ items: Pelerin[]; title: string } | null>(null)
   const [nomAgence, setNomAgence] = useState('')
   const [touchStartY, setTouchStartY] = useState<number | null>(null)
   const [dragOffset, setDragOffset] = useState(0)
   const dateDuJour = new Date().toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' })
+
+  useEffect(() => {
+    if (!canViewAmounts) setShowAmount(false)
+  }, [canViewAmounts])
 
   const { data: rawPelerins, isLoading: powerSyncLoading } = useQuery<any>(`
     SELECT p.*, a.nom_agence AS agence_nom_agence
@@ -566,7 +573,7 @@ export default function Dashboard() {
     generateAndPrintPDF(
       pdfExportTarget.items,
       pdfExportTarget.title,
-      includeFinance,
+      canViewAmounts && includeFinance,
       nomAgence,
       stats,
       recettes
@@ -605,7 +612,7 @@ export default function Dashboard() {
         'Nom Complet': p.nom_complet || '',
         'Téléphone': p.telephone_pelerin || '',
         'Agence Associée': p.agences?.nom_agence || 'Non spécifiée',
-        'Montant Payé (CFA)': p.total_paye || 0,
+        ...(canViewAmounts ? { 'Montant Payé (CFA)': p.total_paye || 0 } : {}),
         'Dossier Fourni': p.document_url ? 'Oui' : 'Non',
         'Inscrit Gouv': p.sur_plateforme_gouv ? 'Oui' : 'Non',
         'Inscrit Nusuk': p.sur_plateforme_nusuk ? 'Oui' : 'Non'
@@ -614,7 +621,9 @@ export default function Dashboard() {
       const worksheet = XLSX.utils.json_to_sheet(cleanRows)
       const workbook = XLSX.utils.book_new()
       XLSX.utils.book_append_sheet(workbook, worksheet, 'Pèlerins')
-      worksheet['!cols'] = [{ wch: 18 }, { wch: 25 }, { wch: 16 }, { wch: 22 }, { wch: 20 }, { wch: 15 }, { wch: 15 }, { wch: 15 }]
+      worksheet['!cols'] = canViewAmounts
+        ? [{ wch: 18 }, { wch: 25 }, { wch: 16 }, { wch: 22 }, { wch: 20 }, { wch: 15 }, { wch: 15 }, { wch: 15 }]
+        : [{ wch: 18 }, { wch: 25 }, { wch: 16 }, { wch: 22 }, { wch: 15 }, { wch: 15 }, { wch: 15 }]
       XLSX.writeFile(workbook, `${filename.replace(/\s/g, '_')}_${new Date().toISOString().split('T')[0]}.xlsx`)
     } catch (err) {
       console.error("Erreur durant l'export Excel:", err)
@@ -668,9 +677,9 @@ export default function Dashboard() {
       progress: stats.tauxNusuk, progressColor: 'bg-blue-600'
     },
     {
-      label: 'Encaissé Global', value: `${recettes.toLocaleString('fr-FR')} CFA`, icon: Wallet,
+      label: 'Encaissé Global', value: `${financialVisible ? recettes.toLocaleString('fr-FR') : '••••••'} CFA`, icon: Wallet,
       light: 'bg-emerald-50', textColor: 'text-emerald-600', borderColor: 'border-emerald-100',
-      bgMobile: 'bg-emerald-50/90 border-emerald-100 text-emerald-900', subtext: `Moy: ${stats.montantMoyen.toLocaleString('fr-FR')}`, tag: 'Finance'
+      bgMobile: 'bg-emerald-50/90 border-emerald-100 text-emerald-900', subtext: `Moy: ${financialVisible ? stats.montantMoyen.toLocaleString('fr-FR') : '••••••'}`, tag: 'Finance'
     },
     {
       label: 'Versements Reçus', value: stats.avecPaiement, icon: TrendingUp,
@@ -742,15 +751,15 @@ export default function Dashboard() {
               <div className="flex items-center gap-2 mt-0.5">
                 <div className="flex items-baseline gap-1">
                   <span className="text-3xl font-black tracking-tight tabular-nums">
-                    {loading ? '---' : (showAmount ? recettes.toLocaleString('fr-FR') : '•••••••')}
+                    {loading ? '---' : (financialVisible ? recettes.toLocaleString('fr-FR') : '•••••••')}
                   </span>
                   <span className="text-sm font-bold text-blue-200">CFA</span>
                 </div>
                 <button
-                  onClick={() => setShowAmount(!showAmount)}
+                  onClick={() => canViewAmounts && setShowAmount(!showAmount)}
                   className="p-1 rounded-lg bg-white/10 border border-white/10 active:scale-90 transition-transform flex items-center justify-center"
                 >
-                  {showAmount ? <EyeOff size={14} className="text-blue-100" /> : <Eye size={14} className="text-blue-100" />}
+                  {financialVisible ? <EyeOff size={14} className="text-blue-100" /> : <Eye size={14} className="text-blue-100" />}
                 </button>
               </div>
             </div>
@@ -935,7 +944,7 @@ export default function Dashboard() {
                   <div>
                     <p className="text-[9px] text-blue-100 font-bold uppercase tracking-wider">Encaissé</p>
                     <p className="text-sm font-black text-white tabular-nums leading-none">
-                      {recettes.toLocaleString('fr-FR')}
+                      {financialVisible ? recettes.toLocaleString('fr-FR') : '••••••'}
                       <span className="text-[10px] font-bold text-blue-200 ml-1">CFA</span>
                     </p>
                   </div>
@@ -1042,7 +1051,7 @@ export default function Dashboard() {
                         <div className="shrink-0">
                           {(p.total_paye ?? 0) > 0 ? (
                             <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2.5 py-1 rounded-xl shadow-xs">
-                              {(p.total_paye ?? 0).toLocaleString('fr-FR')} CFA
+                              {financialVisible ? `${(p.total_paye ?? 0).toLocaleString('fr-FR')} CFA` : '••••••'}
                             </span>
                           ) : (
                             <span className="text-[10px] font-semibold text-amber-700 bg-amber-50 border border-amber-200 px-2.5 py-1 rounded-xl shadow-xs">
@@ -1120,7 +1129,7 @@ export default function Dashboard() {
                         <div className="text-right shrink-0">
                           {(p.total_paye ?? 0) > 0 ? (
                             <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2.5 py-1 rounded-xl shadow-xs">
-                              {(p.total_paye ?? 0).toLocaleString('fr-FR')} CFA
+                              {financialVisible ? `${(p.total_paye ?? 0).toLocaleString('fr-FR')} CFA` : '••••••'}
                             </span>
                           ) : (
                             <span className="text-[10px] font-semibold text-amber-700 bg-amber-50 border border-amber-200 px-2.5 py-1 rounded-xl shadow-xs">
@@ -1300,7 +1309,7 @@ export default function Dashboard() {
                     </div>
                     <div className="shrink-0 text-right">
                       <span className={`text-xs font-black px-2.5 py-1 rounded-md ${(p.total_paye ?? 0) > 0 ? 'text-emerald-700 bg-emerald-50' : 'text-amber-700 bg-amber-50'}`}>
-                        {(p.total_paye ?? 0) > 0 ? `${(p.total_paye ?? 0).toLocaleString('fr-FR')} CFA` : 'Impayé'}
+                        {financialVisible && (p.total_paye ?? 0) > 0 ? `${(p.total_paye ?? 0).toLocaleString('fr-FR')} CFA` : financialVisible ? 'Impayé' : '••••••'}
                       </span>
                     </div>
                   </li>

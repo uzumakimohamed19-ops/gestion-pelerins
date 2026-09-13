@@ -4,6 +4,8 @@ import { useQuery } from '@powersync/react'
 import { useYear } from '@/lib/YearContext'
 import { YearSelector } from '@/components/YearSelector'
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
+import { useWorkProfile } from '@/lib/ProfileContext'
 import { 
   ArrowLeft, 
   Plus, 
@@ -41,10 +43,18 @@ interface Operation {
 
 export default function JournalOperations() {
   const { selectedYear } = useYear()
+  const { isDirection, loading: profileLoading } = useWorkProfile()
+  const router = useRouter()
   const [searchTerm, setSearchTerm] = useState('')
   const { data: operations, isLoading: loading } = useQuery<Operation>(
     'SELECT * FROM operations_agence ORDER BY created_at DESC',
   )
+
+  useEffect(() => {
+    if (!profileLoading && !isDirection) router.replace('/agence/dashboard')
+  }, [isDirection, profileLoading, router])
+
+  if (profileLoading || !isDirection) return null
 
   const operationsFiltrees = (operations ?? []).filter(op => {
     const matchYear = selectedYear === 'all' ? true : new Date(op.created_at).getFullYear() === selectedYear

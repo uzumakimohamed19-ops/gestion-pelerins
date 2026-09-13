@@ -48,6 +48,20 @@ export const profiles = new Table({
   }
 });
 
+// 3. Profils de travail protégés par PIN
+export const account_profiles = new Table({
+  name: 'account_profiles',
+  columns: [
+    column.text('user_id'),
+    column.text('name'),
+    column.text('profile_type'),
+    column.text('pin_hash'),
+    column.text('created_at'),
+    column.text('updated_at')
+  ],
+  indexes: { user: ['user_id'], type: ['profile_type'] }
+});
+
 // 3. Pèlerins
 export const pelerins = new Table({
   name: 'pelerins',
@@ -329,6 +343,7 @@ export const gouv_postulations_log = new Table({
 export const AppSchema = new Schema({
   agences,
   profiles,
+  account_profiles,
   pelerins,
   pelerin_payments,
   operations_agence,

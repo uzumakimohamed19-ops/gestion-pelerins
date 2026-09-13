@@ -10,6 +10,7 @@ import Link from 'next/link'
 import { get, set } from 'idb-keyval'
 import { useYear } from '@/lib/YearContext'
 import { YearSelector } from '@/components/YearSelector'
+import { useWorkProfile } from '@/lib/ProfileContext'
 
 interface Operation {
   id: string
@@ -122,6 +123,7 @@ function AlertPill({ alert, onClick }: { alert: AlertItem; onClick: () => void }
 
 export default function DashboardAgence() {
   const { selectedYear } = useYear()
+  const { canViewAmounts } = useWorkProfile()
   const [loading, setLoading] = useState(true)
   const [allData, setAllData] = useState<Operation[]>()
   
@@ -142,17 +144,21 @@ export default function DashboardAgence() {
     ;(async () => {
       try {
         const saved: any = await get('agence_show_amount')
-        setShowAmount(saved !== undefined && saved !== null ? Boolean(saved) : true)
+        setShowAmount(canViewAmounts && (saved !== undefined && saved !== null ? Boolean(saved) : true))
       } catch (e) {
-        setShowAmount(true)
+        setShowAmount(canViewAmounts)
       }
     })()
-  }, [])
+  }, [canViewAmounts])
 
   useEffect(() => {
     if (!mounted) return
     try { set('agence_show_amount', showAmount) } catch (e) { /* ignore */ }
   }, [showAmount, mounted])
+
+  useEffect(() => {
+    if (!canViewAmounts) setShowAmount(false)
+  }, [canViewAmounts])
 
   const dateDuJour = useMemo(() => {
     return new Date().toLocaleDateString('fr-FR', {
@@ -270,12 +276,12 @@ export default function DashboardAgence() {
 
   const mainCards: TileCard[] = [
     {
-      label: "Chiffre d'Affaires", value: `${showAmount ? stats.caTotal.toLocaleString('fr-FR') : '••••••'} CFA`, icon: Wallet,
+      label: "Chiffre d'Affaires", value: `${canViewAmounts && showAmount ? stats.caTotal.toLocaleString('fr-FR') : '••••••'} CFA`, icon: Wallet,
       light: 'bg-blue-50', textColor: 'text-blue-600', borderColor: 'border-blue-100',
       bgMobile: 'bg-white border-slate-100 text-slate-900', progress: 100, progressColor: 'bg-blue-500', tag: 'Finance'
     },
     {
-      label: 'Bénéfice Net Total', value: `${showAmount ? stats.beneficeTotal.toLocaleString('fr-FR') : '••••••'} CFA`, icon: TrendingUp,
+      label: 'Bénéfice Net Total', value: `${canViewAmounts && showAmount ? stats.beneficeTotal.toLocaleString('fr-FR') : '••••••'} CFA`, icon: TrendingUp,
       light: 'bg-emerald-50', textColor: 'text-emerald-600', borderColor: 'border-emerald-100',
       bgMobile: 'bg-emerald-600 border-emerald-500 text-white', subtext: `${stats.tauxRentabilite}% Rentabilité`,
       progress: stats.tauxRentabilite, progressColor: 'bg-emerald-400'
@@ -287,12 +293,12 @@ export default function DashboardAgence() {
       progress: 100, progressColor: 'bg-purple-500'
     },
     {
-      label: 'Panier Moyen', value: `${showAmount ? stats.panierMoyen.toLocaleString('fr-FR') : '••••••'} CFA`, icon: Globe,
+      label: 'Panier Moyen', value: `${canViewAmounts && showAmount ? stats.panierMoyen.toLocaleString('fr-FR') : '••••••'} CFA`, icon: Globe,
       light: 'bg-cyan-50', textColor: 'text-cyan-600', borderColor: 'border-cyan-100',
       bgMobile: 'bg-white border-slate-100 text-slate-900', subtext: 'Par transaction'
     },
     {
-      label: 'Marge Moyenne', value: `${showAmount ? stats.margeMoyenne.toLocaleString('fr-FR') : '••••••'} CFA`, icon: Clock,
+      label: 'Marge Moyenne', value: `${canViewAmounts && showAmount ? stats.margeMoyenne.toLocaleString('fr-FR') : '••••••'} CFA`, icon: Clock,
       light: 'bg-amber-50', textColor: 'text-amber-500', borderColor: 'border-amber-100',
       bgMobile: 'bg-white border-slate-100 text-slate-900', subtext: 'Par opération'
     },
@@ -336,7 +342,7 @@ export default function DashboardAgence() {
               </div>
             </div>
             <button 
-              onClick={() => setShowAmount(!showAmount)}
+              onClick={() => canViewAmounts && setShowAmount(!showAmount)}
               className="w-10 h-10 rounded-full bg-white/10 border border-white/20 flex items-center justify-center backdrop-blur-md active:scale-90 transition-all"
             >
               {showAmount ? <Eye size={18} /> : <EyeOff size={18} />}
@@ -350,7 +356,7 @@ export default function DashboardAgence() {
             </div>
             <div className="flex items-baseline gap-2">
               <h2 className="text-3xl font-black tracking-tighter tabular-nums">
-                {showAmount ? stats.caTotal.toLocaleString('fr-FR') : '••••••'}
+                {canViewAmounts && showAmount ? stats.caTotal.toLocaleString('fr-FR') : '••••••'}
               </h2>
               <span className="text-sm font-bold text-white/40">CFA</span>
             </div>
@@ -359,7 +365,7 @@ export default function DashboardAgence() {
               <div>
                 <p className="text-[10px] font-bold text-white/40 uppercase mb-1">Profit Net</p>
                 <p className="text-sm font-black text-emerald-400">
-                  {showAmount ? `+${stats.beneficeTotal.toLocaleString('fr-FR')}` : '••••••'} <span className="text-[10px]">CFA</span>
+                      {canViewAmounts && showAmount ? `+${stats.beneficeTotal.toLocaleString('fr-FR')}` : '••••••'} <span className="text-[10px]">CFA</span>
                 </p>
               </div>
               <div className="text-right">
@@ -417,10 +423,10 @@ export default function DashboardAgence() {
                   </div>
                   <div className="text-right shrink-0">
                     <p className="text-sm font-black text-slate-900 tabular-nums">
-                      {showAmount ? `${v.prix_vente.toLocaleString('fr-FR')}` : '•••'}
+                      {canViewAmounts && showAmount ? `${v.prix_vente.toLocaleString('fr-FR')}` : '•••'}
                     </p>
                     <p className="text-[10px] font-bold text-emerald-500 tabular-nums">
-                      {showAmount ? `+${v.benefice.toLocaleString('fr-FR')}` : '•••'}
+                      {canViewAmounts && showAmount ? `+${v.benefice.toLocaleString('fr-FR')}` : '•••'}
                     </p>
                   </div>
                 </div>
@@ -465,8 +471,8 @@ export default function DashboardAgence() {
               onClick={() => setShowAmount(!showAmount)}
               className="inline-flex items-center gap-2 bg-slate-100 text-slate-700 text-xs font-bold px-4 py-2.5 rounded-xl hover:bg-slate-200 active:scale-95 transition-all shadow-sm border border-slate-200"
             >
-              {showAmount ? <Eye size={15} /> : <EyeOff size={15} />}
-              {showAmount ? 'Masquer' : 'Afficher'}
+              {canViewAmounts && showAmount ? <Eye size={15} /> : <EyeOff size={15} />}
+              {canViewAmounts && showAmount ? 'Masquer' : 'Afficher'}
             </button>
             <span className="text-xs font-semibold text-slate-600 bg-white border border-slate-200/80 px-4 py-2.5 rounded-xl shadow-sm flex items-center gap-2">
               <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
@@ -518,10 +524,10 @@ export default function DashboardAgence() {
                       </div>
                       <div className="text-right shrink-0">
                         <p className="text-base font-black text-slate-900 tabular-nums">
-                          {showAmount ? v.prix_vente.toLocaleString('fr-FR') : '•••••'} <span className="text-xs text-slate-400">CFA</span>
+                          {canViewAmounts && showAmount ? v.prix_vente.toLocaleString('fr-FR') : '•••••'} <span className="text-xs text-slate-400">CFA</span>
                         </p>
                         <p className="text-sm font-black text-emerald-600 mt-0.5">
-                          {showAmount ? `+${v.benefice.toLocaleString('fr-FR')}` : '•••••'} <span className="text-[10px] opacity-70">CFA</span>
+                          {canViewAmounts && showAmount ? `+${v.benefice.toLocaleString('fr-FR')}` : '•••••'} <span className="text-[10px] opacity-70">CFA</span>
                         </p>
                       </div>
                     </li>
@@ -611,9 +617,9 @@ export default function DashboardAgence() {
                       <p className="text-xs text-slate-400 uppercase font-semibold">{o.type_activite || 'VENTE INDÉFINIE'}</p>
                     </div>
                     <div className="shrink-0 text-right">
-                      <p className="text-xs font-black text-slate-900">{showAmount ? o.prix_vente.toLocaleString('fr-FR') : '•••••'} CFA</p>
+                      <p className="text-xs font-black text-slate-900">{canViewAmounts && showAmount ? o.prix_vente.toLocaleString('fr-FR') : '•••••'} CFA</p>
                       <span className={`text-[10px] font-black px-1.5 py-0.5 rounded-md ${o.benefice > 0 ? 'text-emerald-700 bg-emerald-50' : 'text-rose-600 bg-rose-50'}`}>
-                        {showAmount ? `+${o.benefice.toLocaleString('fr-FR')}` : '•••••'} Marge
+                        {canViewAmounts && showAmount ? `+${o.benefice.toLocaleString('fr-FR')}` : '•••••'} Marge
                       </span>
                     </div>
                   </li>

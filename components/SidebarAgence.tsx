@@ -17,8 +17,10 @@ import {
   Menu,
   X,
   Plus,
-  Contact 
+  Contact,
+  LockKeyhole
 } from 'lucide-react'
+import { useWorkProfile } from '@/lib/ProfileContext'
 
 export default function NavbarAgence() {
   const pathname = usePathname()
@@ -27,6 +29,7 @@ export default function NavbarAgence() {
   const [userName, setUserName] = useState<string>('')
   const [role, setRole] = useState<string>('staff')
   const [isMenuOpen, setIsMenuOpen] = useState(false)
+  const { isDirection, clearProfile } = useWorkProfile()
 
   useEffect(() => {
     async function getProfileAndAgence() {
@@ -62,11 +65,17 @@ export default function NavbarAgence() {
     router.refresh()
   }
 
+  const handleLock = () => {
+    clearProfile()
+    setIsMenuOpen(false)
+    router.replace('/profile-selection')
+  }
+
   const menuItems = [
     { name: 'Dashboard', href: '/agence/dashboard', icon: LayoutDashboard },
     { name: 'Vendre', href: '/agence/nouvelle-operation', icon: PlusCircle },
-    { name: 'Journal', href: '/agence/journal', icon: ClipboardList },
-    { name: 'Comptabilité', href: '/agence/compta', icon: PieChart },
+    ...(isDirection ? [{ name: 'Journal', href: '/agence/journal', icon: ClipboardList }] : []),
+    ...(isDirection ? [{ name: 'Comptabilité', href: '/agence/compta', icon: PieChart }] : []),
     { name: 'Contact', href: '/agence/contact', icon: Contact }, 
     { name: 'Quitter', href: '/', icon: SquareArrowRight },
   ]
@@ -136,19 +145,30 @@ export default function NavbarAgence() {
         </div>
 
         {/* Section Bas : Profil & Déconnexion */}
-        <div className="pt-4 border-t border-gray-100 flex items-center justify-between">
-          <div className="flex items-center gap-3 min-w-0">
-            <div className="w-9 h-9 rounded-full bg-gray-100 border border-gray-200 shadow-sm overflow-hidden shrink-0">
-              <Image src={`https://ui-avatars.com/api/?name=${userName || nomAgence}&background=f0fdf4&color=047857`} alt="Avatar" width={36} height={36} />
-            </div>
-            <div className="flex flex-col min-w-0">
-              <span className="text-xs font-bold text-gray-700 truncate">{userName || 'Utilisateur'}</span>
-              <span className="text-[10px] text-gray-400 capitalize">{role}</span>
-            </div>
-          </div>
-          <button onClick={handleLogout} className="p-2 text-gray-400 hover:text-red-600 transition-colors shrink-0" title="Déconnexion">
-            <LogOut size={18} />
+        <div className="pt-4 border-t border-gray-100 space-y-2">
+          <button
+            onClick={handleLock}
+            className="w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-2xl bg-blue-50 border border-blue-100 text-sm font-black text-blue-700 hover:bg-blue-100 transition-colors"
+            title="Verrouiller"
+          >
+            <LockKeyhole size={18} />
+            <span>Verrouiller</span>
           </button>
+
+          <div className="flex items-center justify-between gap-3 rounded-2xl bg-gray-50 px-2 py-2">
+            <div className="flex items-center gap-3 min-w-0">
+              <div className="w-9 h-9 rounded-full bg-gray-100 border border-gray-200 shadow-sm overflow-hidden shrink-0">
+                <Image src={`https://ui-avatars.com/api/?name=${userName || nomAgence}&background=f0fdf4&color=047857`} alt="Avatar" width={36} height={36} />
+              </div>
+              <div className="flex flex-col min-w-0">
+                <span className="text-xs font-bold text-gray-700 truncate">{userName || 'Utilisateur'}</span>
+                <span className="text-[10px] text-gray-400 capitalize">{role}</span>
+              </div>
+            </div>
+            <button onClick={handleLogout} className="p-2 text-gray-400 hover:text-red-600 transition-colors shrink-0" title="Déconnexion">
+              <LogOut size={18} />
+            </button>
+          </div>
         </div>
       </nav>
 
@@ -259,6 +279,14 @@ export default function NavbarAgence() {
               )
             })}
 
+            {/* Bouton de verrouillage */}
+            <button
+              onClick={handleLock}
+              className="flex flex-col items-center justify-center gap-2 p-3.5 rounded-2xl bg-blue-50 text-blue-700 border border-blue-100 col-span-2 active:scale-[0.98] transition-transform"
+            >
+              <LockKeyhole size={19} />
+              <span className="text-[11px] font-black uppercase tracking-wider">Verrouiller</span>
+            </button>
             {/* Bouton de déconnexion */}
             <button
               onClick={() => {

@@ -20,8 +20,10 @@ import {
   BarChart3,
   MoreHorizontal,
   Plus,
-  Globe 
+  Globe,
+  LockKeyhole
 } from 'lucide-react'
+import { useWorkProfile } from '@/lib/ProfileContext'
 
 // Rayon (en px) de la courbe concave "inverted border radius"
 const CONCAVE_R = 20
@@ -38,6 +40,7 @@ export default function Navbar() {
     }
   })()
 
+  const { isDirection, clearProfile } = useWorkProfile()
   if (hideNavbar) return null
   const pathname = usePathname()
   const router = useRouter()
@@ -104,14 +107,19 @@ export default function Navbar() {
     router.refresh()
   }
 
+  const handleLock = () => {
+    clearProfile()
+    setIsMenuOpen(false)
+    router.replace('/profile-selection')
+  }
+
   const navItems = [
     { name: 'Tableau de bord', href: '/hajj/dashboard', icon: LayoutDashboard },
     { name: 'Pèlerins', href: '/hajj/liste-pelerins', icon: Users },
     { name: 'Ajouter', href: '/hajj/ajouter-pelerin', icon: UserPlus },
     { name: 'Documents', href: '/hajj/documents', icon: FileText },
     { name: 'Plateforme MDH et nusuk', href: '/hajj/nusuk', icon: Globe }, 
-    { name: 'État général', href: '/hajj/etat-general', icon: BarChart3 },
-    { name: 'Comptabilité', href: '/hajj/comptabilite', icon: PieChart },
+    ...(isDirection ? [{ name: 'État général', href: '/hajj/etat-general', icon: BarChart3 }, { name: 'Comptabilité', href: '/hajj/comptabilite', icon: PieChart }] : []),
     { name: 'Quitter', href: '/', icon: SquareArrowRight },
   ]
 
@@ -258,29 +266,39 @@ export default function Navbar() {
         </div>
 
         {/* Section Bas : Profil & Déconnexion fixés au pied */}
-        <div className="pt-4 border-t border-white/25 flex items-center justify-between">
-          <div className="flex items-center gap-3 min-w-0">
-            <div className="w-9 h-9 rounded-full bg-white/20 border-2 border-white/40 overflow-hidden shadow-inner shrink-0">
-              <Image
-                src={`https://ui-avatars.com/api/?name=${avatarFallbackName}&background=eff6ff&color=2563eb&bold=true`}
-                alt="Avatar"
-                width={36}
-                height={36}
-              />
-            </div>
-            <div className="flex flex-col min-w-0">
-              <span className="text-xs font-bold text-white truncate">{userName || 'Utilisateur'}</span>
-              <span className="text-[10px] text-blue-50/80 uppercase font-medium">{role}</span>
-            </div>
-          </div>
-          
+        <div className="pt-4 border-t border-white/25 space-y-2">
           <button
-            onClick={handleLogout}
-            className="p-2 text-white/80 hover:text-white hover:bg-white/15 rounded-xl transition-all shrink-0"
-            title="Déconnexion"
+            onClick={handleLock}
+            className="w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-2xl bg-white/15 border border-white/25 text-sm font-black text-white hover:bg-white/25 transition-all"
+            title="Verrouiller"
           >
-            <LogOut size={18} />
+            <LockKeyhole size={18} />
+            <span>Verrouiller</span>
           </button>
+
+          <div className="flex items-center justify-between gap-3 rounded-2xl bg-white/10 px-2 py-2">
+            <div className="flex items-center gap-3 min-w-0">
+              <div className="w-9 h-9 rounded-full bg-white/20 border-2 border-white/40 overflow-hidden shadow-inner shrink-0">
+                <Image
+                  src={`https://ui-avatars.com/api/?name=${avatarFallbackName}&background=eff6ff&color=2563eb&bold=true`}
+                  alt="Avatar"
+                  width={36}
+                  height={36}
+                />
+              </div>
+              <div className="flex flex-col min-w-0">
+                <span className="text-xs font-bold text-white truncate">{userName || 'Utilisateur'}</span>
+                <span className="text-[10px] text-blue-50/80 uppercase font-medium">{role}</span>
+              </div>
+            </div>
+            <button
+              onClick={handleLogout}
+              className="p-2 text-white/80 hover:text-white hover:bg-white/15 rounded-xl transition-all shrink-0"
+              title="Déconnexion"
+            >
+              <LogOut size={18} />
+            </button>
+          </div>
         </div>
       </nav>
 
@@ -394,6 +412,14 @@ export default function Navbar() {
               )
             })}
 
+            {/* Bouton de verrouillage */}
+            <button
+              onClick={handleLock}
+              className="flex flex-col items-center justify-center gap-2 p-3.5 rounded-2xl bg-blue-50 text-blue-700 border border-blue-100 col-span-2 active:scale-[0.98] transition-transform"
+            >
+              <LockKeyhole size={19} />
+              <span className="text-[11px] font-black uppercase tracking-wider">Verrouiller</span>
+            </button>
             {/* Bouton de déconnexion */}
             <button
               onClick={() => {

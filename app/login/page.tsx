@@ -29,7 +29,7 @@ export default function LoginPage() {
         const { data: { session } } = await supabase.auth.getSession()
         if (session) {
           console.log("Session active détectée, redirection vers l'accueil...")
-          router.replace('/')
+          router.replace('/profile-selection')
         }
       } catch (error) {
         console.warn('Vérification de session impossible hors connexion.', error)
@@ -98,7 +98,7 @@ export default function LoginPage() {
       console.log("✅ Profil trouvé (Role:", profile.role, "). Tentative de redirection...")
 
       // ÉTAPE C : Redirection forcée
-      window.location.assign('/')
+      window.location.assign('/profile-selection')
 
     } catch (err) {
       console.error("--- Échec de la connexion ---")
