@@ -5,13 +5,14 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
+    "build:static": "cross-env STATIC_EXPORT=true next build",
     "start": "next start",
     "lint": "eslint",
-    "mobile:sync": "next build && npx cap sync",
+    "mobile:sync": "npm run build:static && npx cap sync",
     "mobile:android": "npx cap open android",
     "mobile:ios": "npx cap open ios",
     "desktop:dev": "npx tauri dev",
-    "desktop:build": "npx tauri build"
+    "desktop:build": "npm run build:static && npx tauri build"
   },
   "dependencies": {
     "@capacitor-community/sqlite": "^8.1.1",
@@ -51,6 +52,7 @@
     "@types/node": "^20",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19",
+    "cross-env": "^7.0.3",
     "eslint": "^9",
     "eslint-config-next": "16.2.1",
     "tailwindcss": "^4",

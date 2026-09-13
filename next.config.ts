@@ -1,13 +1,18 @@
 import type { NextConfig } from "next";
 
+// Si on builde pour Capacitor/Tauri, on active l'export statique.
+// Sur Vercel, on laisse Next.js compiler les fonctions Serverless (/api).
+const isStaticExport = process.env.STATIC_EXPORT === "true";
+
 const nextConfig: NextConfig = {
-  output: "export",
+  ...(isStaticExport ? { output: "export" } : {}),
+
   distDir: process.env.NODE_ENV === "development" ? ".next-dev" : ".next",
 
   allowedDevOrigins: ["192.168.1.6"],
 
   images: {
-    unoptimized: true, // Requis en mode export : désactive l'optimisation à la volée côté serveur Node.js
+    unoptimized: true,
     remotePatterns: [
       {
         protocol: "https",
