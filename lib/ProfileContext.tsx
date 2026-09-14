@@ -35,8 +35,8 @@ type ProfileContextValue = {
 }
 
 const ProfileContext = createContext<ProfileContextValue | null>(null)
-const SESSION_KEY = (userId: string) => `active_session_profile_${userId}`
-const PROFILE_SNAPSHOT_KEY = (userId: string) => `active_profile_snapshot_${userId}`
+const SESSION_PROFILE_ID_KEY = (userId: string) => `active_profile_id_${userId}`
+const SESSION_PROFILE_DATA_KEY = (userId: string) => `active_profile_data_${userId}`
 const LAST_ACTIVITY_KEY = (userId: string) => `profile_last_activity_${userId}`
 const INACTIVITY_TIMEOUT_MS = 15 * 60 * 1000 // 15 minutes
 
@@ -61,19 +61,36 @@ export function ProfileRouteGuard({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
   const router = useRouter()
 
+  const isFinancialRoute = useMemo(() => {
+    if (!pathname) return false
+    const norm = pathname.toLowerCase()
+    return (
+      norm.startsWith('/hajj/comptabilite') ||
+      norm.startsWith('/hajj/etat-general') ||
+      norm.startsWith('/agence/compta') ||
+      norm.startsWith('/agence/journal')
+    )
+  }, [pathname])
+
   useEffect(() => {
     if (loading || !profile) return
-    const protectedFinancialRoutes = [
-      '/hajj/comptabilite',
-      '/hajj/etat-general',
-      '/agence/compta',
-      '/agence/journal',
-    ]
-
-    if (!canViewAmounts && protectedFinancialRoutes.includes(pathname)) {
+    if (!canViewAmounts && isFinancialRoute) {
       router.replace('/hajj/dashboard')
     }
-  }, [canViewAmounts, loading, pathname, profile, router])
+  }, [canViewAmounts, isFinancialRoute, loading, profile, router])
+
+  if (!loading && profile && !canViewAmounts && isFinancialRoute) {
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#F4F6F8]">
+        <div className="p-6 bg-white rounded-3xl border border-slate-200 shadow-sm text-center max-w-sm">
+          <p className="text-sm font-black text-slate-900 uppercase">Accès Réservé</p>
+          <p className="text-xs text-slate-500 mt-1">
+            Section strictement réservée au profil Direction.
+          </p>
+        </div>
+      </div>
+    )
+  }
 
   return <>{children}</>
 }
@@ -85,156 +102,147 @@ export default function ProfileProvider({ children }: { children: React.ReactNod
 
   const [userId, setUserId] = useState<string | null>(null)
   const [profile, setProfile] = useState<WorkProfile | null>(null)
-  const [userLoading, setUserLoading] = useState(true)
-  const [profileRestored, setProfileRestored] = useState(false)
+  const [authReady, setAuthReady] = useState(false)
   const [isBiometricAvailable, setIsBiometricAvailable] = useState(false)
 
   const lastActivityRef = useRef<number>(Date.now())
 
-  // Récupération réactive PowerSync
+  // 1. Récupération réactive des profils SQLite PowerSync
   const { data: localProfiles = [], isLoading: isQueryLoading } = useQuery<WorkProfile>(
     'SELECT id, user_id, name, profile_type, pin_hash FROM account_profiles WHERE user_id = ? ORDER BY profile_type ASC, created_at ASC',
     [userId ?? '']
   )
 
-  const loading = userLoading || isQueryLoading
-
-  // Vérification de la disponibilité biométrique sur mobile
-  useEffect(() => {
-    async function checkBiometrics() {
-      if (Capacitor.isNativePlatform()) {
-        try {
-          const result = await NativeBiometric.isAvailable()
-          setIsBiometricAvailable(result.isAvailable)
-        } catch {
-          setIsBiometricAvailable(false)
-        }
-      }
-    }
-    checkBiometrics()
-  }, [])
-
-  // Initialisation utilisateur
+  // 2. Initialisation de l'utilisateur avec déblocage garanti (pas de blocage infini)
   useEffect(() => {
     let isMounted = true
-    async function initUser() {
-      try {
-        const { data } = await getUser()
-        if (isMounted) setUserId(data.user?.id ?? null)
-      } catch (err) {
-        console.error('[ProfileProvider] Erreur auth:', err)
-      } finally {
-        if (isMounted) setUserLoading(false)
-      }
+    const timer = setTimeout(() => {
+      if (isMounted) setAuthReady(true) // Débloque au bout de 2.5s même si le réseau est lent
+    }, 2500)
+
+    getUser()
+      .then(({ data }) => {
+        if (isMounted && data.user?.id) {
+          setUserId(data.user.id)
+        }
+      })
+      .catch((err) => console.error('[ProfileProvider] Erreur auth:', err))
+      .finally(() => {
+        if (isMounted) {
+          clearTimeout(timer)
+          setAuthReady(true)
+        }
+      })
+
+    return () => {
+      isMounted = false
+      clearTimeout(timer)
     }
-    initUser()
-    return () => { isMounted = false }
   }, [])
 
-  // Verrouillage de la session
-  const clearProfile = useCallback(() => {
-    setProfile(null)
-    if (userId) {
-      try {
-        sessionStorage.removeItem(SESSION_KEY(userId))
-        localStorage.removeItem(SESSION_KEY(userId))
-        localStorage.removeItem(PROFILE_SNAPSHOT_KEY(userId))
-        localStorage.removeItem(LAST_ACTIVITY_KEY(userId))
-      } catch {
-        // ignore
-      }
+  // 3. Test disponibilité biométrique
+  useEffect(() => {
+    if (Capacitor.isNativePlatform()) {
+      NativeBiometric.isAvailable()
+        .then((res) => setIsBiometricAvailable(res.isAvailable))
+        .catch(() => setIsBiometricAvailable(false))
     }
-  }, [userId])
+  }, [])
 
-  // Enregistrement de l'activité utilisateur
+  // 4. Mise à jour de l'activité (anti-éjection accidentelle)
   const updateActivity = useCallback(() => {
     const now = Date.now()
     lastActivityRef.current = now
     if (userId) {
       try {
         localStorage.setItem(LAST_ACTIVITY_KEY(userId), String(now))
-      } catch {
-        // ignore
-      }
+      } catch {}
     }
   }, [userId])
 
-  // Restauration locale du profil actif. Le snapshot évite qu'une lecture
-  // PowerSync momentanément vide verrouille l'application au rechargement.
+  // 5. Verrouillage / Déconnexion du profil actif
+  const clearProfile = useCallback(() => {
+    setProfile(null)
+    if (userId) {
+      try {
+        sessionStorage.removeItem(SESSION_PROFILE_ID_KEY(userId))
+        localStorage.removeItem(SESSION_PROFILE_ID_KEY(userId))
+        localStorage.removeItem(SESSION_PROFILE_DATA_KEY(userId))
+        localStorage.removeItem(LAST_ACTIVITY_KEY(userId))
+      } catch {}
+    }
+  }, [userId])
+
+  // 6. Restauration de session : vérifie le délai de 15 minutes sans fausse déconnexion
   useEffect(() => {
     if (!userId) return
 
     try {
-      const activeProfileId =
-        localStorage.getItem(SESSION_KEY(userId)) ?? sessionStorage.getItem(SESSION_KEY(userId))
-      const snapshot = localStorage.getItem(PROFILE_SNAPSHOT_KEY(userId))
-      const storedLastActivity = Number(localStorage.getItem(LAST_ACTIVITY_KEY(userId)) || '0')
-      const now = Date.now()
+      const storedId = localStorage.getItem(SESSION_PROFILE_ID_KEY(userId))
+      const storedRaw = localStorage.getItem(LAST_ACTIVITY_KEY(userId))
 
-      // Si inactif depuis plus de 15 minutes, forcer la re-vérification
-      if (activeProfileId && storedLastActivity && now - storedLastActivity > INACTIVITY_TIMEOUT_MS) {
-        clearProfile()
-        return
+      if (!storedId) return
+
+      // Si une activité est enregistrée, vérifier les 15 minutes
+      if (storedRaw) {
+        const storedTime = Number(storedRaw)
+        if (storedTime > 0 && Date.now() - storedTime > INACTIVITY_TIMEOUT_MS) {
+          clearProfile()
+          return
+        }
       }
 
-      if (activeProfileId) {
-        let restoredProfile = localProfiles.find((p) => p.id === activeProfileId)
-
-        if (!restoredProfile && snapshot) {
+      // Cherche dans localProfiles ou dans le snapshot de secours
+      let current = localProfiles.find((p) => p.id === storedId)
+      if (!current) {
+        const cached = localStorage.getItem(SESSION_PROFILE_DATA_KEY(userId))
+        if (cached) {
           try {
-            const savedProfile = JSON.parse(snapshot) as WorkProfile
-            if (savedProfile.id === activeProfileId && savedProfile.user_id === userId) {
-              restoredProfile = savedProfile
-            }
-          } catch {
-            localStorage.removeItem(PROFILE_SNAPSHOT_KEY(userId))
-          }
-        }
-
-        if (restoredProfile) {
-          setProfile(restoredProfile)
-          updateActivity()
+            const parsed = JSON.parse(cached)
+            if (parsed.id === storedId) current = parsed
+          } catch {}
         }
       }
-    } catch {
-      // ignore
-    } finally {
-      setProfileRestored(true)
-    }
+
+      if (current) {
+        setProfile(current)
+        updateActivity()
+      }
+    } catch {}
   }, [userId, localProfiles, clearProfile, updateActivity])
 
-  // Détection d'inactivité (Timer régulier + Événements DOM)
+  // 7. Écouteurs d'inactivité (Timer régulier + gestes utilisateur)
   useEffect(() => {
     if (!profile || !userId) return
 
-    // Vérification toutes les 15 secondes
-    const interval = setInterval(() => {
-      const storedActivity = Number(localStorage.getItem(LAST_ACTIVITY_KEY(userId)) || lastActivityRef.current)
-      if (Date.now() - storedActivity > INACTIVITY_TIMEOUT_MS) {
+    const checkInactivity = () => {
+      const stored = Number(localStorage.getItem(LAST_ACTIVITY_KEY(userId)) || lastActivityRef.current)
+      if (Date.now() - stored > INACTIVITY_TIMEOUT_MS) {
         clearProfile()
         router.replace('/profile-selection')
       }
-    }, 15000)
+    }
 
-    const events = ['mousedown', 'mousemove', 'keydown', 'scroll', 'touchstart']
-    const handleUserInteraction = () => updateActivity()
+    const interval = setInterval(checkInactivity, 15000)
+    const onAction = () => updateActivity()
+    const events = ['mousedown', 'keydown', 'touchstart']
 
-    events.forEach((evt) => window.addEventListener(evt, handleUserInteraction, { passive: true }))
+    events.forEach((evt) => window.addEventListener(evt, onAction, { passive: true }))
 
     return () => {
       clearInterval(interval)
-      events.forEach((evt) => window.removeEventListener(evt, handleUserInteraction))
+      events.forEach((evt) => window.removeEventListener(evt, onAction))
     }
   }, [profile, userId, clearProfile, updateActivity, router])
 
-  // Détection de reprise Capacitor (mise en veille / réveil du téléphone)
+  // 8. Gestion de l'inactivité au réveil de l'application sur Mobile
   useEffect(() => {
     if (!Capacitor.isNativePlatform() || !userId) return
 
     const listener = CapacitorApp.addListener('appStateChange', (state) => {
       if (state.isActive) {
-        const storedActivity = Number(localStorage.getItem(LAST_ACTIVITY_KEY(userId)) || '0')
-        if (storedActivity && Date.now() - storedActivity > INACTIVITY_TIMEOUT_MS) {
+        const stored = Number(localStorage.getItem(LAST_ACTIVITY_KEY(userId)) || '0')
+        if (stored > 0 && Date.now() - stored > INACTIVITY_TIMEOUT_MS) {
           clearProfile()
           router.replace('/profile-selection')
         } else {
@@ -248,9 +256,9 @@ export default function ProfileProvider({ children }: { children: React.ReactNod
     }
   }, [userId, clearProfile, updateActivity, router])
 
-  // Redirection automatique si aucun profil de travail n'est actif
+  // 9. Redirection vers la sélection de profil si aucun profil n'est déverrouillé
   useEffect(() => {
-    if (loading || !userId || !profileRestored) return
+    if (!authReady || !userId) return
 
     const isExempt =
       pathname === '/login' ||
@@ -260,9 +268,9 @@ export default function ProfileProvider({ children }: { children: React.ReactNod
     if (!profile && !isExempt) {
       router.replace('/profile-selection')
     }
-  }, [loading, pathname, profile, profileRestored, router, userId])
+  }, [authReady, pathname, profile, router, userId])
 
-  // 1. Sélection classique par PIN
+  // Actions
   const selectProfile = useCallback(
     async (candidate: WorkProfile, pin: string) => {
       if (!pin || pin.length < 4) {
@@ -271,25 +279,22 @@ export default function ProfileProvider({ children }: { children: React.ReactNod
 
       const inputHash = await hashPin(pin)
       if (inputHash !== candidate.pin_hash) {
-        throw new Error('Code PIN incorrect. Veuillez réessayer.')
+        throw new Error('Code PIN incorrect.')
       }
 
       setProfile(candidate)
       updateActivity()
+
       if (userId) {
         try {
-          localStorage.setItem(SESSION_KEY(userId), candidate.id)
-          localStorage.setItem(PROFILE_SNAPSHOT_KEY(userId), JSON.stringify(candidate))
-          sessionStorage.setItem(SESSION_KEY(userId), candidate.id)
-        } catch {
-          // ignore
-        }
+          localStorage.setItem(SESSION_PROFILE_ID_KEY(userId), candidate.id)
+          localStorage.setItem(SESSION_PROFILE_DATA_KEY(userId), JSON.stringify(candidate))
+        } catch {}
       }
     },
     [userId, updateActivity]
   )
 
-  // 2. Déverrouillage biométrique (Touch ID / Face ID / Empreinte)
   const unlockWithBiometrics = useCallback(
     async (candidate: WorkProfile) => {
       if (!Capacitor.isNativePlatform()) {
@@ -299,41 +304,36 @@ export default function ProfileProvider({ children }: { children: React.ReactNod
       await NativeBiometric.verifyIdentity({
         reason: `Déverrouiller le profil ${candidate.name}`,
         title: 'Authentification Biométrique',
-        subtitle: 'Confirmez votre identité pour continuer',
-        description: 'Placez votre doigt sur le capteur ou utilisez Face ID',
+        subtitle: 'Confirmez votre identité',
+        description: 'Empreinte digitale ou reconnaissance faciale',
       })
 
       setProfile(candidate)
       updateActivity()
+
       if (userId) {
         try {
-          localStorage.setItem(SESSION_KEY(userId), candidate.id)
-          localStorage.setItem(PROFILE_SNAPSHOT_KEY(userId), JSON.stringify(candidate))
-          sessionStorage.setItem(SESSION_KEY(userId), candidate.id)
-        } catch {
-          // ignore
-        }
+          localStorage.setItem(SESSION_PROFILE_ID_KEY(userId), candidate.id)
+          localStorage.setItem(SESSION_PROFILE_DATA_KEY(userId), JSON.stringify(candidate))
+        } catch {}
       }
     },
     [userId, updateActivity]
   )
 
-  // 3. Création de profil
   const createProfile = useCallback(
     async (name: string, type: WorkProfileType, pin: string) => {
       if (!userId) throw new Error('Session utilisateur introuvable.')
-      if (!name.trim()) throw new Error('Veuillez spécifier un nom de profil.')
-      if (!/^[0-9]{4,6}$/.test(pin)) {
-        throw new Error('Le code PIN doit comporter 4 à 6 chiffres.')
-      }
+      if (!name.trim()) throw new Error('Nom requis.')
+      if (!/^[0-9]{4,6}$/.test(pin)) throw new Error('Le PIN doit comporter 4 à 6 chiffres.')
 
       if (type === 'direction' && localProfiles.some((p) => p.profile_type === 'direction')) {
-        throw new Error('Un profil Direction existe déjà pour ce compte.')
+        throw new Error('Un profil Direction existe déjà.')
       }
 
-      const currentAgents = localProfiles.filter((p) => p.profile_type === 'agent')
-      if (type === 'agent' && currentAgents.length >= 2) {
-        throw new Error('La limite de 2 profils Agents est atteinte.')
+      const agents = localProfiles.filter((p) => p.profile_type === 'agent')
+      if (type === 'agent' && agents.length >= 2) {
+        throw new Error('Limite de 2 profils Agents atteinte.')
       }
 
       const id = crypto.randomUUID()
@@ -349,7 +349,6 @@ export default function ProfileProvider({ children }: { children: React.ReactNod
     [db, userId, localProfiles]
   )
 
-  // 4. Modification de PIN
   const updatePin = useCallback(
     async (profileId: string, oldPin: string, newPin: string) => {
       const target = localProfiles.find((p) => p.id === profileId)
@@ -357,15 +356,11 @@ export default function ProfileProvider({ children }: { children: React.ReactNod
 
       const oldHash = await hashPin(oldPin)
       if (oldHash !== target.pin_hash) {
-        throw new Error('L’ancien code PIN est incorrect.')
+        throw new Error('Ancien code PIN incorrect.')
       }
 
       if (!/^[0-9]{4,6}$/.test(newPin)) {
-        throw new Error('Le nouveau code PIN doit comporter entre 4 et 6 chiffres.')
-      }
-
-      if (oldPin === newPin) {
-        throw new Error('Le nouveau PIN doit être différent de l’ancien.')
+        throw new Error('Le nouveau PIN doit comporter 4 à 6 chiffres.')
       }
 
       const newHash = await hashPin(newPin)
@@ -385,7 +380,7 @@ export default function ProfileProvider({ children }: { children: React.ReactNod
     () => ({
       profile,
       profiles: localProfiles,
-      loading,
+      loading: !authReady || isQueryLoading,
       isDirection: profile?.profile_type === 'direction',
       canViewAmounts: profile?.profile_type === 'direction',
       isBiometricAvailable,
@@ -398,7 +393,8 @@ export default function ProfileProvider({ children }: { children: React.ReactNod
     [
       profile,
       localProfiles,
-      loading,
+      authReady,
+      isQueryLoading,
       isBiometricAvailable,
       selectProfile,
       unlockWithBiometrics,
