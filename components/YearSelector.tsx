@@ -43,7 +43,7 @@ export function YearSelector() {
         onClick={() => setIsOpen(!isOpen)}
         className={`flex items-center justify-between gap-3 px-4 py-2.5 bg-white border ${
           isOpen ? 'border-blue-500 shadow-md shadow-blue-500/5 ring-2 ring-blue-50' : 'border-slate-200 shadow-sm'
-        } rounded-xl hover:border-slate-300 hover:bg-slate-50 active:scale-[0.98] transition-all duration-200 cursor-pointer w-full sm:w-auto`}
+        } rounded-xl hover:border-slate-300 hover:bg-slate-50 active:scale-[0.98] transition-all duration-200 cursor-pointer w-full sm:w-auto dark:border-slate-600 dark:bg-[#303134] dark:hover:bg-[#3c4043]`}
       >
         <div className="flex items-center gap-2.5 min-w-0">
           <div className={`p-1.5 rounded-lg ${isOpen ? 'bg-blue-50 text-blue-600' : 'bg-slate-50 text-slate-500'} transition-colors`}>
@@ -51,7 +51,7 @@ export function YearSelector() {
           </div>
           <div className="text-left">
             <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider leading-none">{labelText}</p>
-            <p className="text-sm font-black text-slate-800 tracking-tight mt-0.5 truncate">{currentLabel}</p>
+            <p className="text-sm font-black text-slate-800 tracking-tight mt-0.5 truncate dark:text-[#e8eaed]">{currentLabel}</p>
           </div>
         </div>
         <ChevronDown 
@@ -62,7 +62,7 @@ export function YearSelector() {
 
       {/* Menu Déroulant (Dropdown Premium) */}
       {isOpen && (
-        <div className="absolute right-0 mt-2 w-56 bg-white/98 backdrop-blur-xl border border-slate-200 rounded-2xl shadow-[0_20px_50px_-16px_rgba(15,23,42,0.28)] z-[80] lg:z-[1300] overflow-hidden origin-top-right animate-fadeIn p-1.5 focus:outline-none">
+        <div className="absolute right-0 mt-2 w-56 bg-white/98 backdrop-blur-xl border border-slate-200 rounded-2xl shadow-[0_20px_50px_-16px_rgba(15,23,42,0.28)] z-[80] lg:z-[1300] overflow-hidden origin-top-right animate-fadeIn p-1.5 focus:outline-none dark:border-[#3c4043] dark:bg-[#303134] dark:shadow-[0_20px_50px_-16px_rgba(0,0,0,0.55)]">
           
           {/* Option : Toutes les années */}
           <button
@@ -73,14 +73,14 @@ export function YearSelector() {
             className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-left text-xs font-semibold transition-all ${
               selectedYear === 'all'
                 ? 'bg-blue-50 text-blue-600 font-bold'
-                : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
+                : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900 dark:text-[#bdc1c6] dark:hover:bg-[#3c4043] dark:hover:text-[#e8eaed]'
             }`}
           >
             <span>Toutes les années</span>
             {selectedYear === 'all' && <Check size={14} className="stroke-[3]" />}
           </button>
 
-          {availableYears.length > 0 && <div className="h-px bg-slate-100 my-1 mx-1" />}
+          {availableYears.length > 0 && <div className="h-px bg-slate-100 my-1 mx-1 dark:bg-[#3c4043]" />}
 
           {/* Options : Années dynamiques */}
           <div className="max-h-48 overflow-y-auto space-y-0.5 pr-0.5 scrollbar-thin">
@@ -96,7 +96,7 @@ export function YearSelector() {
                   className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-left text-xs font-semibold transition-all ${
                     isSelected
                       ? 'bg-blue-50 text-blue-600 font-bold'
-                      : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
+                      : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900 dark:text-[#bdc1c6] dark:hover:bg-[#3c4043] dark:hover:text-[#e8eaed]'
                   }`}
                 >
                   <span className="tabular-nums">{optionPrefix} {y}</span>

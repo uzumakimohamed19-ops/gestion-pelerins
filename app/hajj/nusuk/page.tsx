@@ -567,7 +567,7 @@ export default function PagePlatformeMdh() {
               La session de distribution des quotas est actuellement fermée
             </h2>
             <p className="mx-auto mt-3 max-w-xl text-sm font-semibold text-slate-600 leading-relaxed">
-              Pour des raisons d'équité et de synchronisation des quotas nationaux, la liste de vos pèlerins se chargera automatiquement dès l'ouverture de la session par le Ministère.
+              Pour des raisons d'équité et de synchronisation des quotas nationaux, la liste de vos pèlerins se chargera automatiquement dès l'ouverture de la session.
             </p>
             <div className="mt-6 inline-flex items-center gap-2 rounded-xl bg-slate-50 border border-slate-200 px-4 py-2 text-xs font-bold text-slate-600">
               <span className="h-2 w-2 rounded-full bg-amber-500 animate-ping" />

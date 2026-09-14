@@ -322,7 +322,7 @@ function Tile({ card, loading, onClick }: { card: TileCard; loading: boolean; on
       disabled={loading}
       className={`
         text-left rounded-2xl p-4
-        bg-white border ${card.borderColor}
+        dashboard-tile bg-white border ${card.borderColor}
         shadow-xs hover:border-slate-300
         transition-colors duration-150
         flex flex-col justify-between w-full min-h-[120px]

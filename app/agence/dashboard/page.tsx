@@ -64,7 +64,7 @@ function Tile({ card, loading, onClick }: { card: TileCard; loading: boolean; on
     <button
       onClick={onClick}
       disabled={loading}
-      className={`group text-left bg-white border ${card.borderColor} rounded-2xl p-5 hover:shadow-md hover:-translate-y-0.5 active:scale-[0.99] transition-all duration-300 flex flex-col justify-between w-full relative overflow-hidden shadow-sm h-full`}
+      className={`dashboard-tile group text-left bg-white border ${card.borderColor} rounded-2xl p-5 hover:shadow-md hover:-translate-y-0.5 active:scale-[0.99] transition-all duration-300 flex flex-col justify-between w-full relative overflow-hidden shadow-sm h-full`}
     >
       <div className="flex items-center justify-between w-full mb-4">
         <div className={`p-2.5 rounded-xl ${card.light} border border-white shadow-sm transition-transform group-hover:scale-105`}>
@@ -325,7 +325,7 @@ export default function DashboardAgence() {
       <div className="block md:hidden pb-10">
       
         {/* En-tête Immersif Bleu - pt-4 pour épouser le haut parfaitement */}
-        <div className="bg-gradient-to-b from-slate-800 to-slate-900 text-white px-5 pt-3 pb-8 rounded-b-[2.4rem] shadow-lg shadow-slate-900/10 relative overflow-hidden md:hidden">
+        <div className="bg-gradient-to-b from-slate-800 to-slate-900 text-white px-5 pt-7 pb-14 rounded-b-[2.5rem] shadow-lg shadow-slate-900/10 relative overflow-hidden md:hidden">
           
           <div className="absolute right-[-20px] bottom-[-20px] text-white/5 pointer-events-none transform -rotate-12 select-none">
             <Building2 size={220} />
@@ -349,35 +349,28 @@ export default function DashboardAgence() {
             </button>
           </div>
 
-          <div className="relative z-10 bg-white/10 backdrop-blur-xl border border-white/20 rounded-3xl p-6 shadow-2xl">
-            <div className="flex items-center justify-between mb-2">
+          <div className="flex justify-between items-end mt-7 relative z-10">
+            <div>
               <p className="text-xs font-bold text-white/60 uppercase tracking-widest">Chiffre d'Affaires Global</p>
-              <div className="px-2 py-0.5 rounded-md bg-emerald-500/20 border border-emerald-500/30 text-[10px] font-black text-emerald-400 uppercase">Live</div>
-            </div>
-            <div className="flex items-baseline gap-2">
+              <div className="flex items-baseline gap-2 mt-0.5">
               <h2 className="text-3xl font-black tracking-tighter tabular-nums">
                 {canViewAmounts && showAmount ? stats.caTotal.toLocaleString('fr-FR') : '••••••'}
               </h2>
               <span className="text-sm font-bold text-white/40">CFA</span>
+              </div>
             </div>
-            
-            <div className="mt-6 pt-5 border-t border-white/10 flex justify-between items-center">
-              <div>
-                <p className="text-[10px] font-bold text-white/40 uppercase mb-1">Profit Net</p>
-                <p className="text-sm font-black text-emerald-400">
-                      {canViewAmounts && showAmount ? `+${stats.beneficeTotal.toLocaleString('fr-FR')}` : '••••••'} <span className="text-[10px]">CFA</span>
-                </p>
-              </div>
-              <div className="text-right">
-                <p className="text-[10px] font-bold text-white/40 uppercase mb-1">Rentabilité</p>
-                <p className="text-sm font-black text-white">{stats.tauxRentabilite}%</p>
-              </div>
+            <div className="text-right">
+              <p className="text-[10px] font-bold text-white/40 uppercase mb-1">Profit net</p>
+              <p className="text-sm font-black text-emerald-400">
+                {canViewAmounts && showAmount ? `+${stats.beneficeTotal.toLocaleString('fr-FR')}` : '••••••'} <span className="text-[10px]">CFA</span>
+              </p>
+              <p className="text-[10px] font-bold text-white/40 uppercase mt-2">Rentabilité <span className="text-white">{stats.tauxRentabilite}%</span></p>
             </div>
           </div>
         </div>
 
-        <div className="px-5 -mt-8 relative z-20 pb-2">
-          <div className="mb-4 flex justify-end">
+        <div className="px-4 mt-6 space-y-6">
+          <div className="px-1">
             <YearSelector />
           </div>
           <div className="grid grid-cols-2 gap-3 rounded-[1.5rem] bg-slate-50/80 p-2 shadow-[0_8px_24px_rgba(15,23,42,0.04)]">

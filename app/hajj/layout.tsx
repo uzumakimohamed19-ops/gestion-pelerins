@@ -52,7 +52,7 @@ export default function HajjLayout({ children }: { children: React.ReactNode }) 
       {/* Sur mobile : padding-top s'adapte aux encoches. 
           Sur PC : Le CSS injecté ci-dessus force tout à 0px. */}
       <main 
-        className="flex-1 w-full flex flex-col relative hajj-main-content"
+        className="flex-1 w-full flex flex-col relative hajj-main-content tauri-safe-area"
         style={{ paddingTop: 'env(safe-area-inset-top)' }}
       >
         

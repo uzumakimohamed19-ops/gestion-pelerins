@@ -43,7 +43,7 @@ export default function AgenceLayout({ children }: { children: React.ReactNode }
           -> J'ai supprimé les px-4 md:px-12 d'ici car tes pages internes ont DÉJÀ leurs propres marges. 
           Cela évite l'effet de "double marge" qui écrasait ton application au milieu ! */}
       <main 
-        className="w-full flex-1 pb-24 md:pb-8"
+        className="w-full flex-1 pb-24 md:pb-8 tauri-safe-area"
         style={{ 
           paddingTop: 'env(safe-area-inset-top)' 
         }}

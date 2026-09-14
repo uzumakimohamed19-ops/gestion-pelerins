@@ -6,10 +6,139 @@
   --foreground: #1e293b;
 }
 
+html.dark {
+  --bg-app: #202124;
+  --foreground: #e8eaed;
+}
+
 html,
 body {
   min-height: 100%;
   background-color: var(--bg-app) !important;
+}
+
+/* Tauri desktop has no mobile safe area. */
+html[data-tauri] .tauri-safe-area {
+  padding-top: 0 !important;
+}
+
+/* Neutral surfaces only: semantic colors (success, warning, actions) stay intact. */
+html.dark body,
+html.dark .bg-gray-50,
+html.dark .bg-slate-50,
+html.dark .bg-slate-50\/40,
+html.dark .bg-slate-50\/50,
+html.dark .bg-slate-50\/80,
+html.dark .bg-slate-50\/90,
+html.dark .bg-slate-50\/30,
+html.dark .bg-gray-50\/50 {
+  background-color: #202124 !important;
+}
+
+html.dark .bg-white,
+html.dark .bg-white\/80,
+html.dark .bg-white\/95 {
+  background-color: #303134 !important;
+}
+
+html.dark .bg-gray-100,
+html.dark .bg-slate-100 {
+  background-color: #3c4043 !important;
+}
+
+html.dark .bg-white\/10 { background-color: rgba(255, 255, 255, 0.08) !important; }
+html.dark .bg-white\/15 { background-color: rgba(255, 255, 255, 0.12) !important; }
+html.dark .bg-white\/20 { background-color: rgba(255, 255, 255, 0.14) !important; }
+html.dark .bg-white\/60 { background-color: #3c4043 !important; }
+html.dark .bg-white\/80,
+html.dark .bg-white\/95,
+html.dark .bg-white\/50 { background-color: rgba(48, 49, 52, 0.95) !important; }
+
+html.dark .bg-gradient-to-br.from-slate-50.to-slate-100 {
+  background-image: linear-gradient(to bottom right, #202124, #303134) !important;
+}
+
+html.dark .bg-slate-50\/40 {
+  background-color: rgba(32, 33, 36, 0.82) !important;
+}
+
+html.dark .text-gray-900,
+html.dark .text-slate-900,
+html.dark .text-gray-800,
+html.dark .text-slate-800 {
+  color: #e8eaed !important;
+}
+
+html.dark .text-gray-700,
+html.dark .text-slate-700,
+html.dark .text-gray-600,
+html.dark .text-slate-600 {
+  color: #bdc1c6 !important;
+}
+
+html.dark .text-gray-500,
+html.dark .text-slate-500,
+html.dark .text-gray-400,
+html.dark .text-slate-400 {
+  color: #9aa0a6 !important;
+}
+
+html.dark .border-gray-100,
+html.dark .border-slate-100,
+html.dark .border-slate-200,
+html.dark .border-slate-200\/80,
+html.dark .border-slate-200\/90,
+html.dark .border-gray-200,
+html.dark .border-gray-200\/60 {
+  border-color: #3c4043 !important;
+}
+
+html.dark .border-slate-300,
+html.dark .border-gray-300 {
+  border-color: #5f6368 !important;
+}
+
+html.dark .border-white,
+html.dark .border-white\/20,
+html.dark .border-white\/25,
+html.dark .border-white\/30,
+html.dark .border-white\/80 {
+  border-color: rgba(255, 255, 255, 0.12) !important;
+}
+
+html.dark .dashboard-tile {
+  border-color: #3c4043 !important;
+}
+
+html.dark .shadow-sm,
+html.dark .shadow-md,
+html.dark .shadow-lg,
+html.dark .shadow-xl,
+html.dark .shadow-2xl {
+  --tw-shadow-color: rgba(0, 0, 0, 0.28) !important;
+}
+
+html.dark .ring-blue-50,
+html.dark .ring-indigo-100 {
+  --tw-ring-color: rgba(138, 180, 248, 0.18) !important;
+}
+
+html.dark input,
+html.dark select,
+html.dark textarea {
+  background-color: #303134 !important;
+  color: #e8eaed !important;
+  border-color: #5f6368 !important;
+}
+
+html.dark input::placeholder,
+html.dark textarea::placeholder {
+  color: #94a3b8 !important;
+}
+
+html.dark select option {
+  background-color: #303134 !important;
+  color: #e8eaed !important;
 }
 
 body {

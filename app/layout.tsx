@@ -35,7 +35,12 @@ export default function RootLayout({
   children: React.ReactNode
 }) {
   return (
-    <html lang="fr">
+    <html lang="fr" suppressHydrationWarning>
+      <head>
+        <script dangerouslySetInnerHTML={{
+          __html: "try { const w = window; if (localStorage.getItem('app-theme') === 'dark') document.documentElement.classList.add('dark'); if (w.location.protocol.startsWith('tauri') || w.location.hostname === 'tauri.localhost' || '__TAURI_INTERNALS__' in w || '__TAURI__' in w) document.documentElement.dataset.tauri = 'true' } catch (_) {}"
+        }} />
+      </head>
       <body className="min-h-screen m-0 p-0 antialiased text-slate-900 bg-transparent flex flex-col">
         <ClientPowerSyncWrapper>
           <AuthGuard>

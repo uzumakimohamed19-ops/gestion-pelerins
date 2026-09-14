@@ -492,8 +492,8 @@ export default function ContactClientPage() {
 
       {/* Fenêtre Modale d'envoi WhatsApp Marketing */}
       {whatsAppState.isOpen && (
-        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-black/60 backdrop-blur-xs animate-in fade-in">
-          <div className="bg-white rounded-t-3xl sm:rounded-2xl max-w-lg w-full shadow-2xl animate-in slide-in-from-bottom sm:zoom-in-95 duration-200 max-h-[90vh] flex flex-col">
+        <div className="fixed inset-0 z-[120] flex items-end sm:items-center justify-center p-0 sm:p-4 bg-black/60 backdrop-blur-xs animate-in fade-in">
+          <div className="bg-white rounded-t-3xl sm:rounded-2xl max-w-lg w-full shadow-2xl animate-in slide-in-from-bottom sm:zoom-in-95 duration-200 max-h-[90vh] mb-[calc(5rem+env(safe-area-inset-bottom))] sm:mb-0 flex flex-col">
             <div className="flex items-center justify-between p-4 border-b border-slate-100 shrink-0">
               <div className="flex items-center gap-2">
                 <MessageSquare size={20} className="text-emerald-600" />

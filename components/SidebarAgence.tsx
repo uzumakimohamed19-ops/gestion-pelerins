@@ -80,9 +80,9 @@ export default function NavbarAgence() {
     { name: 'Quitter', href: '/', icon: SquareArrowRight },
   ]
 
-  const remainingItems = useMemo(() => {
-    return menuItems.filter(item => pathname !== item.href)
-  }, [pathname, menuItems])
+  // Garder les quatre emplacements mobiles fixes évite un vide quand l'agent
+  // dispose de moins de liens directionnels ou se trouve déjà sur une page.
+  const remainingItems = useMemo(() => menuItems, [menuItems])
 
   const leftItems = useMemo(() => remainingItems.slice(0, 2), [remainingItems])
   const rightItems = useMemo(() => remainingItems.slice(2, 4), [remainingItems])

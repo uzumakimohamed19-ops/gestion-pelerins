@@ -29,18 +29,19 @@ import { useWorkProfile } from '@/lib/ProfileContext'
 const CONCAVE_R = 20
 
 export default function Navbar() {
-  const { hideNavbar } = (function safeUseUI() {
+  const { hideNavbar, theme } = (function safeUseUI() {
     try {
       // dynamic import inside component to avoid server-only execution errors
       // eslint-disable-next-line @typescript-eslint/no-var-requires
       const { useUI } = require('@/lib/UIContext')
       return useUI()
     } catch (e) {
-      return { hideNavbar: false }
+      return { hideNavbar: false, theme: 'light' as const }
     }
   })()
 
   const { isDirection, clearProfile } = useWorkProfile()
+  const isDark = theme === 'dark'
   if (hideNavbar) return null
   const pathname = usePathname()
   const router = useRouter()
@@ -156,7 +157,7 @@ export default function Navbar() {
       `}</style>
 
       {/* 💻 DESKTOP SIDEBAR — plate, soudée au fond de page (pas d'ombre "carte flottante") */}
-      <nav className="hidden lg:flex flex-col justify-between w-64 bg-gradient-to-b from-[#4A7DF0] via-[#6E97F2] to-[#DCE7FC] fixed top-0 bottom-0 left-0 z-50 p-6 print:hidden overflow-visible">
+      <nav className={`hidden lg:flex flex-col justify-between w-64 fixed top-0 bottom-0 left-0 z-50 p-6 print:hidden overflow-visible ${isDark ? 'bg-[#202124] border-r border-[#3c4043]' : 'bg-gradient-to-b from-[#4A7DF0] via-[#6E97F2] to-[#DCE7FC]'}`}>
         
         {/* Section Haut : Logo + Menu de liens empilés verticalement */}
         <div className="flex flex-col gap-8">
@@ -214,7 +215,7 @@ export default function Navbar() {
                   style={
                     isActive
                       ? {
-                          background: '#f8fafc',
+                          background: isDark ? '#303134' : '#f8fafc',
                           borderRadius: '24px 0 0 24px',
                           marginRight: '-24px',
                           paddingRight: '24px',
@@ -232,7 +233,7 @@ export default function Navbar() {
                         top: -CONCAVE_R,
                         width: CONCAVE_R,
                         height: CONCAVE_R,
-                        background: `radial-gradient(circle at bottom right, #f8fafc ${CONCAVE_R}px, transparent ${CONCAVE_R + 1}px)`,
+                        background: `radial-gradient(circle at bottom right, ${isDark ? '#303134' : '#f8fafc'} ${CONCAVE_R}px, transparent ${CONCAVE_R + 1}px)`,
                         pointerEvents: 'none',
                       }}
                     />
