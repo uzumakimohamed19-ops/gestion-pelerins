@@ -35,6 +35,16 @@ export const supabase = createClient(
 )
 
 let supabaseUserPromise: Promise<any> | null = null
+let supabaseSessionPromise: Promise<any> | null = null
+
+export function getSession() {
+  if (!supabaseSessionPromise) {
+    supabaseSessionPromise = supabase.auth.getSession().finally(() => {
+      supabaseSessionPromise = null
+    })
+  }
+  return supabaseSessionPromise
+}
 
 /**
  * Vérifie le token en ligne, mais conserve la session locale si le réseau est
@@ -44,7 +54,7 @@ export function getUser() {
   if (!supabaseUserPromise) {
     supabaseUserPromise = (async () => {
       try {
-        const { data: sessionData } = await supabase.auth.getSession()
+        const { data: sessionData } = await getSession()
         const localSession = sessionData.session
 
         // Sur Android, ne pas bloquer l'interface sur la validation réseau du token.
@@ -67,7 +77,7 @@ export function getUser() {
         return result
       } catch (error) {
         try {
-          const { data: sessionData } = await supabase.auth.getSession()
+          const { data: sessionData } = await getSession()
           if (sessionData.session?.user) {
             return { data: { user: sessionData.session.user }, error: null }
           }

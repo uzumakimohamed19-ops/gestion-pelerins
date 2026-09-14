@@ -4,6 +4,7 @@ import {
   type PowerSyncDatabase
 } from '@powersync/web';
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { getSession } from '@/lib/supabase';
 
 export class SupabaseConnector implements PowerSyncBackendConnector {
   private client: SupabaseClient;
@@ -14,7 +15,7 @@ export class SupabaseConnector implements PowerSyncBackendConnector {
 
   async fetchCredentials() {
     // 1. Récupération directe de la session
-    let { data: { session }, error } = await this.client.auth.getSession();
+    let { data: { session }, error } = await getSession();
 
     // 2. Si la session est encore en train de se charger depuis le localStorage
     if (!session || error) {

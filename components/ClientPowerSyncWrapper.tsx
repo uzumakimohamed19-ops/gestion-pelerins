@@ -5,7 +5,7 @@ import { App } from "@capacitor/app";
 import { PowerSyncContext } from "@powersync/react";
 import { powersync } from "@/lib/powersync/db";
 import { SupabaseConnector } from "@/lib/powersync/SupabaseConnector";
-import { supabase } from "@/lib/supabase";
+import { supabase, getSession } from "@/lib/supabase";
 import { Lock } from "lucide-react";
 
 export default function ClientPowerSyncWrapper({
@@ -30,7 +30,7 @@ export default function ClientPowerSyncWrapper({
 
       try {
         isConnectingRef.current = true;
-        const { data: { session } } = await supabase.auth.getSession();
+        const { data: { session } } = await getSession();
         
         if (!session) {
           console.log("🟡 PowerSync : En attente d'une session utilisateur Supabase...");

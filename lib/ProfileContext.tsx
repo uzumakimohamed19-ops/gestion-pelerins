@@ -3,7 +3,7 @@
 import { createContext, useContext, useEffect, useMemo, useState, useCallback, useRef } from 'react'
 import { usePathname, useRouter } from 'next/navigation'
 import { usePowerSync, useQuery } from '@powersync/react'
-import { supabase } from '@/lib/supabase'
+import { supabase, getSession } from '@/lib/supabase'
 import { Capacitor } from '@capacitor/core'
 import { App as CapacitorApp } from '@capacitor/app'
 import { NativeBiometric } from '@capgo/capacitor-native-biometric'
@@ -112,7 +112,7 @@ export default function ProfileProvider({ children }: { children: React.ReactNod
     let isMounted = true
 
     // Check immédiat
-    supabase.auth.getSession().then(({ data: { session } }) => {
+    getSession().then(({ data: { session } }) => {
       if (isMounted) {
         setUserId(session?.user?.id ?? null)
         setAuthInitialized(true)

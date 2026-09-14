@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { supabase } from '@/lib/supabase'
+import { supabase, getSession } from '@/lib/supabase'
 import { useRouter } from 'next/navigation'
 import { Lock, Mail, Loader2, AlertCircle, ShieldCheck, CheckSquare, Square } from 'lucide-react'
 
@@ -31,7 +31,7 @@ export default function LoginPage() {
 
     async function checkExistingSession() {
       try {
-        const { data: { session } } = await supabase.auth.getSession()
+        const { data: { session } } = await getSession()
         if (session?.user) {
           router.replace('/profile-selection')
         }

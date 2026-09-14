@@ -4,7 +4,7 @@ import React, { useEffect, useState } from "react";
 import { PowerSyncContext } from "@powersync/react";
 import { powersync } from "@/lib/powersync/db";
 import { SupabaseConnector } from "@/lib/powersync/SupabaseConnector";
-import { supabase } from "@/lib/supabase";
+import { supabase, getSession } from "@/lib/supabase";
 import { Lock } from "lucide-react";
 
 export default function PowerSyncProviderWrapper({
@@ -23,7 +23,7 @@ export default function PowerSyncProviderWrapper({
         await powersync.init();
         
         // Vérifier si une session est déjà là
-        const { data: { session } } = await supabase.auth.getSession();
+        const { data: { session } } = await getSession();
         if (session) {
           await powersync.connect(connector);
         }

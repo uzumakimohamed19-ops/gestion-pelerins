@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useMemo } from 'react'
 import { usePathname, useRouter } from 'next/navigation'
-import { supabase, getUser } from '@/lib/supabase'
+import { supabase, getSession, getUser } from '@/lib/supabase'
 import { Lock } from 'lucide-react'
 
 export default function AuthGuard({ children }: { children: React.ReactNode }) {
@@ -23,7 +23,7 @@ export default function AuthGuard({ children }: { children: React.ReactNode }) {
     const checkSession = async () => {
       try {
         const sessionResult = await Promise.race([
-          supabase.auth.getSession(),
+          getSession(),
           new Promise<null>((resolve) => setTimeout(() => resolve(null), 3000)),
         ])
 
