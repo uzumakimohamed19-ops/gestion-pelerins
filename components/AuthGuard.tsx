@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { usePathname, useRouter } from 'next/navigation'
-import { supabase } from '@/lib/supabase'
+import { supabase, getUser } from '@/lib/supabase'
 
 export default function AuthGuard({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
@@ -14,15 +14,26 @@ export default function AuthGuard({ children }: { children: React.ReactNode }) {
     let mounted = true
 
     const checkSession = async () => {
-      const { data } = await supabase.auth.getSession()
-      if (!mounted) return
+      try {
+        const result = await Promise.race([
+          getUser(),
+          new Promise<null>((resolve) => setTimeout(() => resolve(null), 5000)),
+        ])
+        if (!mounted) return
 
-      const hasSession = Boolean(data.session)
-      setAuthenticated(hasSession)
-      setReady(true)
+        const hasSession = result === null
+          ? !navigator.onLine
+          : Boolean(result.data?.user)
+        setAuthenticated(hasSession)
+        setReady(true)
 
-      if (!hasSession && pathname !== '/login') {
-        router.replace('/login')
+        if (!hasSession && pathname !== '/login' && navigator.onLine) {
+          router.replace('/login')
+        }
+      } catch {
+        if (!mounted) return
+        // Une panne réseau ne doit jamais laisser le garde en chargement infini.
+        setReady(true)
       }
     }
 
