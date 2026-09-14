@@ -5,6 +5,14 @@ import { supabase } from '@/lib/supabase'
 import { useRouter } from 'next/navigation'
 import { Lock, Mail, Loader2, AlertCircle, ShieldCheck, CheckSquare, Square } from 'lucide-react'
 
+// Fonction utilitaire pour éviter qu'une promesse Supabase ne freeze indéfiniment
+function withTimeout<T>(promise: Promise<T>, ms = 10000, errorMsg = 'Le serveur met trop de temps à répondre.'): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<never>((_, reject) => setTimeout(() => reject(new Error(errorMsg)), ms)),
+  ])
+}
+
 export default function LoginPage() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -13,40 +21,37 @@ export default function LoginPage() {
   const [error, setError] = useState('')
   const router = useRouter()
 
-  // 1. Charger les identifiants sauvegardés si présents + Check de session
+  // 1. Pré-remplissage et auto-redirection propre si session déjà active
   useEffect(() => {
-    // Pré-remplissage depuis le LocalStorage
     const savedEmail = localStorage.getItem('remembered_email')
     const savedPassword = localStorage.getItem('remembered_password')
 
     if (savedEmail) setEmail(savedEmail)
     if (savedPassword) setPassword(savedPassword)
 
-    // Vérification de la session active Supabase
-    async function checkSession() {
-      if (!navigator.onLine) return
+    async function checkExistingSession() {
       try {
         const { data: { session } } = await supabase.auth.getSession()
-        if (session) {
-          console.log("Session active détectée, redirection vers l'accueil...")
+        if (session?.user) {
           router.replace('/profile-selection')
         }
-      } catch (error) {
-        console.warn('Vérification de session impossible hors connexion.', error)
+      } catch (err) {
+        console.warn('[LoginPage] Impossible de vérifier la session:', err)
       }
     }
-    checkSession()
+
+    void checkExistingSession()
   }, [router])
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault()
+    if (loading) return
+
     setLoading(true)
     setError('')
-    
-    console.log("--- Début tentative de connexion ---")
 
     try {
-      // GESTION DU MEMORISATION DES IDENTIFIANTS
+      // Mémorisation des identifiants
       if (rememberMe) {
         localStorage.setItem('remembered_email', email)
         localStorage.setItem('remembered_password', password)
@@ -55,168 +60,157 @@ export default function LoginPage() {
         localStorage.removeItem('remembered_password')
       }
 
-      // ÉTAPE A : Authentification Supabase
-      if (!navigator.onLine) {
-        throw new Error('Connexion Internet requise pour se connecter.')
+      if (typeof navigator !== 'undefined' && !navigator.onLine) {
+        throw new Error('Connexion Internet requise pour vous connecter.')
       }
 
-      const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
-        email,
-        password,
-      })
+      // ÉTAPE A : Authentification avec Timeout anti-blocage (10s max)
+      const authResponse = await withTimeout(
+        supabase.auth.signInWithPassword({
+          email: email.trim(),
+          password,
+        }),
+        10000,
+        'Délai de connexion dépassé. Vérifiez votre accès internet.'
+      )
 
-      if (authError) {
-        console.error("Erreur Auth Supabase:", authError.message)
-        throw authError
+      if (authResponse.error) {
+        throw authResponse.error
       }
 
-      if (!authData.user) {
-        throw new Error('Utilisateur non trouvé après authentification.')
+      const user = authResponse.data?.user
+      if (!user) {
+        throw new Error('Utilisateur non identifié.')
       }
 
-      console.log("✅ Authentification réussie. User ID:", authData.user.id)
+      // ÉTAPE B : Vérification du profil dans 'profiles' avec Timeout (8s max)
+      const profilePromise = (async () => {
+        const { data, error } = await supabase
+          .from('profiles')
+          .select('role, agence_id')
+          .eq('id', user.id)
+          .single()
+        return { data, error }
+      })()
 
-      // ÉTAPE B : Vérification du profil dans ta table 'profiles'
-      const { data: profile, error: profileError } = await supabase
-        .from('profiles')
-        .select('role, agence_id')
-        .eq('id', authData.user.id)
-        .single()
+      const { data: profile, error: profileError } = await withTimeout(
+        profilePromise,
+        8000,
+        'Impossible de charger votre profil agence.'
+      )
 
-      if (profileError) {
-        console.error("❌ Erreur Profil (Table 'profiles') :", profileError.message)
+      if (profileError || !profile) {
         await supabase.auth.signOut()
-        throw new Error("Votre compte n'existe pas dans la base de données des profils ou n'est pas activé.")
+        throw new Error("Votre compte n'est lié à aucune agence active.")
       }
 
-      if (!profile) {
-        console.error("❌ Aucun profil retourné pour cet ID.")
-        await supabase.auth.signOut()
-        throw new Error("Profil introuvable.")
+      // ÉTAPE C : Redirection fluide Next.js sans crash de rechargement brutal
+      router.replace('/profile-selection')
+
+    } catch (err: unknown) {
+      console.error('[LoginPage] Échec connexion:', err)
+      const rawMessage = err instanceof Error ? err.message : 'Erreur inconnue'
+      
+      if (rawMessage.includes('Invalid login credentials')) {
+        setError('Email ou mot de passe incorrect.')
+      } else {
+        setError(rawMessage)
       }
-
-      console.log("✅ Profil trouvé (Role:", profile.role, "). Tentative de redirection...")
-
-      // ÉTAPE C : Redirection forcée
-      window.location.assign('/profile-selection')
-
-    } catch (err) {
-      console.error("--- Échec de la connexion ---")
-      const message = err instanceof Error ? err.message : 'Erreur inconnue';
-      setError(message === 'Invalid login credentials'
-        ? 'Email ou mot de passe incorrect'
-        : message)
     } finally {
       setLoading(false)
     }
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 flex items-center justify-center p-6 font-sans w-full relative">
-      
-      {/* 🧬 INJECTION CSS LOCALISÉE 
-          Annule l'espace (padding-left et margin-left) imposé par le layout parent, 
-          uniquement pour la page de connexion sur ordinateur (écrans md et lg). */}
-      <style dangerouslySetInnerHTML={{
-        __html: `
-          @media (min-width: 768px) {
-            main, body, .min-h-screen {
-              padding-left: 0px !important;
-              margin-left: 0px !important;
-            }
-          }
-          @media (min-width: 1024px) {
-            main, body, .min-h-screen {
-              padding-left: 0px !important;
-              margin-left: 0px !important;
-            }
-          }
-        `
-      }} />
-
-      <div className="max-w-md w-full bg-white rounded-[2.5rem] shadow-2xl p-10 border border-gray-100 relative z-10">
-        <div className="text-center mb-10">
-          <div className="inline-flex items-center justify-center w-16 h-16 bg-blue-600 rounded-2xl mb-4 shadow-lg shadow-blue-100">
+    <div className="login-page min-h-screen bg-[#F4F6F8] flex items-center justify-center p-6 font-sans w-full relative">
+      <div className="max-w-md w-full bg-white rounded-[2.5rem] shadow-xl p-8 sm:p-10 border border-slate-100 relative z-10">
+        <div className="text-center mb-8">
+          <div className="inline-flex items-center justify-center w-16 h-16 bg-blue-600 rounded-2xl mb-4 shadow-lg shadow-blue-600/20">
             <ShieldCheck className="text-white" size={32} />
           </div>
-          <h1 className="text-3xl font-black text-gray-900 uppercase tracking-tighter">Connexion</h1>
-          <p className="text-gray-400 font-bold text-xs uppercase tracking-widest mt-2 italic">Accès Plateforme TravelOS</p>
+          <h1 className="text-2xl sm:text-3xl font-black text-slate-900 tracking-tight">Connexion</h1>
+          <p className="text-slate-400 font-bold text-xs uppercase tracking-widest mt-1">
+            Espace Agence Sécurisé
+          </p>
         </div>
 
-        <form onSubmit={handleLogin} className="space-y-6">
-          <div className="space-y-2">
-            <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-4">Email Professionnel</label>
+        <form onSubmit={handleLogin} className="space-y-5">
+          <div className="space-y-1.5">
+            <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider ml-2">
+              Email Professionnel
+            </label>
             <div className="relative">
-              <Mail className="absolute left-5 top-1/2 -translate-y-1/2 text-gray-300" size={20} />
-              <input 
-                type="email" 
+              <Mail className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+              <input
+                type="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                className="w-full pl-14 pr-6 py-4 bg-gray-50 border-none rounded-2xl font-bold text-gray-700 focus:ring-4 focus:ring-blue-100 transition-all outline-none"
+                className="w-full pl-12 pr-4 py-3.5 bg-slate-50 border border-slate-200/80 rounded-2xl font-bold text-slate-800 text-sm focus:bg-white focus:border-blue-600 focus:ring-4 focus:ring-blue-100 transition-all outline-none"
                 placeholder="nom@agence.com"
                 required
               />
             </div>
           </div>
 
-          <div className="space-y-2">
-            <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-4">Mot de passe</label>
+          <div className="space-y-1.5">
+            <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider ml-2">
+              Mot de passe
+            </label>
             <div className="relative">
-              <Lock className="absolute left-5 top-1/2 -translate-y-1/2 text-gray-300" size={20} />
-              <input 
-                type="password" 
+              <Lock className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+              <input
+                type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                className="w-full pl-14 pr-6 py-4 bg-gray-50 border-none rounded-2xl font-bold text-gray-700 focus:ring-4 focus:ring-blue-100 transition-all outline-none"
+                className="w-full pl-12 pr-4 py-3.5 bg-slate-50 border border-slate-200/80 rounded-2xl font-bold text-slate-800 text-sm focus:bg-white focus:border-blue-600 focus:ring-4 focus:ring-blue-100 transition-all outline-none"
                 placeholder="••••••••"
                 required
               />
             </div>
           </div>
 
-          {/* Option Se Souvenir de Moi */}
-          <div 
+          <div
             onClick={() => setRememberMe(!rememberMe)}
-            className="flex items-center gap-3 cursor-pointer select-none px-2 py-1 hover:opacity-80 transition-opacity"
+            className="flex items-center gap-2.5 cursor-pointer select-none px-1 py-1"
           >
             {rememberMe ? (
-              <CheckSquare className="text-blue-600" size={20} />
+              <CheckSquare className="text-blue-600 shrink-0" size={18} />
             ) : (
-              <Square className="text-gray-300" size={20} />
+              <Square className="text-slate-300 shrink-0" size={18} />
             )}
-            <span className="text-xs font-bold text-gray-600 tracking-wide">
+            <span className="text-xs font-bold text-slate-600">
               Mémoriser mes identifiants
             </span>
           </div>
 
           {error && (
-            <div className="p-4 bg-red-50 rounded-2xl flex items-center gap-3 text-red-600 font-bold text-sm border border-red-100">
-              <AlertCircle size={18} />
+            <div className="p-4 bg-rose-50 rounded-2xl flex items-center gap-2.5 text-rose-600 font-bold text-xs border border-rose-200/60 animate-in fade-in">
+              <AlertCircle size={16} className="shrink-0" />
               <span className="flex-1">{error}</span>
             </div>
           )}
 
-          <button 
+          <button
             type="submit"
             disabled={loading}
-            className="w-full py-5 bg-gray-900 text-white rounded-2xl font-black uppercase tracking-widest hover:bg-blue-600 transition-all shadow-xl shadow-blue-100 flex items-center justify-center gap-3 disabled:opacity-50 active:scale-95"
+            className="w-full py-4 bg-blue-600 hover:bg-blue-700 text-white rounded-2xl font-black text-xs uppercase tracking-wider transition-all shadow-lg shadow-blue-600/25 flex items-center justify-center gap-2 disabled:opacity-50 active:scale-98"
           >
             {loading ? (
               <>
-                <Loader2 className="animate-spin" size={20} />
-                Vérification...
+                <Loader2 className="animate-spin" size={18} />
+                <span>Connexion en cours...</span>
               </>
             ) : (
-              "Se connecter"
+              <span>Se connecter</span>
             )}
           </button>
         </form>
 
-        <div className="mt-10 pt-6 border-t border-gray-50 flex justify-center items-center gap-2">
-            <div className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse" />
-            <p className="text-gray-400 text-[10px] font-bold uppercase tracking-widest">
-              Système de connexion sécurisé par Supabase Auth
-            </p>
+        <div className="mt-8 pt-5 border-t border-slate-100 flex justify-center items-center gap-2">
+          <div className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse" />
+          <p className="text-slate-400 text-[10px] font-bold uppercase tracking-wider">
+            Système sécurisé Supabase Auth & PowerSync
+          </p>
         </div>
       </div>
     </div>

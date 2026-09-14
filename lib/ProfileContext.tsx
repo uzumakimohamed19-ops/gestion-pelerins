@@ -3,7 +3,7 @@
 import { createContext, useContext, useEffect, useMemo, useState, useCallback, useRef } from 'react'
 import { usePathname, useRouter } from 'next/navigation'
 import { usePowerSync, useQuery } from '@powersync/react'
-import { getUser } from '@/lib/supabase'
+import { supabase } from '@/lib/supabase'
 import { Capacitor } from '@capacitor/core'
 import { App as CapacitorApp } from '@capacitor/app'
 import { NativeBiometric } from '@capgo/capacitor-native-biometric'
@@ -51,7 +51,7 @@ async function hashPin(pin: string): Promise<string> {
 export function useWorkProfile() {
   const context = useContext(ProfileContext)
   if (!context) {
-    throw new Error('useWorkProfile doit être utilisé à l’intérieur d’un ProfileProvider')
+    throw new Error('useWorkProfile doit être utilisé dans ProfileProvider')
   }
   return context
 }
@@ -85,7 +85,7 @@ export function ProfileRouteGuard({ children }: { children: React.ReactNode }) {
         <div className="p-6 bg-white rounded-3xl border border-slate-200 shadow-sm text-center max-w-sm">
           <p className="text-sm font-black text-slate-900 uppercase">Accès Réservé</p>
           <p className="text-xs text-slate-500 mt-1">
-            Section strictement réservée au profil Direction.
+            Section réservée au profil Direction.
           </p>
         </div>
       </div>
@@ -102,45 +102,83 @@ export default function ProfileProvider({ children }: { children: React.ReactNod
 
   const [userId, setUserId] = useState<string | null>(null)
   const [profile, setProfile] = useState<WorkProfile | null>(null)
-  const [authReady, setAuthReady] = useState(false)
+  const [authInitialized, setAuthInitialized] = useState(false)
   const [isBiometricAvailable, setIsBiometricAvailable] = useState(false)
 
   const lastActivityRef = useRef<number>(Date.now())
 
-  // 1. Récupération réactive des profils SQLite PowerSync
+  // 1. Écoute dynamique de la session Supabase (se met à jour dès le clic sur Connexion)
+  useEffect(() => {
+    let isMounted = true
+
+    // Check immédiat
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (isMounted) {
+        setUserId(session?.user?.id ?? null)
+        setAuthInitialized(true)
+      }
+    }).catch(() => {
+      if (isMounted) setAuthInitialized(true)
+    })
+
+    // Écouteur temps réel des connexions / déconnexions
+    const { data: authListener } = supabase.auth.onAuthStateChange((event, session) => {
+      if (!isMounted) return
+      const currentId = session?.user?.id ?? null
+      setUserId(currentId)
+      setAuthInitialized(true)
+
+      if (event === 'SIGNED_OUT' || !currentId) {
+        setProfile(null)
+      }
+    })
+
+    return () => {
+      isMounted = false
+      authListener.subscription.unsubscribe()
+    }
+  }, [])
+
+  // 2. Récupération réactive SQLite PowerSync dès que userId est disponible
   const { data: localProfiles = [], isLoading: isQueryLoading } = useQuery<WorkProfile>(
     'SELECT id, user_id, name, profile_type, pin_hash FROM account_profiles WHERE user_id = ? ORDER BY profile_type ASC, created_at ASC',
     [userId ?? '']
   )
 
-  // 2. Initialisation de l'utilisateur avec déblocage garanti (pas de blocage infini)
+  // 3. Fallback immédiat vers Supabase si SQLite local est vide (nouvel appareil)
   useEffect(() => {
-    let isMounted = true
-    const timer = setTimeout(() => {
-      if (isMounted) setAuthReady(true) // Débloque au bout de 2.5s même si le réseau est lent
-    }, 2500)
+    if (!userId || localProfiles.length > 0) return
 
-    getUser()
-      .then(({ data }) => {
-        if (isMounted && data.user?.id) {
-          setUserId(data.user.id)
-        }
-      })
-      .catch((err) => console.error('[ProfileProvider] Erreur auth:', err))
-      .finally(() => {
-        if (isMounted) {
-          clearTimeout(timer)
-          setAuthReady(true)
+    let isMounted = true
+    supabase
+      .from('account_profiles')
+      .select('id, user_id, name, profile_type, pin_hash, created_at, updated_at')
+      .eq('user_id', userId)
+      .then(async ({ data, error }) => {
+        if (!isMounted || error || !data || data.length === 0) return
+
+        for (const item of data) {
+          await db.execute(
+            `INSERT OR REPLACE INTO account_profiles (id, user_id, name, profile_type, pin_hash, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+            [
+              item.id,
+              item.user_id,
+              item.name,
+              item.profile_type,
+              item.pin_hash,
+              item.created_at || new Date().toISOString(),
+              item.updated_at || new Date().toISOString(),
+            ]
+          ).catch(() => {})
         }
       })
 
     return () => {
       isMounted = false
-      clearTimeout(timer)
     }
-  }, [])
+  }, [userId, localProfiles.length, db])
 
-  // 3. Test disponibilité biométrique
+  // 4. Test biométrie
   useEffect(() => {
     if (Capacitor.isNativePlatform()) {
       NativeBiometric.isAvailable()
@@ -149,7 +187,6 @@ export default function ProfileProvider({ children }: { children: React.ReactNod
     }
   }, [])
 
-  // 4. Mise à jour de l'activité (anti-éjection accidentelle)
   const updateActivity = useCallback(() => {
     const now = Date.now()
     lastActivityRef.current = now
@@ -160,12 +197,10 @@ export default function ProfileProvider({ children }: { children: React.ReactNod
     }
   }, [userId])
 
-  // 5. Verrouillage / Déconnexion du profil actif
   const clearProfile = useCallback(() => {
     setProfile(null)
     if (userId) {
       try {
-        sessionStorage.removeItem(SESSION_PROFILE_ID_KEY(userId))
         localStorage.removeItem(SESSION_PROFILE_ID_KEY(userId))
         localStorage.removeItem(SESSION_PROFILE_DATA_KEY(userId))
         localStorage.removeItem(LAST_ACTIVITY_KEY(userId))
@@ -173,7 +208,7 @@ export default function ProfileProvider({ children }: { children: React.ReactNod
     }
   }, [userId])
 
-  // 6. Restauration de session : vérifie le délai de 15 minutes sans fausse déconnexion
+  // 5. Restauration de session sans fausse déconnexion
   useEffect(() => {
     if (!userId) return
 
@@ -183,7 +218,6 @@ export default function ProfileProvider({ children }: { children: React.ReactNod
 
       if (!storedId) return
 
-      // Si une activité est enregistrée, vérifier les 15 minutes
       if (storedRaw) {
         const storedTime = Number(storedRaw)
         if (storedTime > 0 && Date.now() - storedTime > INACTIVITY_TIMEOUT_MS) {
@@ -192,7 +226,6 @@ export default function ProfileProvider({ children }: { children: React.ReactNod
         }
       }
 
-      // Cherche dans localProfiles ou dans le snapshot de secours
       let current = localProfiles.find((p) => p.id === storedId)
       if (!current) {
         const cached = localStorage.getItem(SESSION_PROFILE_DATA_KEY(userId))
@@ -211,22 +244,20 @@ export default function ProfileProvider({ children }: { children: React.ReactNod
     } catch {}
   }, [userId, localProfiles, clearProfile, updateActivity])
 
-  // 7. Écouteurs d'inactivité (Timer régulier + gestes utilisateur)
+  // Inactivité 15 min
   useEffect(() => {
     if (!profile || !userId) return
 
-    const checkInactivity = () => {
+    const interval = setInterval(() => {
       const stored = Number(localStorage.getItem(LAST_ACTIVITY_KEY(userId)) || lastActivityRef.current)
       if (Date.now() - stored > INACTIVITY_TIMEOUT_MS) {
         clearProfile()
         router.replace('/profile-selection')
       }
-    }
+    }, 15000)
 
-    const interval = setInterval(checkInactivity, 15000)
     const onAction = () => updateActivity()
     const events = ['mousedown', 'keydown', 'touchstart']
-
     events.forEach((evt) => window.addEventListener(evt, onAction, { passive: true }))
 
     return () => {
@@ -235,7 +266,7 @@ export default function ProfileProvider({ children }: { children: React.ReactNod
     }
   }, [profile, userId, clearProfile, updateActivity, router])
 
-  // 8. Gestion de l'inactivité au réveil de l'application sur Mobile
+  // Inactivité réveil Capacitor
   useEffect(() => {
     if (!Capacitor.isNativePlatform() || !userId) return
 
@@ -256,9 +287,9 @@ export default function ProfileProvider({ children }: { children: React.ReactNod
     }
   }, [userId, clearProfile, updateActivity, router])
 
-  // 9. Redirection vers la sélection de profil si aucun profil n'est déverrouillé
+  // Redirection automatique si aucun profil de travail actif
   useEffect(() => {
-    if (!authReady || !userId) return
+    if (!authInitialized || !userId) return
 
     const isExempt =
       pathname === '/login' ||
@@ -268,19 +299,14 @@ export default function ProfileProvider({ children }: { children: React.ReactNod
     if (!profile && !isExempt) {
       router.replace('/profile-selection')
     }
-  }, [authReady, pathname, profile, router, userId])
+  }, [authInitialized, pathname, profile, router, userId])
 
-  // Actions
   const selectProfile = useCallback(
     async (candidate: WorkProfile, pin: string) => {
-      if (!pin || pin.length < 4) {
-        throw new Error('Le code PIN doit comporter au moins 4 chiffres.')
-      }
+      if (!pin || pin.length < 4) throw new Error('Le code PIN doit comporter au moins 4 chiffres.')
 
       const inputHash = await hashPin(pin)
-      if (inputHash !== candidate.pin_hash) {
-        throw new Error('Code PIN incorrect.')
-      }
+      if (inputHash !== candidate.pin_hash) throw new Error('Code PIN incorrect.')
 
       setProfile(candidate)
       updateActivity()
@@ -297,9 +323,7 @@ export default function ProfileProvider({ children }: { children: React.ReactNod
 
   const unlockWithBiometrics = useCallback(
     async (candidate: WorkProfile) => {
-      if (!Capacitor.isNativePlatform()) {
-        throw new Error('La biométrie est disponible uniquement sur mobile.')
-      }
+      if (!Capacitor.isNativePlatform()) throw new Error('Biométrie disponible uniquement sur mobile.')
 
       await NativeBiometric.verifyIdentity({
         reason: `Déverrouiller le profil ${candidate.name}`,
@@ -355,13 +379,9 @@ export default function ProfileProvider({ children }: { children: React.ReactNod
       if (!target) throw new Error('Profil introuvable.')
 
       const oldHash = await hashPin(oldPin)
-      if (oldHash !== target.pin_hash) {
-        throw new Error('Ancien code PIN incorrect.')
-      }
+      if (oldHash !== target.pin_hash) throw new Error('Ancien code PIN incorrect.')
 
-      if (!/^[0-9]{4,6}$/.test(newPin)) {
-        throw new Error('Le nouveau PIN doit comporter 4 à 6 chiffres.')
-      }
+      if (!/^[0-9]{4,6}$/.test(newPin)) throw new Error('Le nouveau PIN doit comporter 4 à 6 chiffres.')
 
       const newHash = await hashPin(newPin)
       const now = new Date().toISOString()
@@ -380,7 +400,7 @@ export default function ProfileProvider({ children }: { children: React.ReactNod
     () => ({
       profile,
       profiles: localProfiles,
-      loading: !authReady || isQueryLoading,
+      loading: !authInitialized || (Boolean(userId) && isQueryLoading),
       isDirection: profile?.profile_type === 'direction',
       canViewAmounts: profile?.profile_type === 'direction',
       isBiometricAvailable,
@@ -393,7 +413,8 @@ export default function ProfileProvider({ children }: { children: React.ReactNod
     [
       profile,
       localProfiles,
-      authReady,
+      authInitialized,
+      userId,
       isQueryLoading,
       isBiometricAvailable,
       selectProfile,

@@ -17,6 +17,11 @@ body {
   background-color: var(--bg-app) !important;
 }
 
+/* The login route has no sidebar, so it must use the full viewport width. */
+main:has(.login-page) {
+  padding-left: 0 !important;
+}
+
 /* Tauri desktop has no mobile safe area. */
 html[data-tauri] .tauri-safe-area {
   padding-top: 0 !important;
