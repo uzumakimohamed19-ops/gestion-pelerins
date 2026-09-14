@@ -8,7 +8,6 @@ import { YearProvider } from '@/lib/YearContext'
 export default function AgenceLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
 
-  // La barre s'active toujours uniquement sur le dashboard
   const isDashboard = pathname === '/agence' || pathname === '/agence/dashboard'
 
   return (
@@ -33,7 +32,7 @@ export default function AgenceLayout({ children }: { children: React.ReactNode }
         className="fixed top-0 left-0 w-full z-[9999] pointer-events-none"
         style={{ 
           height: 'env(safe-area-inset-top)',
-          backgroundColor: isDashboard ? '#1e293b' : 'transparent' // #1e293b = slate-800
+          backgroundColor: isDashboard ? '#1e293b' : '#ffffff'
         }}
       />
 

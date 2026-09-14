@@ -8,7 +8,6 @@ import { YearProvider } from '@/lib/YearContext'
 export default function HajjLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
 
-  // On vérifie si on est STRICTEMENT sur le dashboard du hajj
   const isDashboard = pathname === '/hajj' || pathname === '/hajj/dashboard'
 
   return (
@@ -62,7 +61,7 @@ export default function HajjLayout({ children }: { children: React.ReactNode }) 
           className="shadow-none fixed top-0 left-0 w-full z-[9999] pointer-events-none transition-colors duration-200 lg:hidden"
           style={{ 
             height: 'env(safe-area-inset-top)',
-            backgroundColor: isDashboard ? '#2563eb' : 'transparent'
+            backgroundColor: isDashboard ? '#2563eb' : '#ffffff'
           }}
         />
 

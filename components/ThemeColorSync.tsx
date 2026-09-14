@@ -10,8 +10,9 @@ export default function ThemeColorSync() {
   const pathname = usePathname()
 
   useEffect(() => {
-    const isAgence = pathname?.startsWith('/agence')
-    const color = isAgence ? AGENCE_THEME : HAJJ_THEME
+    const isAgenceDashboard = pathname === '/agence' || pathname === '/agence/dashboard'
+    const isHajjDashboard = pathname === '/hajj' || pathname === '/hajj/dashboard'
+    const color = isAgenceDashboard ? AGENCE_THEME : isHajjDashboard ? HAJJ_THEME : '#ffffff'
 
     let themeMeta = document.querySelector('meta[name="theme-color"]') as HTMLMetaElement | null
     if (!themeMeta) {
@@ -27,10 +28,8 @@ export default function ThemeColorSync() {
       appleMeta.setAttribute('name', 'apple-mobile-web-app-status-bar-style')
       document.head.appendChild(appleMeta)
     }
-    appleMeta.setAttribute('content', isAgence ? 'black-translucent' : 'default')
+    appleMeta.setAttribute('content', isAgenceDashboard ? 'black-translucent' : 'default')
 
-    document.documentElement.style.setProperty('--app-theme-color', color)
-    document.documentElement.style.setProperty('color-scheme', isAgence ? 'dark' : 'light')
   }, [pathname])
 
   return null
