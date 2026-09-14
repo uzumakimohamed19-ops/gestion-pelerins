@@ -61,7 +61,10 @@ export default function ClientPowerSyncWrapper({
 
     const init = async () => {
       try {
-        await powersync.init();
+        await Promise.race([
+          powersync.init(),
+          new Promise<void>((resolve) => window.setTimeout(resolve, 8000)),
+        ]);
         if (isMounted) setReady(true);
         void connectToPowerSync();
       } catch (err) {

@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useMemo } from 'react'
 import { usePathname, useRouter } from 'next/navigation'
-import { supabase } from '@/lib/supabase'
+import { supabase, getUser } from '@/lib/supabase'
 import { Lock } from 'lucide-react'
 
 export default function AuthGuard({ children }: { children: React.ReactNode }) {
@@ -22,47 +22,41 @@ export default function AuthGuard({ children }: { children: React.ReactNode }) {
 
     const checkSession = async () => {
       try {
-        // 1. Lecture instantanée depuis le cache local Supabase (1 ms, zéro lag réseau)
-        const { data: { session } } = await supabase.auth.getSession()
+        const sessionResult = await Promise.race([
+          supabase.auth.getSession(),
+          new Promise<null>((resolve) => setTimeout(() => resolve(null), 3000)),
+        ])
 
         if (!mounted) return
 
-        if (session?.user) {
+        if (sessionResult?.data.session?.user) {
           setAuthenticated(true)
           setReady(true)
 
           // 2. Validation asynchrone en arrière-plan avec timeout strict de 3s
-          const timeoutPromise = new Promise<null>((resolve) =>
-            setTimeout(() => resolve(null), 3000)
-          )
-          
-          const userCheck = await Promise.race([
-            supabase.auth.getUser(),
-            timeoutPromise,
-          ])
+          const userCheck = await Promise.race([getUser(), new Promise<null>((resolve) => setTimeout(() => resolve(null), 3000))])
 
           // Si le token a été révoqué côté serveur
           if (userCheck && 'error' in userCheck && userCheck.error) {
-            await supabase.auth.signOut()
             if (mounted) {
-              setAuthenticated(false)
-              if (!isPublicRoute) router.replace('/login')
+              // Une erreur réseau ne doit pas invalider la session locale.
+              setAuthenticated(true)
             }
           }
         } else {
           // Aucun token valide trouvé
           setAuthenticated(false)
           setReady(true)
-          if (!isPublicRoute) {
+          if (!isPublicRoute && navigator.onLine) {
             router.replace('/login')
           }
         }
       } catch (err) {
         console.error('[AuthGuard] Erreur vérification session:', err)
         if (!mounted) return
-        setAuthenticated(false)
+        setAuthenticated(!navigator.onLine)
         setReady(true)
-        if (!isPublicRoute) {
+        if (!isPublicRoute && navigator.onLine) {
           router.replace('/login')
         }
       }
