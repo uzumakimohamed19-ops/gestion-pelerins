@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useMemo } from 'react'
 import { usePathname, useRouter } from 'next/navigation'
-import { supabase, getSession, getUser } from '@/lib/supabase'
+import { supabase, getUser } from '@/lib/supabase'
 import { Lock } from 'lucide-react'
 
 export default function AuthGuard({ children }: { children: React.ReactNode }) {
@@ -22,29 +22,26 @@ export default function AuthGuard({ children }: { children: React.ReactNode }) {
 
     const checkSession = async () => {
       try {
-        const sessionResult = await Promise.race([
-          getSession(),
-          new Promise<null>((resolve) => setTimeout(() => resolve(null), 3000)),
+        const timeout = Symbol('auth-check-timeout')
+        const userResult = await Promise.race([
+          getUser(),
+          new Promise<typeof timeout>((resolve) => setTimeout(() => resolve(timeout), 3000)),
         ])
 
         if (!mounted) return
 
-        if (sessionResult?.data.session?.user) {
+        // Timeout ou erreur réseau: ne pas éjecter l'utilisateur ni afficher login.
+        if (userResult === timeout || userResult.error) {
           setAuthenticated(true)
           setReady(true)
+          return
+        }
 
-          // 2. Validation asynchrone en arrière-plan avec timeout strict de 3s
-          const userCheck = await Promise.race([getUser(), new Promise<null>((resolve) => setTimeout(() => resolve(null), 3000))])
-
-          // Si le token a été révoqué côté serveur
-          if (userCheck && 'error' in userCheck && userCheck.error) {
-            if (mounted) {
-              // Une erreur réseau ne doit pas invalider la session locale.
-              setAuthenticated(true)
-            }
-          }
+        if (userResult.data?.user) {
+          setAuthenticated(true)
+          setReady(true)
         } else {
-          // Aucun token valide trouvé
+          // Absence de session confirmée: seule cette situation peut rediriger.
           setAuthenticated(false)
           setReady(true)
           if (!isPublicRoute && navigator.onLine) {
@@ -54,11 +51,10 @@ export default function AuthGuard({ children }: { children: React.ReactNode }) {
       } catch (err) {
         console.error('[AuthGuard] Erreur vérification session:', err)
         if (!mounted) return
-        setAuthenticated(!navigator.onLine)
+        // Échec de lecture/verrou réseau: conserver l'accès à l'application
+        // et laisser les données locales PowerSync fonctionner.
+        setAuthenticated(true)
         setReady(true)
-        if (!isPublicRoute && navigator.onLine) {
-          router.replace('/login')
-        }
       }
     }
 
