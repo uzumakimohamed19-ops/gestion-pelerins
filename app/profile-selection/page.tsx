@@ -77,13 +77,8 @@ export default function ProfileSelectionPage() {
           return
         }
 
-        if (typeof navigator !== 'undefined' && !navigator.onLine) {
-          if (isMounted) {
-            setModalCreateOpen(false)
-            setIsInitializing(false)
-          }
-          return
-        }
+        // Le verrouillage local doit rester actif même hors ligne ; on conserve la vérification
+        // locale et on laisse l'application se comporter comme en ligne sans provoquer de déconnexion.
 
         // Étape A : Vérification instantanée dans SQLite local
         const localRows = await db.getAll<{ id: string }>(

@@ -6,6 +6,7 @@ const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
 
 const SUPABASE_REQUEST_TIMEOUT_MS = 15000
 const AUTH_LOOKUP_TIMEOUT_MS = 4000
+const SESSION_LOOKUP_TIMEOUT_MS = 4000
 
 const fetchWithTimeout: typeof fetch = async (input, init = {}) => {
   const controller = new AbortController()
@@ -43,7 +44,18 @@ export function isOfflineMode() {
 
 export function getSession() {
   if (!supabaseSessionPromise) {
-    supabaseSessionPromise = supabase.auth.getSession().finally(() => {
+    supabaseSessionPromise = Promise.race([
+      supabase.auth.getSession(),
+      new Promise<never>((_, reject) => {
+        setTimeout(() => reject(new Error('SESSION_LOOKUP_TIMEOUT')), SESSION_LOOKUP_TIMEOUT_MS)
+      }),
+    ]).catch((error) => {
+      if (error instanceof Error && error.message === 'SESSION_LOOKUP_TIMEOUT') {
+        return { data: { session: null }, error: null }
+      }
+
+      return { data: { session: null }, error }
+    }).finally(() => {
       supabaseSessionPromise = null
     })
   }
@@ -58,7 +70,13 @@ export function getUser() {
   if (!supabaseUserPromise) {
     supabaseUserPromise = (async () => {
       try {
-        const { data: sessionData } = await getSession()
+        const { data: sessionData } = await Promise.race([
+          getSession(),
+          new Promise<never>((_, reject) => {
+            setTimeout(() => reject(new Error('SESSION_LOOKUP_TIMEOUT')), SESSION_LOOKUP_TIMEOUT_MS)
+          }),
+        ]).catch(() => ({ data: { session: null }, error: null }))
+
         const localSession = sessionData.session
 
         // Offline: on garde la session locale active, sans la considérer comme invalide.

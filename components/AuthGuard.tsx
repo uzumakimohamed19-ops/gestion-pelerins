@@ -30,36 +30,38 @@ export default function AuthGuard({ children }: { children: React.ReactNode }) {
 
         if (!mounted) return
 
-        // Timeout ou erreur réseau: ne pas éjecter l'utilisateur ni afficher login.
-        if (userResult === timeout || userResult.error) {
+        if (userResult === timeout) {
           setAuthenticated(true)
           setReady(true)
           return
         }
 
-        if (userResult.data?.user) {
+        if (userResult?.error && !isOfflineMode()) {
           setAuthenticated(true)
           setReady(true)
-        } else {
-          // En mode hors ligne, on conserve la session locale et on ne force pas la déconnexion.
-          if (isOfflineMode()) {
-            setAuthenticated(true)
-            setReady(true)
-            return
-          }
+          return
+        }
 
-          // Absence de session confirmée: seule cette situation peut rediriger.
-          setAuthenticated(false)
+        if (userResult?.data?.user) {
+          setAuthenticated(true)
           setReady(true)
-          if (!isPublicRoute && navigator.onLine) {
-            router.replace('/login')
-          }
+          return
+        }
+
+        if (isOfflineMode()) {
+          setAuthenticated(true)
+          setReady(true)
+          return
+        }
+
+        setAuthenticated(false)
+        setReady(true)
+        if (!isPublicRoute && navigator.onLine) {
+          router.replace('/login')
         }
       } catch (err) {
         console.error('[AuthGuard] Erreur vérification session:', err)
         if (!mounted) return
-        // Échec de lecture/verrou réseau: conserver l'accès à l'application
-        // et laisser les données locales PowerSync fonctionner.
         setAuthenticated(true)
         setReady(true)
       }

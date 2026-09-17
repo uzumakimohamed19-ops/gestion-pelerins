@@ -128,10 +128,6 @@ export default function ProfileProvider({ children }: { children: React.ReactNod
       setUserId(currentId)
       setAuthInitialized(true)
 
-      if (isOfflineMode()) {
-        return
-      }
-
       if (event === 'SIGNED_OUT' || (!currentId && event !== 'INITIAL_SESSION')) {
         setProfile(null)
       }
@@ -212,6 +208,29 @@ export default function ProfileProvider({ children }: { children: React.ReactNod
     }
   }, [userId])
 
+  const lockIfInactive = useCallback(() => {
+    if (!userId) return false
+
+    try {
+      const storedRaw = localStorage.getItem(LAST_ACTIVITY_KEY(userId))
+      if (!storedRaw) {
+        updateActivity()
+        return false
+      }
+
+      const storedTime = Number(storedRaw)
+      if (storedTime > 0 && Date.now() - storedTime > INACTIVITY_TIMEOUT_MS) {
+        clearProfile()
+        if (pathname !== '/profile-selection' && pathname !== '/login' && !pathname.startsWith('/auth')) {
+          router.replace('/profile-selection')
+        }
+        return true
+      }
+    } catch {}
+
+    return false
+  }, [clearProfile, pathname, router, updateActivity, userId])
+
   // 5. Restauration de session sans fausse déconnexion
   useEffect(() => {
     if (!userId) return
@@ -226,6 +245,9 @@ export default function ProfileProvider({ children }: { children: React.ReactNod
         const storedTime = Number(storedRaw)
         if (storedTime > 0 && Date.now() - storedTime > INACTIVITY_TIMEOUT_MS) {
           clearProfile()
+          if (pathname !== '/profile-selection' && pathname !== '/login' && !pathname.startsWith('/auth')) {
+            router.replace('/profile-selection')
+          }
           return
         }
       }
@@ -246,18 +268,14 @@ export default function ProfileProvider({ children }: { children: React.ReactNod
         updateActivity()
       }
     } catch {}
-  }, [userId, localProfiles, clearProfile, updateActivity])
+  }, [userId, localProfiles, clearProfile, updateActivity, pathname, router])
 
-  // Inactivité 15 min
+  // Inactivité 15 min - appliquée quel que soit le statut réseau
   useEffect(() => {
     if (!profile || !userId) return
 
     const interval = setInterval(() => {
-      const stored = Number(localStorage.getItem(LAST_ACTIVITY_KEY(userId)) || lastActivityRef.current)
-      if (Date.now() - stored > INACTIVITY_TIMEOUT_MS) {
-        clearProfile()
-        router.replace('/profile-selection')
-      }
+      lockIfInactive()
     }, 15000)
 
     const onAction = () => updateActivity()
@@ -268,7 +286,7 @@ export default function ProfileProvider({ children }: { children: React.ReactNod
       clearInterval(interval)
       events.forEach((evt) => window.removeEventListener(evt, onAction))
     }
-  }, [profile, userId, clearProfile, updateActivity, router])
+  }, [profile, userId, lockIfInactive, updateActivity])
 
   // Inactivité réveil Capacitor
   useEffect(() => {
@@ -276,11 +294,7 @@ export default function ProfileProvider({ children }: { children: React.ReactNod
 
     const listener = CapacitorApp.addListener('appStateChange', (state) => {
       if (state.isActive) {
-        const stored = Number(localStorage.getItem(LAST_ACTIVITY_KEY(userId)) || '0')
-        if (stored > 0 && Date.now() - stored > INACTIVITY_TIMEOUT_MS) {
-          clearProfile()
-          router.replace('/profile-selection')
-        } else {
+        if (!lockIfInactive()) {
           updateActivity()
         }
       }
@@ -289,7 +303,7 @@ export default function ProfileProvider({ children }: { children: React.ReactNod
     return () => {
       listener.then((sub) => sub.remove())
     }
-  }, [userId, clearProfile, updateActivity, router])
+  }, [userId, lockIfInactive, updateActivity])
 
   // Redirection automatique si aucun profil de travail actif
   useEffect(() => {
