@@ -37,6 +37,10 @@ export const supabase = createClient(
 let supabaseUserPromise: Promise<any> | null = null
 let supabaseSessionPromise: Promise<any> | null = null
 
+export function isOfflineMode() {
+  return typeof navigator !== 'undefined' && !navigator.onLine
+}
+
 export function getSession() {
   if (!supabaseSessionPromise) {
     supabaseSessionPromise = supabase.auth.getSession().finally(() => {
@@ -57,8 +61,8 @@ export function getUser() {
         const { data: sessionData } = await getSession()
         const localSession = sessionData.session
 
-        // Sur Android, ne pas bloquer l'interface sur la validation réseau du token.
-        if (!localSession || (typeof navigator !== 'undefined' && !navigator.onLine)) {
+        // Offline: on garde la session locale active, sans la considérer comme invalide.
+        if (!localSession || isOfflineMode()) {
           return { data: { user: localSession?.user ?? null }, error: null }
         }
 

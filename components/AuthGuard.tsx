@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useMemo } from 'react'
 import { usePathname, useRouter } from 'next/navigation'
-import { supabase, getUser } from '@/lib/supabase'
+import { supabase, getUser, isOfflineMode } from '@/lib/supabase'
 import { Lock } from 'lucide-react'
 
 export default function AuthGuard({ children }: { children: React.ReactNode }) {
@@ -41,6 +41,13 @@ export default function AuthGuard({ children }: { children: React.ReactNode }) {
           setAuthenticated(true)
           setReady(true)
         } else {
+          // En mode hors ligne, on conserve la session locale et on ne force pas la déconnexion.
+          if (isOfflineMode()) {
+            setAuthenticated(true)
+            setReady(true)
+            return
+          }
+
           // Absence de session confirmée: seule cette situation peut rediriger.
           setAuthenticated(false)
           setReady(true)
@@ -65,10 +72,10 @@ export default function AuthGuard({ children }: { children: React.ReactNode }) {
       if (!mounted) return
 
       const hasSession = Boolean(session?.user)
-      setAuthenticated(hasSession)
+      setAuthenticated(hasSession || isOfflineMode())
       setReady(true)
 
-      if (event === 'SIGNED_OUT' && !isPublicRoute) {
+      if (event === 'SIGNED_OUT' && !isPublicRoute && !isOfflineMode()) {
         router.replace('/login')
       }
     })

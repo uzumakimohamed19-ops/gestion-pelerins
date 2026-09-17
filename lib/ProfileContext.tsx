@@ -3,7 +3,7 @@
 import { createContext, useContext, useEffect, useMemo, useState, useCallback, useRef } from 'react'
 import { usePathname, useRouter } from 'next/navigation'
 import { usePowerSync, useQuery } from '@powersync/react'
-import { supabase, getSession } from '@/lib/supabase'
+import { supabase, getSession, isOfflineMode } from '@/lib/supabase'
 import { Capacitor } from '@capacitor/core'
 import { App as CapacitorApp } from '@capacitor/app'
 import { NativeBiometric } from '@capgo/capacitor-native-biometric'
@@ -128,7 +128,11 @@ export default function ProfileProvider({ children }: { children: React.ReactNod
       setUserId(currentId)
       setAuthInitialized(true)
 
-      if (event === 'SIGNED_OUT' || !currentId) {
+      if (isOfflineMode()) {
+        return
+      }
+
+      if (event === 'SIGNED_OUT' || (!currentId && event !== 'INITIAL_SESSION')) {
         setProfile(null)
       }
     })

@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState, useMemo } from 'react'
-import { supabase, getUser } from '@/lib/supabase'
+import { supabase } from '@/lib/supabase'
 import Link from 'next/link'
 import Image from 'next/image'
 import { usePathname, useRouter } from 'next/navigation'
@@ -21,43 +21,64 @@ import {
   LockKeyhole
 } from 'lucide-react'
 import { useWorkProfile } from '@/lib/ProfileContext'
+import { useQuery } from '@powersync/react'
 
 export default function NavbarAgence() {
   const pathname = usePathname()
   const router = useRouter()
-  const [nomAgence, setNomAgence] = useState<string>('Chargement...')
-  const [userName, setUserName] = useState<string>('')
-  const [role, setRole] = useState<string>('staff')
+  
+  // ⚡ Affichage immédiat 0 ms depuis le cache local (aucun flash "Chargement...")
+  const [nomAgence, setNomAgence] = useState<string>(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('cached_nom_agence') || 'Mon Agence'
+    }
+    return 'Mon Agence'
+  })
+  const [userName, setUserName] = useState<string>(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('cached_user_name') || ''
+    }
+    return ''
+  })
+  const [role, setRole] = useState<string>(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('cached_user_role') || 'staff'
+    }
+    return 'staff'
+  })
   const [isMenuOpen, setIsMenuOpen] = useState(false)
   const { isDirection, clearProfile } = useWorkProfile()
 
+  // ⚡ Lecture PowerSync SQLite locale : aucun appel réseau distant Supabase
+  const { data: profileData } = useQuery<{
+    role: string | null
+    full_name: string | null
+    nom_agence: string | null
+  }>(
+    `SELECT p.role, p.full_name, a.nom_agence
+     FROM profiles p
+     LEFT JOIN agences a ON p.agence_id = a.id
+     LIMIT 1`
+  )
+
+  // ⚡ Mise à jour automatique des états et du cache dès lecture de la base locale
   useEffect(() => {
-    async function getProfileAndAgence() {
-      try {
-        const { data: userData, error: userError } = await getUser()
-        if (userError) return
-
-        const user = userData?.user
-        if (!user) return
-
-        const { data: profile, error: profileError } = await supabase
-          .from('profiles')
-          .select(`role, full_name, agence_id, agences ( nom_agence )`)
-          .eq('id', user.id)
-          .single()
-
-        if (profile) {
-          setRole(profile.role || 'staff')
-          setUserName(profile.full_name || '')
-          const agencyName = (profile.agences as any)?.nom_agence
-          setNomAgence(agencyName || 'Mon Agence')
-        }
-      } catch (err) {
-        console.error(err)
+    const current = profileData?.[0]
+    if (current) {
+      if (current.nom_agence) {
+        setNomAgence(current.nom_agence)
+        localStorage.setItem('cached_nom_agence', current.nom_agence)
+      }
+      if (current.full_name) {
+        setUserName(current.full_name)
+        localStorage.setItem('cached_user_name', current.full_name)
+      }
+      if (current.role) {
+        setRole(current.role)
+        localStorage.setItem('cached_user_role', current.role)
       }
     }
-    getProfileAndAgence()
-  }, [])
+  }, [profileData])
 
   const handleLogout = async () => {
     await supabase.auth.signOut({ scope: 'local' })
@@ -80,10 +101,7 @@ export default function NavbarAgence() {
     { name: 'Quitter', href: '/', icon: SquareArrowRight },
   ]
 
-  // Garder les quatre emplacements mobiles fixes évite un vide quand l'agent
-  // dispose de moins de liens directionnels ou se trouve déjà sur une page.
   const remainingItems = useMemo(() => menuItems, [menuItems])
-
   const leftItems = useMemo(() => remainingItems.slice(0, 2), [remainingItems])
   const rightItems = useMemo(() => remainingItems.slice(2, 4), [remainingItems])
 
@@ -100,7 +118,7 @@ export default function NavbarAgence() {
         }
       `}</style>
 
-      {/* --- 💻 DESKTOP SIDEBAR (Transformée de Topbar à Sidebar) --- */}
+      {/* --- 💻 DESKTOP SIDEBAR --- */}
       <nav className="hidden md:flex flex-col justify-between w-64 bg-white/80 backdrop-blur-md border-r border-gray-100 fixed top-0 bottom-0 left-0 z-50 shadow-sm p-6 print:hidden">
         
         {/* Section Haut : Logo & Agence */}
@@ -158,7 +176,7 @@ export default function NavbarAgence() {
           <div className="flex items-center justify-between gap-3 rounded-2xl bg-gray-50 px-2 py-2">
             <div className="flex items-center gap-3 min-w-0">
               <div className="w-9 h-9 rounded-full bg-gray-100 border border-gray-200 shadow-sm overflow-hidden shrink-0">
-                <Image src={`https://ui-avatars.com/api/?name=${userName || nomAgence}&background=f0fdf4&color=047857`} alt="Avatar" width={36} height={36} />
+                <Image src={`https://ui-avatars.com/api/?name=${encodeURIComponent(userName || nomAgence || 'User')}&background=f0fdf4&color=047857`} alt="Avatar" width={36} height={36} />
               </div>
               <div className="flex flex-col min-w-0">
                 <span className="text-xs font-bold text-gray-700 truncate">{userName || 'Utilisateur'}</span>
@@ -172,7 +190,7 @@ export default function NavbarAgence() {
         </div>
       </nav>
 
-      {/* --- 📱 MOBILE NAV PREMIUM (Strictement intacte) --- */}
+      {/* --- 📱 MOBILE NAV PREMIUM --- */}
       <div className="md:hidden">
         
         {/* BARRE DE NAVIGATION FIXE EN BAS */}

@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState, useMemo } from 'react'
-import { supabase, getUser } from '@/lib/supabase'
+import { supabase } from '@/lib/supabase'
 import Link from 'next/link'
 import Image from 'next/image'
 import { usePathname, useRouter } from 'next/navigation'
@@ -24,6 +24,7 @@ import {
   LockKeyhole
 } from 'lucide-react'
 import { useWorkProfile } from '@/lib/ProfileContext'
+import { useQuery } from '@powersync/react'
 
 // Rayon (en px) de la courbe concave "inverted border radius"
 const CONCAVE_R = 20
@@ -45,40 +46,62 @@ export default function Navbar() {
   if (hideNavbar) return null
   const pathname = usePathname()
   const router = useRouter()
-  const [nomAgence, setNomAgence] = useState<string>('Chargement...')
-  const [userName, setUserName] = useState<string>('')
-  const [role, setRole] = useState<string>('staff')
+
+  // ⚡ Récupération immédiate depuis le cache local (0 ms de latence, pas de "Chargement...")
+  const [nomAgence, setNomAgence] = useState<string>(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('cached_nom_agence') || 'Mon Agence'
+    }
+    return 'Mon Agence'
+  })
+  const [userName, setUserName] = useState<string>(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('cached_user_name') || ''
+    }
+    return ''
+  })
+  const [role, setRole] = useState<string>(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('cached_user_role') || 'staff'
+    }
+    return 'staff'
+  })
   const [isMenuOpen, setIsMenuOpen] = useState(false)
 
   // États pour la gestion du scroll du bouton mobile
   const [isButtonVisible, setIsButtonVisible] = useState(true)
   const [lastScrollY, setLastScrollY] = useState(0)
 
+  // ⚡ Lecture PowerSync SQLite 100% Locale : Profil & Agence
+  const { data: profileData } = useQuery<{
+    role: string | null
+    full_name: string | null
+    nom_agence: string | null
+  }>(
+    `SELECT p.role, p.full_name, a.nom_agence
+     FROM profiles p
+     LEFT JOIN agences a ON p.agence_id = a.id
+     LIMIT 1`
+  )
+
+  // ⚡ Synchronisation instantanée dès que la base SQLite locale réagit
   useEffect(() => {
-    async function getProfileAndAgence() {
-      try {
-        const { data: userData } = await getUser()
-        const user = userData?.user
-        if (!user) return
-
-        const { data: profile } = await supabase
-          .from('profiles')
-          .select(`role, full_name, agence_id, agences ( nom_agence )`)
-          .eq('id', user.id)
-          .single()
-
-        if (profile) {
-          setRole(profile.role || 'staff')
-          setUserName(profile.full_name || '')
-          const agencyName = (profile.agences as any)?.nom_agence
-          setNomAgence(agencyName || 'Mon Agence')
-        }
-      } catch (err) {
-        console.error(err)
+    const current = profileData?.[0]
+    if (current) {
+      if (current.nom_agence) {
+        setNomAgence(current.nom_agence)
+        localStorage.setItem('cached_nom_agence', current.nom_agence)
+      }
+      if (current.full_name) {
+        setUserName(current.full_name)
+        localStorage.setItem('cached_user_name', current.full_name)
+      }
+      if (current.role) {
+        setRole(current.role)
+        localStorage.setItem('cached_user_role', current.role)
       }
     }
-    getProfileAndAgence()
-  }, [])
+  }, [profileData])
 
   // Effet pour masquer le menu mobile au défilement vers le bas
   useEffect(() => {
@@ -303,7 +326,7 @@ export default function Navbar() {
         </div>
       </nav>
 
-      {/* 📱 MOBILE NAV — inchangé */}
+      {/* 📱 MOBILE NAV */}
       <div className="lg:hidden">
         
         {/* BARRE DE NAVIGATION FIXE EN BAS AVEC EFFET DE FLOU */}

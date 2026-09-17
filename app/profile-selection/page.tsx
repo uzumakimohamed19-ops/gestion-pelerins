@@ -70,7 +70,18 @@ export default function ProfileSelectionPage() {
         const uid = authData.user?.id
 
         if (!uid) {
-          if (isMounted) setIsInitializing(false)
+          if (isMounted) {
+            setModalCreateOpen(false)
+            setIsInitializing(false)
+          }
+          return
+        }
+
+        if (typeof navigator !== 'undefined' && !navigator.onLine) {
+          if (isMounted) {
+            setModalCreateOpen(false)
+            setIsInitializing(false)
+          }
           return
         }
 
@@ -238,7 +249,7 @@ export default function ProfileSelectionPage() {
         localStorage.setItem(`last_pin_date_${selectedCandidate.id}`, today)
         localStorage.setItem('has_created_profile_marker', 'true')
 
-        router.push('/hajj/dashboard')
+        router.push('/')
       } catch (err: unknown) {
         setPin('')
         setError(err instanceof Error ? err.message : 'Code PIN incorrect.')
@@ -255,7 +266,7 @@ export default function ProfileSelectionPage() {
     startTransition(async () => {
       try {
         await unlockWithBiometrics(selectedCandidate)
-        router.push('/hajj/dashboard')
+        router.push('/')
       } catch (err: unknown) {
         setError(err instanceof Error ? err.message : 'Authentification annulée.')
       }
