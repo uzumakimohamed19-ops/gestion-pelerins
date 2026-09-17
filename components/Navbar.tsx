@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState, useMemo } from 'react'
-import { supabase } from '@/lib/supabase'
+import { supabase, getUser } from '@/lib/supabase'
 import Link from 'next/link'
 import Image from 'next/image'
 import { usePathname, useRouter } from 'next/navigation'
@@ -47,32 +47,48 @@ export default function Navbar() {
   const pathname = usePathname()
   const router = useRouter()
 
-  // ⚡ Récupération immédiate depuis le cache local (0 ms de latence, pas de "Chargement...")
-  const [nomAgence, setNomAgence] = useState<string>(() => {
-    if (typeof window !== 'undefined') {
-      return localStorage.getItem('cached_nom_agence') || 'Mon Agence'
-    }
-    return 'Mon Agence'
-  })
-  const [userName, setUserName] = useState<string>(() => {
-    if (typeof window !== 'undefined') {
-      return localStorage.getItem('cached_user_name') || ''
-    }
-    return ''
-  })
-  const [role, setRole] = useState<string>(() => {
-    if (typeof window !== 'undefined') {
-      return localStorage.getItem('cached_user_role') || 'staff'
-    }
-    return 'staff'
-  })
+  // 🔑 ID utilisateur connecté
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null)
+
+  const [nomAgence, setNomAgence] = useState<string>('Mon Agence')
+  const [userName, setUserName] = useState<string>('')
+  const [role, setRole] = useState<string>('staff')
   const [isMenuOpen, setIsMenuOpen] = useState(false)
 
   // États pour la gestion du scroll du bouton mobile
   const [isButtonVisible, setIsButtonVisible] = useState(true)
   const [lastScrollY, setLastScrollY] = useState(0)
 
-  // ⚡ Lecture PowerSync SQLite 100% Locale : Profil & Agence
+  // 1. Détection immédiate du compte connecté
+  useEffect(() => {
+    async function loadCurrentUser() {
+      try {
+        const { data } = await supabase.auth.getSession()
+        const uid = data.session?.user?.id
+        if (uid) {
+          setCurrentUserId(uid)
+          // Chargement du cache spécifique à cet utilisateur
+          const cachedAgence = localStorage.getItem(`cached_nom_agence_${uid}`)
+          const cachedName = localStorage.getItem(`cached_user_name_${uid}`)
+          const cachedRole = localStorage.getItem(`cached_user_role_${uid}`)
+          if (cachedAgence) setNomAgence(cachedAgence)
+          if (cachedName) setUserName(cachedName)
+          if (cachedRole) setRole(cachedRole)
+        } else {
+          // Fallback getUser
+          const { data: userData } = await getUser()
+          if (userData?.user?.id) {
+            setCurrentUserId(userData.user.id)
+          }
+        }
+      } catch (err) {
+        console.error('Erreur session utilisateur:', err)
+      }
+    }
+    loadCurrentUser()
+  }, [])
+
+  // 2. ⚡ Requête PowerSync SQLite STRICTEMENT filtrée par l'ID de l'utilisateur connecté
   const { data: profileData } = useQuery<{
     role: string | null
     full_name: string | null
@@ -81,27 +97,31 @@ export default function Navbar() {
     `SELECT p.role, p.full_name, a.nom_agence
      FROM profiles p
      LEFT JOIN agences a ON p.agence_id = a.id
-     LIMIT 1`
+     WHERE p.id = ?
+     LIMIT 1`,
+    [currentUserId ?? '']
   )
 
-  // ⚡ Synchronisation instantanée dès que la base SQLite locale réagit
+  // 3. Mise à jour automatique dès que les données du compte connecté sont prêtes
   useEffect(() => {
-    const current = profileData?.[0]
+    if (!currentUserId || !profileData || profileData.length === 0) return
+
+    const current = profileData[0]
     if (current) {
       if (current.nom_agence) {
         setNomAgence(current.nom_agence)
-        localStorage.setItem('cached_nom_agence', current.nom_agence)
+        localStorage.setItem(`cached_nom_agence_${currentUserId}`, current.nom_agence)
       }
       if (current.full_name) {
         setUserName(current.full_name)
-        localStorage.setItem('cached_user_name', current.full_name)
+        localStorage.setItem(`cached_user_name_${currentUserId}`, current.full_name)
       }
       if (current.role) {
         setRole(current.role)
-        localStorage.setItem('cached_user_role', current.role)
+        localStorage.setItem(`cached_user_role_${currentUserId}`, current.role)
       }
     }
-  }, [profileData])
+  }, [profileData, currentUserId])
 
   // Effet pour masquer le menu mobile au défilement vers le bas
   useEffect(() => {
@@ -126,6 +146,11 @@ export default function Navbar() {
   }, [lastScrollY, isMenuOpen])
 
   const handleLogout = async () => {
+    if (currentUserId) {
+      localStorage.removeItem(`cached_nom_agence_${currentUserId}`)
+      localStorage.removeItem(`cached_user_name_${currentUserId}`)
+      localStorage.removeItem(`cached_user_role_${currentUserId}`)
+    }
     await supabase.auth.signOut({ scope: 'local' })
     router.replace('/login')
     router.refresh()
@@ -162,7 +187,7 @@ export default function Navbar() {
       item.href !== '/hajj/liste-pelerins' && 
       pathname !== item.href
     ).slice(0, 2)
-  }, [pathname])
+  }, [pathname, navItems])
 
   if (pathname === '/login') return null
 

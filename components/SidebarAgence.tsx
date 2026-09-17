@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState, useMemo } from 'react'
-import { supabase } from '@/lib/supabase'
+import { supabase, getUser } from '@/lib/supabase'
 import Link from 'next/link'
 import Image from 'next/image'
 import { usePathname, useRouter } from 'next/navigation'
@@ -26,30 +26,44 @@ import { useQuery } from '@powersync/react'
 export default function NavbarAgence() {
   const pathname = usePathname()
   const router = useRouter()
-  
-  // ⚡ Affichage immédiat 0 ms depuis le cache local (aucun flash "Chargement...")
-  const [nomAgence, setNomAgence] = useState<string>(() => {
-    if (typeof window !== 'undefined') {
-      return localStorage.getItem('cached_nom_agence') || 'Mon Agence'
-    }
-    return 'Mon Agence'
-  })
-  const [userName, setUserName] = useState<string>(() => {
-    if (typeof window !== 'undefined') {
-      return localStorage.getItem('cached_user_name') || ''
-    }
-    return ''
-  })
-  const [role, setRole] = useState<string>(() => {
-    if (typeof window !== 'undefined') {
-      return localStorage.getItem('cached_user_role') || 'staff'
-    }
-    return 'staff'
-  })
-  const [isMenuOpen, setIsMenuOpen] = useState(false)
   const { isDirection, clearProfile } = useWorkProfile()
 
-  // ⚡ Lecture PowerSync SQLite locale : aucun appel réseau distant Supabase
+  // 🔑 ID utilisateur connecté
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null)
+
+  const [nomAgence, setNomAgence] = useState<string>('Mon Agence')
+  const [userName, setUserName] = useState<string>('')
+  const [role, setRole] = useState<string>('staff')
+  const [isMenuOpen, setIsMenuOpen] = useState(false)
+
+  // 1. Détection immédiate du compte connecté
+  useEffect(() => {
+    async function loadCurrentUser() {
+      try {
+        const { data } = await supabase.auth.getSession()
+        const uid = data.session?.user?.id
+        if (uid) {
+          setCurrentUserId(uid)
+          const cachedAgence = localStorage.getItem(`cached_nom_agence_${uid}`)
+          const cachedName = localStorage.getItem(`cached_user_name_${uid}`)
+          const cachedRole = localStorage.getItem(`cached_user_role_${uid}`)
+          if (cachedAgence) setNomAgence(cachedAgence)
+          if (cachedName) setUserName(cachedName)
+          if (cachedRole) setRole(cachedRole)
+        } else {
+          const { data: userData } = await getUser()
+          if (userData?.user?.id) {
+            setCurrentUserId(userData.user.id)
+          }
+        }
+      } catch (err) {
+        console.error('Erreur session utilisateur:', err)
+      }
+    }
+    loadCurrentUser()
+  }, [])
+
+  // 2. ⚡ Requête PowerSync SQLite STRICTEMENT filtrée par l'ID de l'utilisateur connecté
   const { data: profileData } = useQuery<{
     role: string | null
     full_name: string | null
@@ -58,29 +72,38 @@ export default function NavbarAgence() {
     `SELECT p.role, p.full_name, a.nom_agence
      FROM profiles p
      LEFT JOIN agences a ON p.agence_id = a.id
-     LIMIT 1`
+     WHERE p.id = ?
+     LIMIT 1`,
+    [currentUserId ?? '']
   )
 
-  // ⚡ Mise à jour automatique des états et du cache dès lecture de la base locale
+  // 3. Mise à jour automatique dès que les données du compte connecté sont prêtes
   useEffect(() => {
-    const current = profileData?.[0]
+    if (!currentUserId || !profileData || profileData.length === 0) return
+
+    const current = profileData[0]
     if (current) {
       if (current.nom_agence) {
         setNomAgence(current.nom_agence)
-        localStorage.setItem('cached_nom_agence', current.nom_agence)
+        localStorage.setItem(`cached_nom_agence_${currentUserId}`, current.nom_agence)
       }
       if (current.full_name) {
         setUserName(current.full_name)
-        localStorage.setItem('cached_user_name', current.full_name)
+        localStorage.setItem(`cached_user_name_${currentUserId}`, current.full_name)
       }
       if (current.role) {
         setRole(current.role)
-        localStorage.setItem('cached_user_role', current.role)
+        localStorage.setItem(`cached_user_role_${currentUserId}`, current.role)
       }
     }
-  }, [profileData])
+  }, [profileData, currentUserId])
 
   const handleLogout = async () => {
+    if (currentUserId) {
+      localStorage.removeItem(`cached_nom_agence_${currentUserId}`)
+      localStorage.removeItem(`cached_user_name_${currentUserId}`)
+      localStorage.removeItem(`cached_user_role_${currentUserId}`)
+    }
     await supabase.auth.signOut({ scope: 'local' })
     router.replace('/login')
     router.refresh()

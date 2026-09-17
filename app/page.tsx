@@ -4,6 +4,7 @@ import React, { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { BarChart3, Settings, Globe, ArrowUpRight, CheckCircle2 } from 'lucide-react'
 import { useQuery } from '@powersync/react'
+import { supabase, getUser } from '@/lib/supabase'
 
 // 🕋 Kaaba monumentale, nette et stylisée avec Kiswah & Bab Al-Kaaba dorés
 function KaabaIcon({ className = 'w-16 h-16' }: { className?: string }) {
@@ -56,30 +57,76 @@ export default function PageSelectionModule() {
   const [ripple, setRipple] = useState<RippleOrigin | null>(null)
   const [isExpanding, setIsExpanding] = useState(false)
 
-  // Cache instantané 0 ms
-  const [nomAgence, setNomAgence] = useState<string>(() => {
-    if (typeof window !== 'undefined') {
-      return localStorage.getItem('cached_nom_agence') || ''
-    }
-    return ''
-  })
+  // 🔑 ID utilisateur connecté
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null)
+  const [nomAgence, setNomAgence] = useState<string>('')
   const [salutation, setSalutation] = useState<string>('Bienvenue')
 
-  // Requête SQLite locale PowerSync
-  const { data: agences } = useQuery<{ nom_agence: string }>(
+  // 1. Détection immédiate du compte connecté et écoute des changements de compte
+  useEffect(() => {
+    async function initUser() {
+      try {
+        const { data } = await supabase.auth.getSession()
+        const uid = data.session?.user?.id
+        if (uid) {
+          setCurrentUserId(uid)
+          const cached = localStorage.getItem(`cached_nom_agence_${uid}`)
+          if (cached) setNomAgence(cached)
+        } else {
+          const { data: userData } = await getUser()
+          const fallbackUid = userData?.user?.id
+          if (fallbackUid) {
+            setCurrentUserId(fallbackUid)
+            const cached = localStorage.getItem(`cached_nom_agence_${fallbackUid}`)
+            if (cached) setNomAgence(cached)
+          }
+        }
+      } catch (err) {
+        console.error('Erreur lecture session:', err)
+      }
+    }
+
+    initUser()
+
+    // Écoute directe des changements de session (login / switch / logout)
+    const { data: authListener } = supabase.auth.onAuthStateChange((_event, session) => {
+      const uid = session?.user?.id ?? null
+      setCurrentUserId(uid)
+      if (uid) {
+        const cached = localStorage.getItem(`cached_nom_agence_${uid}`)
+        setNomAgence(cached || '')
+      } else {
+        setNomAgence('')
+      }
+    })
+
+    return () => {
+      authListener.subscription.unsubscribe()
+    }
+  }, [])
+
+  // 2. ⚡ Requête PowerSync SQLite STRICTEMENT ciblée sur l'utilisateur actif
+  const { data: agenceData } = useQuery<{ nom_agence: string }>(
     `SELECT a.nom_agence 
-     FROM agences a 
-     LIMIT 1`
+     FROM profiles p
+     JOIN agences a ON p.agence_id = a.id
+     WHERE p.id = ?
+     LIMIT 1`,
+    [currentUserId ?? '']
   )
 
+  // 3. Mise à jour immédiate dès que PowerSync lit l'agence du compte actif
   useEffect(() => {
-    const agenceLocale = agences?.[0]?.nom_agence
+    if (!currentUserId || !agenceData || agenceData.length === 0) return
+
+    const agenceLocale = agenceData[0]?.nom_agence
     if (agenceLocale) {
       setNomAgence(agenceLocale)
-      localStorage.setItem('cached_nom_agence', agenceLocale)
+      localStorage.setItem(`cached_nom_agence_${currentUserId}`, agenceLocale)
     }
-  }, [agences])
+  }, [agenceData, currentUserId])
 
+  // Salutation dynamique (Matin / Soir)
   useEffect(() => {
     const hour = new Date().getHours()
     if (hour >= 5 && hour < 18) {
