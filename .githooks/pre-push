@@ -1,0 +1,6 @@
+#!/bin/sh
+set -eu
+
+printf '%s\n' '[pre-push] Nettoyage des caches Next/Capacitor/Tauri...'
+node "$(git rev-parse --show-toplevel)/scripts/clean-caches.mjs"
+printf '%s\n' '[pre-push] Nettoyage terminé; envoi Git autorisé.'

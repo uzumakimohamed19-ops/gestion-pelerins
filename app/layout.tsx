@@ -5,6 +5,7 @@ import TopBarContainer from '@/components/TopBarContainer'
 import ThemeColorSync from '@/components/ThemeColorSync'
 import NativeBackButton from '@/components/NativeBackButton'
 import ClientPowerSyncWrapper from '@/components/ClientPowerSyncWrapper'
+import AppCacheGuard from '@/components/AppCacheGuard'
 import AuthGuard from '@/components/AuthGuard'
 import ProfileProvider, { ProfileRouteGuard } from '@/lib/ProfileContext'
 
@@ -42,6 +43,7 @@ export default function RootLayout({
         }} />
       </head>
       <body className="min-h-screen m-0 p-0 antialiased text-slate-900 bg-transparent flex flex-col">
+        <AppCacheGuard />
         <ClientPowerSyncWrapper>
           <AuthGuard>
             <ProfileProvider>

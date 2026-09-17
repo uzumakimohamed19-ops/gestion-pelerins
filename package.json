@@ -1,11 +1,14 @@
 {
   "name": "gestion-pelerins",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
     "build": "next build",
     "build:static": "cross-env STATIC_EXPORT=true next build",
+    "clean:caches": "node scripts/clean-caches.mjs",
+    "setup:hooks": "git config core.hooksPath .githooks",
+    "prepare:push": "npm run clean:caches",
     "start": "next start",
     "lint": "eslint",
     "mobile:sync": "npm run build:static && npx cap sync",

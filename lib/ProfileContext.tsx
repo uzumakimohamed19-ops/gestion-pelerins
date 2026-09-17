@@ -106,6 +106,7 @@ export default function ProfileProvider({ children }: { children: React.ReactNod
   const [isBiometricAvailable, setIsBiometricAvailable] = useState(false)
 
   const lastActivityRef = useRef<number>(Date.now())
+  const activeUserIdRef = useRef<string | null>(null)
 
   // 1. Écoute dynamique de la session Supabase (se met à jour dès le clic sur Connexion)
   useEffect(() => {
@@ -125,10 +126,12 @@ export default function ProfileProvider({ children }: { children: React.ReactNod
     const { data: authListener } = supabase.auth.onAuthStateChange((event, session) => {
       if (!isMounted) return
       const currentId = session?.user?.id ?? null
+      const userChanged = activeUserIdRef.current !== currentId
+      activeUserIdRef.current = currentId
       setUserId(currentId)
       setAuthInitialized(true)
 
-      if (event === 'SIGNED_OUT' || (!currentId && event !== 'INITIAL_SESSION')) {
+      if (userChanged || event === 'SIGNED_OUT' || (!currentId && event !== 'INITIAL_SESSION')) {
         setProfile(null)
       }
     })
@@ -208,6 +211,16 @@ export default function ProfileProvider({ children }: { children: React.ReactNod
     }
   }, [userId])
 
+  // Ne jamais conserver le profil d'un autre compte pendant une transition
+  // de session (déconnexion/reconnexion rapide).
+  useEffect(() => {
+    if (!userId) {
+      setProfile(null)
+      return
+    }
+    setProfile((current) => (current && current.user_id !== userId ? null : current))
+  }, [userId])
+
   const lockIfInactive = useCallback(() => {
     if (!userId) return false
 
@@ -252,13 +265,22 @@ export default function ProfileProvider({ children }: { children: React.ReactNod
         }
       }
 
-      let current = localProfiles.find((p) => p.id === storedId)
-      if (!current) {
+      // Le cache ne sert qu'en secours hors ligne et doit être lié au compte.
+      let current = localProfiles.find((p) => p.id === storedId && p.user_id === userId)
+      if (!current && isOfflineMode()) {
         const cached = localStorage.getItem(SESSION_PROFILE_DATA_KEY(userId))
         if (cached) {
           try {
-            const parsed = JSON.parse(cached)
-            if (parsed.id === storedId) current = parsed
+            const parsed = JSON.parse(cached) as Partial<WorkProfile>
+            if (
+              parsed.id === storedId &&
+              parsed.user_id === userId &&
+              typeof parsed.name === 'string' &&
+              (parsed.profile_type === 'direction' || parsed.profile_type === 'agent') &&
+              typeof parsed.pin_hash === 'string'
+            ) {
+              current = parsed as WorkProfile
+            }
           } catch {}
         }
       }
@@ -321,7 +343,11 @@ export default function ProfileProvider({ children }: { children: React.ReactNod
 
   const selectProfile = useCallback(
     async (candidate: WorkProfile, pin: string) => {
+      if (!userId || candidate.user_id !== userId) {
+        throw new Error('Profil indisponible pour cette session.')
+      }
       if (!pin || pin.length < 4) throw new Error('Le code PIN doit comporter au moins 4 chiffres.')
+      if (!/^[0-9]{4,6}$/.test(pin)) throw new Error('Le code PIN doit comporter 4 à 6 chiffres.')
 
       const inputHash = await hashPin(pin)
       if (inputHash !== candidate.pin_hash) throw new Error('Code PIN incorrect.')
@@ -341,6 +367,9 @@ export default function ProfileProvider({ children }: { children: React.ReactNod
 
   const unlockWithBiometrics = useCallback(
     async (candidate: WorkProfile) => {
+      if (!userId || candidate.user_id !== userId) {
+        throw new Error('Profil indisponible pour cette session.')
+      }
       if (!Capacitor.isNativePlatform()) throw new Error('Biométrie disponible uniquement sur mobile.')
 
       await NativeBiometric.verifyIdentity({

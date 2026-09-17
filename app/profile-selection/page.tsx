@@ -25,6 +25,7 @@ export default function ProfileSelectionPage() {
 
   const {
     profiles,
+    loading: profilesLoading,
     isBiometricAvailable,
     selectProfile,
     unlockWithBiometrics,
@@ -66,6 +67,10 @@ export default function ProfileSelectionPage() {
 
     async function resolveProfiles() {
       try {
+        // Le contexte est la source de vérité : ne pas interpréter une requête
+        // Supabase temporairement lente comme « aucun profil ».
+        if (profilesLoading) return
+
         const { data: authData } = await getUser()
         const uid = authData.user?.id
 
@@ -73,6 +78,7 @@ export default function ProfileSelectionPage() {
           if (isMounted) {
             setModalCreateOpen(false)
             setIsInitializing(false)
+            router.replace('/login')
           }
           return
         }
@@ -150,7 +156,7 @@ export default function ProfileSelectionPage() {
     return () => {
       isMounted = false
     }
-  }, [db])
+  }, [db, profilesLoading, router])
 
   // Synchronisation avec les mises à jour réactives de PowerSync
   useEffect(() => {
