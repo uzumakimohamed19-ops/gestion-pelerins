@@ -37,11 +37,11 @@ export function YearSelector() {
   const currentLabel = selectedYear === 'all' ? 'Toutes les années' : `${optionPrefix} ${selectedYear}`
 
   return (
-    <div className="relative z-[70] lg:z-[1200] inline-block text-left select-none" ref={dropdownRef}>
+    <div className="relative z-[70] lg:z-[1200] w-full sm:w-auto text-left select-none" ref={dropdownRef}>
       {/* Bouton Principal de l'UI */}
       <button
         onClick={() => setIsOpen(!isOpen)}
-        className={`flex items-center justify-between gap-3 px-4 py-2.5 bg-white border ${
+        className={`flex items-center justify-between gap-2 sm:gap-3 px-3 sm:px-4 py-2.5 bg-white border ${
           isOpen ? 'border-blue-500 shadow-md shadow-blue-500/5 ring-2 ring-blue-50' : 'border-slate-200 shadow-sm'
         } rounded-xl hover:border-slate-300 hover:bg-slate-50 active:scale-[0.98] transition-all duration-200 cursor-pointer w-full sm:w-auto dark:border-slate-600 dark:bg-[#303134] dark:hover:bg-[#3c4043]`}
       >
@@ -62,7 +62,7 @@ export function YearSelector() {
 
       {/* Menu Déroulant (Dropdown Premium) */}
       {isOpen && (
-        <div className="absolute right-0 mt-2 w-56 bg-white/98 backdrop-blur-xl border border-slate-200 rounded-2xl shadow-[0_20px_50px_-16px_rgba(15,23,42,0.28)] z-[80] lg:z-[1300] overflow-hidden origin-top-right animate-fadeIn p-1.5 focus:outline-none dark:border-[#3c4043] dark:bg-[#303134] dark:shadow-[0_20px_50px_-16px_rgba(0,0,0,0.55)]">
+        <div className="absolute left-0 right-0 sm:left-auto sm:right-0 mt-2 w-[min(16rem,calc(100vw-1rem))] sm:w-56 bg-white/98 backdrop-blur-xl border border-slate-200 rounded-2xl shadow-[0_20px_50px_-16px_rgba(15,23,42,0.28)] z-[80] lg:z-[1300] overflow-hidden origin-top-right animate-fadeIn p-1.5 focus:outline-none dark:border-[#3c4043] dark:bg-[#303134] dark:shadow-[0_20px_50px_-16px_rgba(0,0,0,0.55)]">
           
           {/* Option : Toutes les années */}
           <button

@@ -1,5 +1,6 @@
 'use client'
 import { useEffect, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { Download, X, Smartphone } from 'lucide-react'
 
 interface BeforeInstallPromptEvent extends Event {
@@ -8,6 +9,7 @@ interface BeforeInstallPromptEvent extends Event {
 }
 
 export default function PwaInstaller() {
+  const { t } = useTranslation()
   const [deferredPrompt, setDeferredPrompt] = useState<BeforeInstallPromptEvent | null>(null)
   const [showPopUp, setShowPopUp] = useState(false)
 
@@ -66,13 +68,13 @@ export default function PwaInstaller() {
               <Smartphone size={24} />
             </div>
             <div className="flex-1 min-w-0 pr-4">
-              <h3 className="text-sm font-bold tracking-tight">Installer l'application</h3>
-              <p className="text-xs text-slate-400 mt-1">Ajoutez TravelOS sur votre écran d'accueil pour y accéder en un clic.</p>
+              <h3 className="text-sm font-bold tracking-tight">{t('pwa.title')}</h3>
+              <p className="text-xs text-slate-400 mt-1">{t('pwa.description')}</p>
               <div className="flex gap-2 mt-3">
                 <button onClick={handleInstallClick} className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold rounded-lg transition-all flex items-center gap-1.5">
-                  <Download size={14} /> Installer
+                  <Download size={14} /> {t('common.install')}
                 </button>
-                <button onClick={() => setShowPopUp(false)} className="px-3 py-2 bg-slate-800 text-slate-300 text-xs font-medium rounded-lg">Plus tard</button>
+                <button onClick={() => setShowPopUp(false)} className="px-3 py-2 bg-slate-800 text-slate-300 text-xs font-medium rounded-lg">{t('common.later')}</button>
               </div>
             </div>
             <button onClick={() => setShowPopUp(false)} className="absolute top-3 right-3 p-1 text-slate-500 hover:text-slate-300"><X size={14} /></button>
@@ -88,7 +90,7 @@ export default function PwaInstaller() {
             className="flex items-center gap-2 bg-slate-950 hover:bg-slate-900 text-white text-xs font-bold px-4 py-3 rounded-xl shadow-xl border border-slate-800 transition-all active:scale-95"
           >
             <Download size={14} className="text-indigo-400" />
-            Installer l'application
+            {t('pwa.title')}
           </button>
         </div>
       )}

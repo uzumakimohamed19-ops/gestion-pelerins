@@ -45,6 +45,22 @@ export default function ProfileSelectionPage() {
   const [pin, setPin] = useState('')
   const [showKeypadOnDesktop, setShowKeypadOnDesktop] = useState(false)
   const desktopInputRef = useRef<HTMLInputElement>(null)
+  const pinInputProps = {
+    autoComplete: 'one-time-code',
+    autoCorrect: 'off',
+    autoCapitalize: 'off',
+    spellCheck: false,
+    'data-1p-ignore': 'true',
+    'data-lpignore': 'true',
+    'data-bwignore': 'true',
+    'data-form-type': 'other',
+    'data-bitwarden-watching': 'false',
+    'data-ccpignore': 'true',
+    style: {
+      WebkitTextSecurity: 'disc',
+      textSecurity: 'disc',
+    } as React.CSSProperties,
+  } as const
 
   // Champs création
   const [name, setName] = useState('')
@@ -67,8 +83,6 @@ export default function ProfileSelectionPage() {
 
     async function resolveProfiles() {
       try {
-        // Le contexte est la source de vérité : ne pas interpréter une requête
-        // Supabase temporairement lente comme « aucun profil ».
         if (profilesLoading) return
 
         const { data: authData } = await getUser()
@@ -82,9 +96,6 @@ export default function ProfileSelectionPage() {
           }
           return
         }
-
-        // Le verrouillage local doit rester actif même hors ligne ; on conserve la vérification
-        // locale et on laisse l'application se comporter comme en ligne sans provoquer de déconnexion.
 
         // Étape A : Vérification instantanée dans SQLite local
         const localRows = await db.getAll<{ id: string }>(
@@ -105,7 +116,6 @@ export default function ProfileSelectionPage() {
         }
 
         // Étape B : Nouvel appareil ! SQLite est vide parce que PowerSync n'a pas encore fini de répliquer.
-        // On interroge Supabase directement en HTTPS pour voir si le profil existe sur un autre appareil.
         const { data: remoteProfiles } = await supabase
           .from('account_profiles')
           .select('id, name, profile_type, pin_hash, created_at, updated_at')
@@ -116,7 +126,6 @@ export default function ProfileSelectionPage() {
             localStorage.setItem('has_created_profile_marker', 'true')
           } catch {}
 
-          // Injection immédiate dans SQLite pour court-circuiter l'attente de 10s de PowerSync
           for (const item of remoteProfiles) {
             await db.execute(
               `INSERT OR REPLACE INTO account_profiles (id, user_id, name, profile_type, pin_hash, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
@@ -140,7 +149,7 @@ export default function ProfileSelectionPage() {
           return
         }
 
-        // Étape C : Zéro profil ni en local, ni sur le serveur Supabase -> Seule situation où on ouvre la création
+        // Étape C : Zéro profil ni en local, ni sur le serveur Supabase
         if (isMounted) {
           setModalCreateOpen(true)
           setIsInitializing(false)
@@ -215,7 +224,7 @@ export default function ProfileSelectionPage() {
     if (isInitializing || modalCreateOpen || modalPinOpen) return
 
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.target instanceof HTMLInputElement && e.target.type !== 'password') return
+      if (e.target instanceof HTMLInputElement && e.target !== desktopInputRef.current) return
 
       if (e.key >= '0' && e.key <= '9') {
         e.preventDefault()
@@ -643,7 +652,8 @@ export default function ProfileSelectionPage() {
 
             <input
               ref={desktopInputRef}
-              type="password"
+              type="text"
+              name="pin-code-field"
               inputMode="numeric"
               pattern="[0-9]*"
               maxLength={6}
@@ -655,6 +665,7 @@ export default function ProfileSelectionPage() {
               }}
               className="opacity-0 absolute -z-10"
               autoFocus
+              {...pinInputProps}
             />
 
             <div
@@ -800,7 +811,8 @@ export default function ProfileSelectionPage() {
               <div>
                 <label className="text-[11px] font-black uppercase text-slate-400 block mb-1">Code PIN (4 à 6 chiffres)</label>
                 <input
-                  type="password"
+                  type="text"
+                  name="new-profile-pin"
                   inputMode="numeric"
                   pattern="[0-9]*"
                   maxLength={6}
@@ -809,6 +821,7 @@ export default function ProfileSelectionPage() {
                   placeholder="••••"
                   required
                   className="w-full px-3.5 py-3 rounded-xl border border-slate-200 bg-slate-50 text-sm font-bold tracking-widest text-slate-900 focus:bg-white focus:border-blue-600 outline-none transition"
+                  {...pinInputProps}
                 />
               </div>
 
@@ -857,7 +870,8 @@ export default function ProfileSelectionPage() {
               <div>
                 <label className="text-[11px] font-black uppercase text-slate-400 block mb-1">Ancien PIN</label>
                 <input
-                  type="password"
+                  type="text"
+                  name="current-pin-code"
                   inputMode="numeric"
                   pattern="[0-9]*"
                   maxLength={6}
@@ -866,13 +880,15 @@ export default function ProfileSelectionPage() {
                   placeholder="••••"
                   required
                   className="w-full px-3.5 py-3 rounded-xl border border-slate-200 bg-slate-50 text-sm font-bold tracking-widest text-slate-900 focus:bg-white focus:border-blue-600 outline-none transition"
+                  {...pinInputProps}
                 />
               </div>
 
               <div>
                 <label className="text-[11px] font-black uppercase text-slate-400 block mb-1">Nouveau PIN</label>
                 <input
-                  type="password"
+                  type="text"
+                  name="updated-pin-code"
                   inputMode="numeric"
                   pattern="[0-9]*"
                   maxLength={6}
@@ -881,13 +897,15 @@ export default function ProfileSelectionPage() {
                   placeholder="••••"
                   required
                   className="w-full px-3.5 py-3 rounded-xl border border-slate-200 bg-slate-50 text-sm font-bold tracking-widest text-slate-900 focus:bg-white focus:border-blue-600 outline-none transition"
+                  {...pinInputProps}
                 />
               </div>
 
               <div>
                 <label className="text-[11px] font-black uppercase text-slate-400 block mb-1">Confirmer le nouveau PIN</label>
                 <input
-                  type="password"
+                  type="text"
+                  name="confirm-updated-pin"
                   inputMode="numeric"
                   pattern="[0-9]*"
                   maxLength={6}
@@ -896,6 +914,7 @@ export default function ProfileSelectionPage() {
                   placeholder="••••"
                   required
                   className="w-full px-3.5 py-3 rounded-xl border border-slate-200 bg-slate-50 text-sm font-bold tracking-widest text-slate-900 focus:bg-white focus:border-blue-600 outline-none transition"
+                  {...pinInputProps}
                 />
               </div>
 

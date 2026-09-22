@@ -62,7 +62,7 @@ export const account_profiles = new Table({
   indexes: { user: ['user_id'], type: ['profile_type'] }
 });
 
-// 3. Pèlerins
+// 4. Pèlerins
 export const pelerins = new Table({
   name: 'pelerins',
   columns: [
@@ -108,7 +108,7 @@ export const pelerins = new Table({
   }
 });
 
-// 4. Paiements Pèlerins
+// 5. Paiements Pèlerins
 export const pelerin_payments = new Table({
   name: 'pelerin_payments',
   columns: [
@@ -124,7 +124,7 @@ export const pelerin_payments = new Table({
   }
 });
 
-// 5. Opérations Agence (Ventes, Billetterie, Visas, etc.)
+// 6. Opérations Agence (Ventes, Billetterie, Visas, etc.)
 export const operations_agence = new Table({
   name: 'operations_agence',
   columns: [
@@ -187,7 +187,7 @@ export const operations_agence = new Table({
   }
 });
 
-// 6. Dépenses d'agence
+// 7. Dépenses d'agence
 export const depenses = new Table({
   name: 'depenses',
   columns: [
@@ -206,7 +206,7 @@ export const depenses = new Table({
   }
 });
 
-// 7. Dépenses Hajj
+// 8. Dépenses Hajj
 export const depenses_hajj = new Table({
   name: 'depenses_hajj',
   columns: [
@@ -219,7 +219,7 @@ export const depenses_hajj = new Table({
   ]
 });
 
-// 8. Dépenses supprimées (Audit)
+// 9. Dépenses supprimées (Audit)
 export const depenses_supprimees = new Table({
   name: 'depenses_supprimees',
   columns: [
@@ -237,7 +237,7 @@ export const depenses_supprimees = new Table({
   ]
 });
 
-// 9. Budgets mensuels
+// 10. Budgets mensuels
 export const budgets_mensuels = new Table({
   name: 'budgets_mensuels',
   columns: [
@@ -250,7 +250,26 @@ export const budgets_mensuels = new Table({
   ]
 });
 
-// 10. Sessions Hajj
+// 11. Budgets modulables de l'agence (Suivi budgétaire personnalisé)
+export const budgets_agence = new Table({
+  name: 'budgets_agence',
+  columns: [
+    column.text('agence_id'),
+    column.text('categorie_id'),
+    column.text('label'),
+    column.text('couleur'),
+    column.real('montant_plafond'),
+    column.text('periode_type'),
+    column.text('created_at'),
+    column.text('updated_at')
+  ],
+  indexes: {
+    agence: ['agence_id'],
+    categorie: ['categorie_id']
+  }
+});
+
+// 12. Sessions Hajj
 export const hajj_sessions = new Table({
   name: 'hajj_sessions',
   columns: [
@@ -266,7 +285,7 @@ export const hajj_sessions = new Table({
   ]
 });
 
-// 11. Configuration Campagne Hajj
+// 13. Configuration Campagne Hajj
 export const hajj_campaign_config = new Table({
   name: 'hajj_campaign_config',
   columns: [
@@ -281,7 +300,7 @@ export const hajj_campaign_config = new Table({
   ]
 });
 
-// 12. Vols
+// 14. Vols
 export const vols = new Table({
   name: 'vols',
   columns: [
@@ -296,7 +315,7 @@ export const vols = new Table({
   ]
 });
 
-// 13. Types de documents
+// 15. Types de documents
 export const types_documents = new Table({
   name: 'types_documents',
   columns: [
@@ -306,7 +325,7 @@ export const types_documents = new Table({
   ]
 });
 
-// 14. Fichiers documents agence
+// 16. Fichiers documents agence
 export const documents_agence_files = new Table({
   name: 'documents_agence_files',
   columns: [
@@ -318,7 +337,7 @@ export const documents_agence_files = new Table({
   ]
 });
 
-// 15. Documents internes agence
+// 17. Documents internes agence
 export const documents_internes_agence = new Table({
   name: 'documents_internes_agence',
   columns: [
@@ -330,7 +349,7 @@ export const documents_internes_agence = new Table({
   ]
 });
 
-// 16. Log postulations gouvernementales
+// 18. Log postulations gouvernementales
 export const gouv_postulations_log = new Table({
   name: 'gouv_postulations_log',
   columns: [
@@ -351,6 +370,7 @@ export const AppSchema = new Schema({
   depenses_hajj,
   depenses_supprimees,
   budgets_mensuels,
+  budgets_agence,
   hajj_sessions,
   hajj_campaign_config,
   vols,

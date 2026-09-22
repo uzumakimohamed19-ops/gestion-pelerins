@@ -1,10 +1,12 @@
 'use client'
+
 import { useEffect, useState, useMemo, type ElementType } from 'react'
 import { useQuery } from '@powersync/react'
 import {
   TrendingUp, Wallet, Plane, Plus, Clock, Briefcase,
   ShieldCheck, Globe, X, Search, UserPlus, AlertTriangle, 
-  ChevronRight, FileSpreadsheet, Building2, Eye, EyeOff
+  ChevronRight, FileSpreadsheet, Building2, Eye, EyeOff,
+  Sun, Moon
 } from 'lucide-react'
 import Link from 'next/link'
 import { get, set } from 'idb-keyval'
@@ -48,9 +50,9 @@ type ModalState = {
   title: string
 } | null
 
-function Bar({ value, color }: { value: number; color: string }) {
+function Bar({ value, color, isDark }: { value: number; color: string; isDark?: boolean }) {
   return (
-    <div className="mt-3 h-1.5 w-full bg-slate-100/70 overflow-hidden rounded-full">
+    <div className={`mt-3 h-1.5 w-full overflow-hidden rounded-full ${isDark ? 'bg-[#2C2C2E]' : 'bg-slate-100/70'}`}>
       <div
         className={`h-full rounded-full ${color} transition-all duration-700 ease-out`}
         style={{ width: `${Math.min(100, Math.max(0, value))}%` }}
@@ -59,19 +61,31 @@ function Bar({ value, color }: { value: number; color: string }) {
   )
 }
 
-function Tile({ card, loading, onClick }: { card: TileCard; loading: boolean; onClick: () => void }) {
+function Tile({ card, loading, isDark, onClick }: { card: TileCard; loading: boolean; isDark: boolean; onClick: () => void }) {
   return (
     <button
       onClick={onClick}
       disabled={loading}
-      className={`dashboard-tile group text-left bg-white border ${card.borderColor} rounded-2xl p-5 hover:shadow-md hover:-translate-y-0.5 active:scale-[0.99] transition-all duration-300 flex flex-col justify-between w-full relative overflow-hidden shadow-sm h-full`}
+      className={`dashboard-tile group text-left border rounded-2xl p-5 hover:shadow-md hover:-translate-y-0.5 active:scale-[0.99] transition-all duration-300 flex flex-col justify-between w-full relative overflow-hidden h-full cursor-pointer ${
+        isDark 
+          ? 'bg-[#1C1C1E] border-[#2C2C2E] text-[#F5F5F7] hover:border-[#38383A]' 
+          : `bg-white border ${card.borderColor} shadow-sm`
+      }`}
     >
       <div className="flex items-center justify-between w-full mb-4">
-        <div className={`p-2.5 rounded-xl ${card.light} border border-white shadow-sm transition-transform group-hover:scale-105`}>
+        <div className={`p-2.5 rounded-xl border shadow-sm transition-transform group-hover:scale-105 ${
+          isDark 
+            ? 'bg-[#2C2C2E] border-[#38383A]' 
+            : `${card.light} border-white`
+        }`}>
           <card.icon size={20} className={card.textColor} />
         </div>
         {card.tag && (
-          <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-md uppercase tracking-wider bg-slate-50 text-slate-400 border border-slate-100">
+          <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-md uppercase tracking-wider border ${
+            isDark 
+              ? 'bg-[#2C2C2E] text-[#8E8E93] border-[#38383A]' 
+              : 'bg-slate-50 text-slate-400 border-slate-100'
+          }`}>
             {card.tag}
           </span>
         )}
@@ -79,44 +93,78 @@ function Tile({ card, loading, onClick }: { card: TileCard; loading: boolean; on
       
       <div className="min-w-0 w-full">
         {loading ? (
-          <div className="h-8 w-24 bg-slate-100 rounded-lg animate-pulse mb-2" />
+          <div className={`h-8 w-24 rounded-lg animate-pulse mb-2 ${isDark ? 'bg-[#2C2C2E]' : 'bg-slate-100'}`} />
         ) : (
-          <p className="text-xl md:text-2xl font-black text-slate-900 leading-tight tabular-nums tracking-tight mb-1.5 break-words">
+          <p className={`text-xl md:text-2xl font-black leading-tight tabular-nums tracking-tight mb-1.5 break-words ${
+            isDark ? 'text-[#F5F5F7]' : 'text-slate-900'
+          }`}>
             {card.value}
           </p>
         )}
-        <p className="text-xs md:text-sm text-slate-500 font-medium tracking-wide uppercase truncate">{card.label}</p>
+        <p className={`text-xs md:text-sm font-medium tracking-wide uppercase truncate ${
+          isDark ? 'text-[#8E8E93]' : 'text-slate-500'
+        }`}>{card.label}</p>
       </div>
 
       {card.subtext && !loading && (
-        <p className={`text-xs font-bold mt-3 ${card.textColor} bg-slate-50/50 px-2.5 py-1.5 rounded-lg border border-slate-100 inline-block w-max max-w-full truncate`}>
+        <p className={`text-xs font-bold mt-3 px-2.5 py-1.5 rounded-lg border inline-block w-max max-w-full truncate ${card.textColor} ${
+          isDark 
+            ? 'bg-[#2C2C2E] border-[#38383A]' 
+            : 'bg-slate-50/50 border-slate-100'
+        }`}>
           {card.subtext}
         </p>
       )}
       
       {card.progress != null && !loading && (
-        <Bar value={card.progress} color={card.progressColor ?? 'bg-slate-400'} />
+        <Bar value={card.progress} color={card.progressColor ?? 'bg-slate-400'} isDark={isDark} />
       )}
     </button>
   )
 }
 
 const alertStyles = {
-  amber: { dot: 'bg-amber-500', bg: 'hover:bg-amber-50/50', border: 'border-amber-100/70' },
-  red:   { dot: 'bg-red-500',   bg: 'hover:bg-red-50/50',   border: 'border-red-100/70' },
-  blue:  { dot: 'bg-blue-500',  bg: 'hover:bg-blue-50/50',  border: 'border-blue-100/70' },
+  amber: { 
+    dot: 'bg-amber-500', 
+    bg: 'hover:bg-amber-50/50', 
+    border: 'border-amber-100/70',
+    darkBg: 'hover:bg-[#FF9F0A]/10',
+    darkBorder: 'border-[#FF9F0A]/20'
+  },
+  red: { 
+    dot: 'bg-red-500', 
+    bg: 'hover:bg-red-50/50', 
+    border: 'border-red-100/70',
+    darkBg: 'hover:bg-[#FF453A]/10',
+    darkBorder: 'border-[#FF453A]/20'
+  },
+  blue: { 
+    dot: 'bg-blue-500', 
+    bg: 'hover:bg-blue-50/50', 
+    border: 'border-blue-100/70',
+    darkBg: 'hover:bg-[#0A84FF]/10',
+    darkBorder: 'border-[#0A84FF]/20'
+  },
 }
 
-function AlertPill({ alert, onClick }: { alert: AlertItem; onClick: () => void }) {
+function AlertPill({ alert, isDark, onClick }: { alert: AlertItem; isDark: boolean; onClick: () => void }) {
   const s = alertStyles[alert.type] || alertStyles.amber
   return (
     <button
       onClick={onClick}
-      className={`w-full text-left flex items-center gap-3 px-4 py-3 rounded-xl border ${s.border} bg-white ${s.bg} transition-all duration-200 group shadow-sm`}
+      className={`w-full text-left flex items-center gap-3 px-4 py-3 rounded-xl border transition-all duration-200 group shadow-sm cursor-pointer ${
+        isDark
+          ? `bg-[#1C1C1E] ${s.darkBorder}${s.darkBg}`
+          : `bg-white ${s.border}${s.bg}`
+      }`}
     >
       <span className={`w-2 h-2 rounded-full shrink-0 animate-pulse ${s.dot}`} />
-      <p className="text-xs md:text-sm text-slate-600 font-medium leading-snug flex-1 truncate">{alert.msg}</p>
-      <ChevronRight size={14} className="text-slate-300 group-hover:text-slate-500 group-hover:translate-x-0.5 shrink-0 transition-all" />
+      <p className={`text-xs md:text-sm font-medium leading-snug flex-1 truncate ${
+        isDark ? 'text-[#F5F5F7]' : 'text-slate-600'
+      }`}>{alert.msg}</p>
+      <ChevronRight size={14} className={`shrink-0 transition-all group-hover:translate-x-0.5 ${
+        isDark ? 'text-[#8E8E93] group-hover:text-[#F5F5F7]' : 'text-slate-300 group-hover:text-slate-500'
+      }`} />
     </button>
   )
 }
@@ -133,6 +181,24 @@ export default function DashboardAgence() {
 
   const [showAmount, setShowAmount] = useState<boolean>(true)
   const [mounted, setMounted] = useState(false)
+
+  // 🌓 GESTION DU THÈME SOMBRE (Synchronisé avec tout le module agence)
+  const [isDark, setIsDark] = useState<boolean>(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('compta_theme_dark') === 'true'
+    }
+    return false
+  })
+
+  const toggleDarkMode = () => {
+    setIsDark(prev => {
+      const next = !prev
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('compta_theme_dark', String(next))
+      }
+      return next
+    })
+  }
 
   const { data: operations, isLoading: operationsLoading } = useQuery<Operation>(
     'SELECT * FROM operations_agence ORDER BY created_at DESC',
@@ -276,56 +342,100 @@ export default function DashboardAgence() {
 
   const mainCards: TileCard[] = [
     {
-      label: "Chiffre d'Affaires", value: `${canViewAmounts && showAmount ? stats.caTotal.toLocaleString('fr-FR') : '••••••'} CFA`, icon: Wallet,
-      light: 'bg-blue-50', textColor: 'text-blue-600', borderColor: 'border-blue-100',
-      bgMobile: 'bg-white border-slate-100 text-slate-900', progress: 100, progressColor: 'bg-blue-500', tag: 'Finance'
+      label: "Chiffre d'Affaires", 
+      value: `${canViewAmounts && showAmount ? stats.caTotal.toLocaleString('fr-FR') : '••••••'} CFA`, 
+      icon: Wallet,
+      light: 'bg-blue-50', 
+      textColor: isDark ? 'text-[#0A84FF]' : 'text-blue-600', 
+      borderColor: 'border-blue-100',
+      bgMobile: isDark ? 'bg-[#1C1C1E] border-[#2C2C2E] text-[#F5F5F7]' : 'bg-white border-slate-100 text-slate-900', 
+      progress: 100, 
+      progressColor: isDark ? 'bg-[#0A84FF]' : 'bg-blue-500', 
+      tag: 'Finance'
     },
     {
-      label: 'Bénéfice Net Total', value: `${canViewAmounts && showAmount ? stats.beneficeTotal.toLocaleString('fr-FR') : '••••••'} CFA`, icon: TrendingUp,
-      light: 'bg-emerald-50', textColor: 'text-emerald-600', borderColor: 'border-emerald-100',
-      bgMobile: 'bg-emerald-600 border-emerald-500 text-white', subtext: `${stats.tauxRentabilite}% Rentabilité`,
-      progress: stats.tauxRentabilite, progressColor: 'bg-emerald-400'
+      label: 'Bénéfice Net Total', 
+      value: `${canViewAmounts && showAmount ? stats.beneficeTotal.toLocaleString('fr-FR') : '••••••'} CFA`, 
+      icon: TrendingUp,
+      light: 'bg-emerald-50', 
+      textColor: isDark ? 'text-[#34C759]' : 'text-emerald-600', 
+      borderColor: 'border-emerald-100',
+      bgMobile: isDark ? 'bg-[#1C1C1E] border-[#34C759]/30 text-[#34C759]' : 'bg-emerald-600 border-emerald-500 text-white', 
+      subtext: `${stats.tauxRentabilite}% Rentabilité`,
+      progress: stats.tauxRentabilite, 
+      progressColor: isDark ? 'bg-[#34C759]' : 'bg-emerald-400'
     },
     {
-      label: 'Total Opérations', value: stats.nombreVentes, icon: Briefcase,
-      light: 'bg-purple-50', textColor: 'text-purple-600', borderColor: 'border-purple-100',
-      bgMobile: 'bg-white border-slate-100 text-slate-900', subtext: 'Ventes enregistrées',
-      progress: 100, progressColor: 'bg-purple-500'
+      label: 'Total Opérations', 
+      value: stats.nombreVentes, 
+      icon: Briefcase,
+      light: 'bg-purple-50', 
+      textColor: isDark ? 'text-[#BF5AF2]' : 'text-purple-600', 
+      borderColor: 'border-purple-100',
+      bgMobile: isDark ? 'bg-[#1C1C1E] border-[#2C2C2E] text-[#F5F5F7]' : 'bg-white border-slate-100 text-slate-900', 
+      subtext: 'Ventes enregistrées',
+      progress: 100, 
+      progressColor: isDark ? 'bg-[#BF5AF2]' : 'bg-purple-500'
     },
     {
-      label: 'Panier Moyen', value: `${canViewAmounts && showAmount ? stats.panierMoyen.toLocaleString('fr-FR') : '••••••'} CFA`, icon: Globe,
-      light: 'bg-cyan-50', textColor: 'text-cyan-600', borderColor: 'border-cyan-100',
-      bgMobile: 'bg-white border-slate-100 text-slate-900', subtext: 'Par transaction'
+      label: 'Panier Moyen', 
+      value: `${canViewAmounts && showAmount ? stats.panierMoyen.toLocaleString('fr-FR') : '••••••'} CFA`, 
+      icon: Globe,
+      light: 'bg-cyan-50', 
+      textColor: isDark ? 'text-[#64D2FF]' : 'text-cyan-600', 
+      borderColor: 'border-cyan-100',
+      bgMobile: isDark ? 'bg-[#1C1C1E] border-[#2C2C2E] text-[#F5F5F7]' : 'bg-white border-slate-100 text-slate-900', 
+      subtext: 'Par transaction'
     },
     {
-      label: 'Marge Moyenne', value: `${canViewAmounts && showAmount ? stats.margeMoyenne.toLocaleString('fr-FR') : '••••••'} CFA`, icon: Clock,
-      light: 'bg-amber-50', textColor: 'text-amber-500', borderColor: 'border-amber-100',
-      bgMobile: 'bg-white border-slate-100 text-slate-900', subtext: 'Par opération'
+      label: 'Marge Moyenne', 
+      value: `${canViewAmounts && showAmount ? stats.margeMoyenne.toLocaleString('fr-FR') : '••••••'} CFA`, 
+      icon: Clock,
+      light: 'bg-amber-50', 
+      textColor: isDark ? 'text-[#FF9F0A]' : 'text-amber-500', 
+      borderColor: 'border-amber-100',
+      bgMobile: isDark ? 'bg-[#1C1C1E] border-[#2C2C2E] text-[#F5F5F7]' : 'bg-white border-slate-100 text-slate-900', 
+      subtext: 'Par opération'
     },
     {
-      label: 'Ventes Haute Marge', value: stats.hauteMarge, icon: ShieldCheck,
-      light: 'bg-teal-50', textColor: 'text-teal-600', borderColor: 'border-teal-100',
-      bgMobile: 'bg-white border-slate-100 text-slate-900', subtext: `${stats.pctHauteMarge}% du volume`,
-      progress: stats.pctHauteMarge, progressColor: 'bg-teal-500', tag: 'KPI'
+      label: 'Ventes Haute Marge', 
+      value: stats.hauteMarge, 
+      icon: ShieldCheck,
+      light: 'bg-teal-50', 
+      textColor: isDark ? 'text-[#30D158]' : 'text-teal-600', 
+      borderColor: 'border-teal-100',
+      bgMobile: isDark ? 'bg-[#1C1C1E] border-[#2C2C2E] text-[#F5F5F7]' : 'bg-white border-slate-100 text-slate-900', 
+      subtext: `${stats.pctHauteMarge}% du volume`,
+      progress: stats.pctHauteMarge, 
+      progressColor: isDark ? 'bg-[#30D158]' : 'bg-teal-500', 
+      tag: 'KPI'
     }
   ]
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center min-h-screen font-black text-slate-300 animate-pulse text-xs uppercase tracking-widest p-4 text-center">
+      <div className={`flex items-center justify-center min-h-screen font-black text-xs uppercase tracking-widest p-4 text-center animate-pulse ${
+        isDark ? 'bg-[#000000] text-[#8E8E93]' : 'bg-slate-50/40 text-slate-300'
+      }`}>
         Chargement des données réelles...
       </div>
     )
   }
 
   return (
-    <div className="w-full min-h-screen bg-slate-50/40 select-none pt-0">
+    <div className={`w-full min-h-screen select-none pt-0 transition-colors duration-150 ${
+      isDark ? 'bg-[#000000] text-[#F5F5F7]' : 'bg-slate-50/40 text-slate-900'
+    }`}>
       
-      {/* 📱 AFFICHAGE MOBILE UNIQUE (`md:hidden`) ── COLLÉ EN HAUT */}
+      {/* 📱 AFFICHAGE MOBILE UNIQUE (`md:hidden`) */}
       <div className="block md:hidden pb-10">
       
-        {/* En-tête Immersif Bleu - pt-4 pour épouser le haut parfaitement */}
-        <div className="bg-gradient-to-b from-slate-800 to-slate-900 text-white px-5 pt-7 pb-14 rounded-b-[2.5rem] shadow-lg shadow-slate-900/10 relative overflow-hidden md:hidden">
+        {/* En-tête Immersif */}
+        <div className={`text-white px-5 pt-7 pb-14 rounded-b-[2.5rem] shadow-lg relative overflow-hidden transition-colors ${
+          isDark 
+            ? 'bg-gradient-to-b from-[#1C1C1E] to-[#121214] border-b border-[#2C2C2E]' 
+            : 'bg-gradient-to-b from-slate-800 to-slate-900 shadow-slate-900/10'
+        }`}>
           
           <div className="absolute right-[-20px] bottom-[-20px] text-white/5 pointer-events-none transform -rotate-12 select-none">
             <Building2 size={220} />
@@ -341,22 +451,35 @@ export default function DashboardAgence() {
                 <h1 className="text-lg font-black tracking-tight">Agence 2026</h1>
               </div>
             </div>
-            <button 
-              onClick={() => canViewAmounts && setShowAmount(!showAmount)}
-              className="w-10 h-10 rounded-full bg-white/10 border border-white/20 flex items-center justify-center backdrop-blur-md active:scale-90 transition-all"
-            >
-              {showAmount ? <Eye size={18} /> : <EyeOff size={18} />}
-            </button>
+            
+            <div className="flex items-center gap-2">
+              {/* Bouton Thème Mobile */}
+              <button 
+                type="button"
+                onClick={toggleDarkMode}
+                className="w-10 h-10 rounded-full bg-white/10 border border-white/20 flex items-center justify-center backdrop-blur-md active:scale-90 transition-all cursor-pointer"
+                title={isDark ? 'Passer en mode clair' : 'Passer en mode sombre'}
+              >
+                {isDark ? <Sun size={17} className="text-[#FFD60A]" /> : <Moon size={17} className="text-white" />}
+              </button>
+
+              <button 
+                onClick={() => canViewAmounts && setShowAmount(!showAmount)}
+                className="w-10 h-10 rounded-full bg-white/10 border border-white/20 flex items-center justify-center backdrop-blur-md active:scale-90 transition-all cursor-pointer"
+              >
+                {showAmount ? <Eye size={18} /> : <EyeOff size={18} />}
+              </button>
+            </div>
           </div>
 
           <div className="flex justify-between items-end mt-7 relative z-10">
             <div>
               <p className="text-xs font-bold text-white/60 uppercase tracking-widest">Chiffre d'Affaires Global</p>
               <div className="flex items-baseline gap-2 mt-0.5">
-              <h2 className="text-3xl font-black tracking-tighter tabular-nums">
-                {canViewAmounts && showAmount ? stats.caTotal.toLocaleString('fr-FR') : '••••••'}
-              </h2>
-              <span className="text-sm font-bold text-white/40">CFA</span>
+                <h2 className="text-3xl font-black tracking-tighter tabular-nums">
+                  {canViewAmounts && showAmount ? stats.caTotal.toLocaleString('fr-FR') : '••••••'}
+                </h2>
+                <span className="text-sm font-bold text-white/40">CFA</span>
               </div>
             </div>
             <div className="text-right">
@@ -373,52 +496,72 @@ export default function DashboardAgence() {
           <div className="px-1">
             <YearSelector />
           </div>
-          <div className="grid grid-cols-2 gap-3 rounded-[1.5rem] bg-slate-50/80 p-2 shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
-          {mainCards.slice(2).map((card, i) => (
-            <button
-              key={i}
-              onClick={() => openModal(card.label)}
-              className={`p-4 rounded-3xl border shadow-sm text-left active:scale-[0.97] transition-all ${card.bgMobile || 'bg-white border-slate-100 text-slate-900'}`}
-            >
-              <div className={`w-8 h-8 rounded-xl flex items-center justify-center mb-3 ${card.bgMobile?.includes('bg-white') ? card.light : 'bg-white/20'}`}>
-                <card.icon size={16} className={card.bgMobile?.includes('bg-white') ? card.textColor : 'text-white'} />
-              </div>
-              <p className={`text-[10px] font-bold uppercase tracking-wider mb-1 ${card.bgMobile?.includes('bg-white') ? 'text-slate-400' : 'text-white/60'}`}>
-                {card.label}
-              </p>
-              <p className="text-lg font-black tabular-nums tracking-tight">
-                {card.value}
-              </p>
-            </button>
-          ))}
+          <div className={`grid grid-cols-2 gap-3 rounded-[1.5rem] p-2 transition-colors ${
+            isDark ? 'bg-[#121214] border border-[#2C2C2E]' : 'bg-slate-50/80 shadow-[0_8px_24px_rgba(15,23,42,0.04)]'
+          }`}>
+            {mainCards.slice(2).map((card, i) => (
+              <button
+                key={i}
+                onClick={() => openModal(card.label)}
+                className={`p-4 rounded-3xl border text-left active:scale-[0.97] transition-all cursor-pointer ${
+                  isDark
+                    ? 'bg-[#1C1C1E] border-[#2C2C2E] text-[#F5F5F7]'
+                    : (card.bgMobile || 'bg-white border-slate-100 text-slate-900 shadow-sm')
+                }`}
+              >
+                <div className={`w-8 h-8 rounded-xl flex items-center justify-center mb-3 ${
+                  isDark
+                    ? 'bg-[#2C2C2E]'
+                    : (card.bgMobile?.includes('bg-white') ? card.light : 'bg-white/20')
+                }`}>
+                  <card.icon size={16} className={card.textColor} />
+                </div>
+                <p className={`text-[10px] font-bold uppercase tracking-wider mb-1 ${
+                  isDark ? 'text-[#8E8E93]' : (card.bgMobile?.includes('bg-white') ? 'text-slate-400' : 'text-white/60')
+                }`}>
+                  {card.label}
+                </p>
+                <p className="text-lg font-black tabular-nums tracking-tight">
+                  {card.value}
+                </p>
+              </button>
+            ))}
           </div>
         </div>
 
         {/* Liste Activité Mobile */}
         <div className="px-5 mt-8">
           <div className="flex items-center justify-between mb-4">
-            <h3 className="text-sm font-black text-slate-800 uppercase tracking-widest">Dernières Ventes</h3>
-            <span className="text-[10px] font-bold text-slate-400 bg-slate-100 px-2 py-1 rounded-lg uppercase">{dateDuJour}</span>
+            <h3 className={`text-sm font-black uppercase tracking-widest ${isDark ? 'text-[#F5F5F7]' : 'text-slate-800'}`}>Dernières Ventes</h3>
+            <span className={`text-[10px] font-bold px-2 py-1 rounded-lg uppercase ${
+              isDark ? 'bg-[#1C1C1E] text-[#8E8E93] border border-[#2C2C2E]' : 'bg-slate-100 text-slate-400'
+            }`}>{dateDuJour}</span>
           </div>
 
           {dernieresVentes.length > 0 ? (
             <div className="space-y-3">
               {dernieresVentes.map((v) => (
-                <div key={v.id} className="bg-white border border-slate-100 p-4 rounded-2xl flex items-center justify-between gap-4 shadow-sm">
+                <div key={v.id} className={`border p-4 rounded-2xl flex items-center justify-between gap-4 transition-colors ${
+                  isDark ? 'bg-[#1C1C1E] border-[#2C2C2E]' : 'bg-white border-slate-100 shadow-sm'
+                }`}>
                   <div className="flex items-center gap-3 min-w-0">
-                    <div className="w-10 h-10 rounded-xl bg-slate-50 border border-slate-100 flex items-center justify-center text-slate-400 shrink-0">
+                    <div className={`w-10 h-10 rounded-xl border flex items-center justify-center shrink-0 ${
+                      isDark ? 'bg-[#2C2C2E] border-[#38383A] text-[#8E8E93]' : 'bg-slate-50 border-slate-100 text-slate-400'
+                    }`}>
                       <Plane size={18} />
                     </div>
                     <div className="min-w-0">
-                      <p className="text-sm font-bold text-slate-800 truncate">{v.client_nom}</p>
-                      <p className="text-[10px] font-bold text-slate-400 uppercase tracking-tighter truncate">{v.type_activite || 'Prestation'}</p>
+                      <p className={`text-sm font-bold truncate ${isDark ? 'text-[#F5F5F7]' : 'text-slate-800'}`}>{v.client_nom}</p>
+                      <p className={`text-[10px] font-bold uppercase tracking-tighter truncate ${
+                        isDark ? 'text-[#8E8E93]' : 'text-slate-400'
+                      }`}>{v.type_activite || 'Prestation'}</p>
                     </div>
                   </div>
                   <div className="text-right shrink-0">
-                    <p className="text-sm font-black text-slate-900 tabular-nums">
+                    <p className={`text-sm font-black tabular-nums ${isDark ? 'text-[#F5F5F7]' : 'text-slate-900'}`}>
                       {canViewAmounts && showAmount ? `${v.prix_vente.toLocaleString('fr-FR')}` : '•••'}
                     </p>
-                    <p className="text-[10px] font-bold text-emerald-500 tabular-nums">
+                    <p className="text-[10px] font-bold text-[#34C759] tabular-nums">
                       {canViewAmounts && showAmount ? `+${v.benefice.toLocaleString('fr-FR')}` : '•••'}
                     </p>
                   </div>
@@ -426,8 +569,10 @@ export default function DashboardAgence() {
               ))}
             </div>
           ) : (
-            <div className="bg-slate-100/50 border-2 border-dashed border-slate-200 rounded-3xl p-10 text-center">
-              <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">Aucune donnée</p>
+            <div className={`border-2 border-dashed rounded-3xl p-10 text-center ${
+              isDark ? 'bg-[#121214] border-[#2C2C2E]' : 'bg-slate-100/50 border-slate-200'
+            }`}>
+              <p className={`text-xs font-bold uppercase tracking-widest ${isDark ? 'text-[#8E8E93]' : 'text-slate-400'}`}>Aucune donnée</p>
             </div>
           )}
 
@@ -435,45 +580,84 @@ export default function DashboardAgence() {
             <div className="mt-8 space-y-2">
               <p className="text-[10px] font-black text-rose-500 uppercase tracking-[0.2em] mb-3 ml-1">Alertes Attention</p>
               {alerts.map((a, i) => (
-                <AlertPill key={i} alert={a} onClick={() => openModal(a.filter)} />
+                <AlertPill key={i} alert={a} isDark={isDark} onClick={() => openModal(a.filter)} />
               ))}
             </div>
           )}
 
           <button
             onClick={() => allData && exportToExcel(allData, 'Rapport_Operations_Agence')}
-            className="w-full mt-8 flex items-center justify-center gap-2 p-3.5 bg-slate-900 text-white rounded-2xl text-xs font-bold shadow-md active:bg-slate-800 transition-colors"
+            className={`w-full mt-8 flex items-center justify-center gap-2 p-3.5 rounded-2xl text-xs font-bold shadow-md transition-colors cursor-pointer ${
+              isDark ? 'bg-[#FFFFFF] text-black hover:bg-[#E5E5EA]' : 'bg-slate-900 text-white active:bg-slate-800'
+            }`}
           >
-            <FileSpreadsheet size={16} className="text-emerald-400" />
+            <FileSpreadsheet size={16} className={isDark ? 'text-black' : 'text-emerald-400'} />
             Exporter les données (.XLSX)
           </button>
         </div>
       </div>
 
-      {/* 💻 AFFICHAGE PC UNIQUE ── pt-0 POUR COLLER COMPLÈTEMENT AU NAV BAR */}
+      {/* 💻 AFFICHAGE PC UNIQUE */}
       <div className="hidden md:block max-w-[1600px] mx-auto px-4 sm:px-6 lg:px-8 pt-0 pb-16 w-full">
         
-        {/* pt-5 rajouté ici uniquement pour donner de l'espace au texte sans décoller le bloc global */}
-        <div className="pt-5 mb-8 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 border-b border-slate-100 pb-6">
+        <div className={`pt-5 mb-8 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 border-b pb-6 ${
+          isDark ? 'border-[#2C2C2E]' : 'border-slate-100'
+        }`}>
           <div>
-            <span className="text-[10px] font-black text-slate-600 bg-slate-100 px-2.5 py-1 rounded-md uppercase tracking-widest border border-slate-200">Suivi Agence 2026</span>
-            <h1 className="text-2xl md:text-3xl font-black text-slate-900 tracking-tight mt-2">Tableau de gestion & de suivi</h1>
+            <span className={`text-[10px] font-black px-2.5 py-1 rounded-md uppercase tracking-widest border ${
+              isDark 
+                ? 'bg-[#1C1C1E] text-[#8E8E93] border-[#2C2C2E]' 
+                : 'text-slate-600 bg-slate-100 border-slate-200'
+            }`}>Suivi Agence 2026</span>
+            <h1 className={`text-2xl md:text-3xl font-black tracking-tight mt-2 ${
+              isDark ? 'text-[#F5F5F7]' : 'text-slate-900'
+            }`}>Tableau de gestion & de suivi</h1>
           </div>
+          
           <div className="flex items-center flex-wrap gap-3">
+            {/* 🌓 Bouton Mode Sombre Desktop */}
+            <button
+              type="button"
+              onClick={toggleDarkMode}
+              className={`inline-flex items-center gap-2 text-xs font-semibold px-4 py-2.5 rounded-xl border transition-colors cursor-pointer ${
+                isDark 
+                  ? 'bg-[#1C1C1E] border-[#2C2C2E] text-[#FFD60A] hover:bg-[#2C2C2E]' 
+                  : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-100 shadow-sm'
+              }`}
+              title={isDark ? 'Basculer en mode clair' : 'Basculer en mode sombre'}
+            >
+              {isDark ? <Sun size={15} className="text-[#FFD60A]" /> : <Moon size={15} className="text-slate-600" />}
+              <span>{isDark ? 'Mode clair' : 'Mode sombre'}</span>
+            </button>
+
             <button
               onClick={() => setShowAmount(!showAmount)}
-              className="inline-flex items-center gap-2 bg-slate-100 text-slate-700 text-xs font-bold px-4 py-2.5 rounded-xl hover:bg-slate-200 active:scale-95 transition-all shadow-sm border border-slate-200"
+              className={`inline-flex items-center gap-2 text-xs font-bold px-4 py-2.5 rounded-xl border transition-all cursor-pointer ${
+                isDark 
+                  ? 'bg-[#1C1C1E] border-[#2C2C2E] text-[#F5F5F7] hover:bg-[#2C2C2E]' 
+                  : 'bg-slate-100 text-slate-700 border-slate-200 hover:bg-slate-200 active:scale-95 shadow-sm'
+              }`}
             >
               {canViewAmounts && showAmount ? <Eye size={15} /> : <EyeOff size={15} />}
               {canViewAmounts && showAmount ? 'Masquer' : 'Afficher'}
             </button>
-            <span className="text-xs font-semibold text-slate-600 bg-white border border-slate-200/80 px-4 py-2.5 rounded-xl shadow-sm flex items-center gap-2">
-              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-              <b className="text-slate-900">{stats.nombreVentes}</b> opérations enregistrées
+            
+            <span className={`text-xs font-semibold px-4 py-2.5 rounded-xl border flex items-center gap-2 ${
+              isDark 
+                ? 'bg-[#1C1C1E] border-[#2C2C2E] text-[#8E8E93]' 
+                : 'text-slate-600 bg-white border-slate-200/80 shadow-sm'
+            }`}>
+              <span className="w-2 h-2 rounded-full bg-[#34C759] animate-pulse" />
+              <b className={isDark ? 'text-[#F5F5F7]' : 'text-slate-900'}>{stats.nombreVentes}</b> opérations
             </span>
+
             <Link
               href="/agence/nouvelle-operation"
-              className="inline-flex items-center gap-2 bg-slate-900 text-white text-xs font-bold px-5 py-3 rounded-xl hover:bg-slate-800 active:scale-95 transition-all shadow-sm"
+              className={`inline-flex items-center gap-2 text-xs font-bold px-5 py-3 rounded-xl transition-all shadow-sm cursor-pointer ${
+                isDark 
+                  ? 'bg-[#FFFFFF] text-black hover:bg-[#E5E5EA]' 
+                  : 'bg-slate-900 text-white hover:bg-slate-800 active:scale-95'
+              }`}
             >
               <Plus size={15} /> Nouvelle Vente
             </Link>
@@ -487,39 +671,53 @@ export default function DashboardAgence() {
             </div>
             <div className="grid grid-cols-2 xl:grid-cols-3 gap-6">
               {mainCards.map((card, i) => (
-                <Tile key={i} card={card} loading={loading} onClick={() => openModal(card.label)} />
+                <Tile key={i} card={card} loading={loading} isDark={isDark} onClick={() => openModal(card.label)} />
               ))}
             </div>
 
             {dernieresVentes.length > 0 && (
-              <div className="bg-white border border-slate-100 rounded-2xl overflow-hidden shadow-sm">
-                <div className="px-6 py-5 border-b border-slate-100 flex justify-between items-center bg-slate-50/30">
-                  <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">Flux des dernières ventes</p>
+              <div className={`border rounded-2xl overflow-hidden transition-colors ${
+                isDark ? 'bg-[#1C1C1E] border-[#2C2C2E]' : 'bg-white border-slate-100 shadow-sm'
+              }`}>
+                <div className={`px-6 py-5 border-b flex justify-between items-center ${
+                  isDark ? 'border-[#2C2C2E] bg-[#121214]' : 'border-slate-100 bg-slate-50/30'
+                }`}>
+                  <p className={`text-xs font-bold uppercase tracking-wider ${isDark ? 'text-[#8E8E93]' : 'text-slate-500'}`}>Flux des dernières ventes</p>
                 </div>
-                <ul className="divide-y divide-slate-100">
+                <ul className={`divide-y ${isDark ? 'divide-[#2C2C2E]' : 'divide-slate-100'}`}>
                   {dernieresVentes.map((v) => (
-                    <li key={v.id} className="px-6 py-5 flex items-center justify-between gap-4 hover:bg-slate-50/30 transition-colors">
+                    <li key={v.id} className={`px-6 py-5 flex items-center justify-between gap-4 transition-colors ${
+                      isDark ? 'hover:bg-[#2C2C2E]/50' : 'hover:bg-slate-50/30'
+                    }`}>
                       <div className="flex items-center gap-4 min-w-0 flex-1">
-                        <div className="w-10 h-10 rounded-xl bg-slate-100 border border-slate-200/50 flex items-center justify-center text-xs font-bold text-slate-700 shrink-0">
+                        <div className={`w-10 h-10 rounded-xl border flex items-center justify-center text-xs font-bold shrink-0 ${
+                          isDark ? 'bg-[#2C2C2E] border-[#38383A] text-[#8E8E93]' : 'bg-slate-100 border-slate-200/50 text-slate-700'
+                        }`}>
                           <Plane size={18} />
                         </div>
                         <div className="min-w-0 flex-1">
-                          <p className="text-base font-bold text-slate-800 truncate">{v.client_nom}</p>
+                          <p className={`text-base font-bold truncate ${isDark ? 'text-[#F5F5F7]' : 'text-slate-800'}`}>{v.client_nom}</p>
                           <div className="flex gap-2 mt-1.5 flex-wrap items-center">
-                            <span className="text-[10px] text-slate-600 bg-slate-50 border border-slate-100 px-2 py-0.5 rounded-md font-semibold">
+                            <span className={`text-[10px] px-2 py-0.5 rounded-md font-semibold border ${
+                              isDark 
+                                ? 'bg-[#2C2C2E] border-[#38383A] text-[#8E8E93]' 
+                                : 'text-slate-600 bg-slate-50 border-slate-100'
+                            }`}>
                               {v.type_activite || 'VENTE'}
                             </span>
-                            <span className="text-[10px] text-slate-400 font-medium flex items-center gap-1">
+                            <span className={`text-[10px] font-medium flex items-center gap-1 ${
+                              isDark ? 'text-[#8E8E93]' : 'text-slate-400'
+                            }`}>
                               <Clock size={11} /> {new Date(v.created_at).toLocaleDateString('fr-FR')}
                             </span>
                           </div>
                         </div>
                       </div>
                       <div className="text-right shrink-0">
-                        <p className="text-base font-black text-slate-900 tabular-nums">
-                          {canViewAmounts && showAmount ? v.prix_vente.toLocaleString('fr-FR') : '•••••'} <span className="text-xs text-slate-400">CFA</span>
+                        <p className={`text-base font-black tabular-nums ${isDark ? 'text-[#F5F5F7]' : 'text-slate-900'}`}>
+                          {canViewAmounts && showAmount ? v.prix_vente.toLocaleString('fr-FR') : '•••••'} <span className={`text-xs ${isDark ? 'text-[#636366]' : 'text-slate-400'}`}>CFA</span>
                         </p>
-                        <p className="text-sm font-black text-emerald-600 mt-0.5">
+                        <p className="text-sm font-black text-[#34C759] mt-0.5">
                           {canViewAmounts && showAmount ? `+${v.benefice.toLocaleString('fr-FR')}` : '•••••'} <span className="text-[10px] opacity-70">CFA</span>
                         </p>
                       </div>
@@ -532,31 +730,37 @@ export default function DashboardAgence() {
 
           <div className="w-full lg:w-80 xl:w-96 shrink-0 flex flex-col gap-5">
             {alerts.length > 0 && (
-              <div className="bg-white border border-slate-100 rounded-2xl overflow-hidden shadow-sm w-full">
-                <div className="px-4 py-3.5 border-b border-slate-100 flex items-center gap-2 bg-slate-50/50">
-                  <AlertTriangle size={14} className="text-amber-500" />
-                  <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">Anomalies détectées</p>
+              <div className={`border rounded-2xl overflow-hidden w-full ${
+                isDark ? 'bg-[#1C1C1E] border-[#2C2C2E]' : 'bg-white border-slate-100 shadow-sm'
+              }`}>
+                <div className={`px-4 py-3.5 border-b flex items-center gap-2 ${
+                  isDark ? 'border-[#2C2C2E] bg-[#121214]' : 'border-slate-100 bg-slate-50/50'
+                }`}>
+                  <AlertTriangle size={14} className="text-[#FF9F0A]" />
+                  <p className={`text-xs font-bold uppercase tracking-wider ${isDark ? 'text-[#8E8E93]' : 'text-slate-500'}`}>Anomalies détectées</p>
                 </div>
                 <div className="p-3 flex flex-col gap-2">
                   {alerts.map((a, i) => (
-                    <AlertPill key={i} alert={a} onClick={() => openModal(a.filter)} />
+                    <AlertPill key={i} alert={a} isDark={isDark} onClick={() => openModal(a.filter)} />
                   ))}
                 </div>
               </div>
             )}
 
-            <div className="bg-white border border-slate-100 rounded-2xl p-6 shadow-sm w-full">
-              <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-5">Processus Métiers</p>
+            <div className={`border rounded-2xl p-6 w-full ${
+              isDark ? 'bg-[#1C1C1E] border-[#2C2C2E]' : 'bg-white border-slate-100 shadow-sm'
+            }`}>
+              <p className={`text-xs font-bold uppercase tracking-wider mb-5 ${isDark ? 'text-[#8E8E93]' : 'text-slate-400'}`}>Processus Métiers</p>
               {[
-                { label: 'Volume Rentabilité Haute Marge', pct: stats.pctHauteMarge, color: 'bg-teal-500' },
-                { label: 'Taux Moyen d\'Efficacité Marge', pct: stats.tauxRentabilite, color: 'bg-emerald-500' },
+                { label: 'Volume Rentabilité Haute Marge', pct: stats.pctHauteMarge, color: isDark ? 'bg-[#30D158]' : 'bg-teal-500' },
+                { label: 'Taux Moyen d\'Efficacité Marge', pct: stats.tauxRentabilite, color: isDark ? 'bg-[#34C759]' : 'bg-emerald-500' },
               ].map((r, i) => (
                 <div key={i} className="mb-5 last:mb-0">
                   <div className="flex justify-between items-center mb-2">
-                    <span className="text-xs text-slate-600 font-medium">{r.label}</span>
-                    <span className="text-xs font-black text-slate-800">{r.pct}%</span>
+                    <span className={`text-xs font-medium ${isDark ? 'text-[#8E8E93]' : 'text-slate-600'}`}>{r.label}</span>
+                    <span className={`text-xs font-black ${isDark ? 'text-[#F5F5F7]' : 'text-slate-800'}`}>{r.pct}%</span>
                   </div>
-                  <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
+                  <div className={`h-2 rounded-full overflow-hidden ${isDark ? 'bg-[#2C2C2E]' : 'bg-slate-100'}`}>
                     <div className={`h-full rounded-full ${r.color} transition-all duration-1000`} style={{ width: `${r.pct}%` }} />
                   </div>
                 </div>
@@ -564,29 +768,42 @@ export default function DashboardAgence() {
               
               <button
                 onClick={() => visibleData.length > 0 && exportToExcel(visibleData, 'Global_Agence_Operations')}
-                className="mt-6 w-full flex items-center justify-center gap-2 py-3 border border-slate-200 text-slate-700 bg-slate-50 rounded-xl text-xs font-bold hover:bg-slate-100 transition-colors"
+                className={`mt-6 w-full flex items-center justify-center gap-2 py-3 rounded-xl text-xs font-bold transition-colors cursor-pointer border ${
+                  isDark 
+                    ? 'border-[#38383A] text-[#F5F5F7] bg-[#2C2C2E] hover:bg-[#38383A]' 
+                    : 'border-slate-200 text-slate-700 bg-slate-50 hover:bg-slate-100'
+                }`}
               >
-                <FileSpreadsheet size={14} className="text-emerald-600" /> Export Excel Global
+                <FileSpreadsheet size={14} className={isDark ? 'text-[#34C759]' : 'text-emerald-600'} /> Export Excel Global
               </button>
             </div>
           </div>
         </div>
       </div>
 
-      {/* MODALE RE-OPTIMISÉE */}
+      {/* ─── MODALE DÉTAILS (Mode Clair & Sombre) ─── */}
       {modal && (
-        <div className="fixed inset-0 z-[999] flex items-end sm:items-center justify-center bg-slate-900/60 backdrop-blur-sm p-0 sm:p-4" onClick={() => setModal(null)}>
-          <div className="bg-white w-full sm:max-w-3xl rounded-t-2xl sm:rounded-2xl shadow-2xl h-[85vh] sm:h-auto max-h-[85vh] sm:max-h-[calc(100vh-80px)] flex flex-col" onClick={e => e.stopPropagation()}>
-            <div className="w-12 h-1 bg-slate-200 rounded-full mx-auto my-3 sm:hidden shrink-0" />
-            <div className="flex items-center justify-between px-5 pb-4 pt-1 sm:py-4 border-b border-slate-100 shrink-0">
+        <div className="fixed inset-0 z-[999] flex items-end sm:items-center justify-center bg-black/70 backdrop-blur-xs p-0 sm:p-4" onClick={() => setModal(null)}>
+          <div className={`w-full sm:max-w-3xl rounded-t-2xl sm:rounded-2xl border shadow-2xl h-[85vh] sm:h-auto max-h-[85vh] sm:max-h-[calc(100vh-80px)] flex flex-col ${
+            isDark ? 'bg-[#1C1C1E] border-[#2C2C2E]' : 'bg-white border-slate-100'
+          }`} onClick={e => e.stopPropagation()}>
+            <div className={`w-12 h-1 rounded-full mx-auto my-3 sm:hidden shrink-0 ${isDark ? 'bg-[#38383A]' : 'bg-slate-200'}`} />
+            
+            <div className={`flex items-center justify-between px-5 pb-4 pt-1 sm:py-4 border-b shrink-0 ${
+              isDark ? 'border-[#2C2C2E]' : 'border-slate-100'
+            }`}>
               <div>
-                <h2 className="text-base sm:text-lg font-black text-slate-900">{modal.title}</h2>
-                <p className="text-xs text-slate-400 mt-0.5">{filteredItems.length} opération(s)</p>
+                <h2 className={`text-base sm:text-lg font-black ${isDark ? 'text-[#F5F5F7]' : 'text-slate-900'}`}>{modal.title}</h2>
+                <p className="text-xs text-[#8E8E93] mt-0.5">{filteredItems.length} opération(s)</p>
               </div>
-              <button onClick={() => setModal(null)} className="p-2 rounded-xl bg-slate-50 text-slate-400 border border-slate-100"><X size={16} /></button>
+              <button onClick={() => setModal(null)} className={`p-2 rounded-xl border transition-colors cursor-pointer ${
+                isDark ? 'bg-[#2C2C2E] text-[#8E8E93] border-[#38383A] hover:text-[#F5F5F7]' : 'bg-slate-50 text-slate-400 border-slate-100'
+              }`}><X size={16} /></button>
             </div>
 
-            <div className="px-5 py-4 border-b border-slate-100 space-y-3 bg-slate-50/50 shrink-0">
+            <div className={`px-5 py-4 border-b space-y-3 shrink-0 ${
+              isDark ? 'border-[#2C2C2E] bg-[#121214]' : 'border-slate-100 bg-slate-50/50'
+            }`}>
               <div className="flex gap-2">
                 <div className="flex-1 relative">
                   <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
@@ -595,7 +812,11 @@ export default function DashboardAgence() {
                     placeholder="Rechercher par client ou activité..."
                     value={searchQuery}
                     onChange={e => setSearchQuery(e.target.value)}
-                    className="w-full pl-9 pr-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:border-blue-500 bg-white"
+                    className={`w-full pl-9 pr-3 py-2 border rounded-xl text-sm outline-none transition-colors ${
+                      isDark 
+                        ? 'bg-[#2C2C2E] border-[#38383A] text-[#F5F5F7] placeholder:text-[#636366] focus:border-[#545458]' 
+                        : 'border-slate-200 text-slate-900 bg-white focus:border-blue-500'
+                    }`}
                   />
                 </div>
               </div>
@@ -604,14 +825,22 @@ export default function DashboardAgence() {
             <div className="overflow-y-auto flex-1 px-5 py-4">
               <ul className="space-y-2">
                 {filteredItems.map((o) => (
-                  <li key={o.id} className="px-4 py-3 rounded-xl bg-white border border-slate-100 flex items-center justify-between gap-3 shadow-sm">
+                  <li key={o.id} className={`px-4 py-3 rounded-xl border flex items-center justify-between gap-3 shadow-xs ${
+                    isDark ? 'bg-[#2C2C2E] border-[#38383A]' : 'bg-white border-slate-100'
+                  }`}>
                     <div className="min-w-0 flex-1">
-                      <p className="text-sm font-bold text-slate-800 truncate">{o.client_nom}</p>
-                      <p className="text-xs text-slate-400 uppercase font-semibold">{o.type_activite || 'VENTE INDÉFINIE'}</p>
+                      <p className={`text-sm font-bold truncate ${isDark ? 'text-[#F5F5F7]' : 'text-slate-800'}`}>{o.client_nom}</p>
+                      <p className="text-xs text-[#8E8E93] uppercase font-semibold">{o.type_activite || 'VENTE INDÉFINIE'}</p>
                     </div>
                     <div className="shrink-0 text-right">
-                      <p className="text-xs font-black text-slate-900">{canViewAmounts && showAmount ? o.prix_vente.toLocaleString('fr-FR') : '•••••'} CFA</p>
-                      <span className={`text-[10px] font-black px-1.5 py-0.5 rounded-md ${o.benefice > 0 ? 'text-emerald-700 bg-emerald-50' : 'text-rose-600 bg-rose-50'}`}>
+                      <p className={`text-xs font-black ${isDark ? 'text-[#F5F5F7]' : 'text-slate-900'}`}>
+                        {canViewAmounts && showAmount ? o.prix_vente.toLocaleString('fr-FR') : '•••••'} CFA
+                      </p>
+                      <span className={`text-[10px] font-black px-1.5 py-0.5 rounded-md ${
+                        o.benefice > 0 
+                          ? isDark ? 'text-[#34C759] bg-[#34C759]/20' : 'text-emerald-700 bg-emerald-50'
+                          : isDark ? 'text-[#FF453A] bg-[#FF453A]/20' : 'text-rose-600 bg-rose-50'
+                      }`}>
                         {canViewAmounts && showAmount ? `+${o.benefice.toLocaleString('fr-FR')}` : '•••••'} Marge
                       </span>
                     </div>

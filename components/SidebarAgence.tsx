@@ -23,6 +23,9 @@ import {
 import { useWorkProfile } from '@/lib/ProfileContext'
 import { useQuery } from '@powersync/react'
 
+// Rayon (en px) de la courbe concave "inverted border radius"
+const CONCAVE_R = 20
+
 export default function NavbarAgence() {
   const pathname = usePathname()
   const router = useRouter()
@@ -35,6 +38,57 @@ export default function NavbarAgence() {
   const [userName, setUserName] = useState<string>('')
   const [role, setRole] = useState<string>('staff')
   const [isMenuOpen, setIsMenuOpen] = useState(false)
+
+  // 🌓 GESTION DU THÈME SOMBRE SANS CONFLIT DE RENDU REACT
+  const [isDark, setIsDark] = useState<boolean>(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('compta_theme_dark') === 'true'
+    }
+    return false
+  })
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+
+    // ⚡ On diffère l'exécution dans le prochain tick pour éviter d'interrompre le rendu d'une autre page
+    const syncTheme = () => {
+      setTimeout(() => {
+        const currentDark = localStorage.getItem('compta_theme_dark') === 'true'
+        setIsDark((prev) => (prev !== currentDark ? currentDark : prev))
+      }, 0)
+    }
+
+    // 1. Écoute des événements
+    window.addEventListener('storage', syncTheme)
+    window.addEventListener('theme-change', syncTheme)
+
+    // 2. Interception asynchrone sécurisée de setItem
+    const originalSetItem = localStorage.setItem
+    localStorage.setItem = function (key: string, value: string) {
+      originalSetItem.apply(this, [key, value])
+      if (key === 'compta_theme_dark') {
+        setTimeout(() => {
+          window.dispatchEvent(new Event('theme-change'))
+        }, 0)
+      }
+    }
+
+    syncTheme()
+
+    return () => {
+      window.removeEventListener('storage', syncTheme)
+      window.removeEventListener('theme-change', syncTheme)
+      localStorage.setItem = originalSetItem
+    }
+  }, [])
+
+  // Re-synchronisation propre lors des changements de page
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const currentDark = localStorage.getItem('compta_theme_dark') === 'true'
+      setIsDark((prev) => (prev !== currentDark ? currentDark : prev))
+    }
+  }, [pathname])
 
   // 1. Détection immédiate du compte connecté
   useEffect(() => {
@@ -63,7 +117,7 @@ export default function NavbarAgence() {
     loadCurrentUser()
   }, [])
 
-  // 2. ⚡ Requête PowerSync SQLite STRICTEMENT filtrée par l'ID de l'utilisateur connecté
+  // 2. ⚡ Requête PowerSync SQLite
   const { data: profileData } = useQuery<{
     role: string | null
     full_name: string | null
@@ -77,7 +131,7 @@ export default function NavbarAgence() {
     [currentUserId ?? '']
   )
 
-  // 3. Mise à jour automatique dès que les données du compte connecté sont prêtes
+  // 3. Mise à jour automatique des données profil
   useEffect(() => {
     if (!currentUserId || !profileData || profileData.length === 0) return
 
@@ -130,6 +184,9 @@ export default function NavbarAgence() {
 
   if (pathname === '/login') return null
 
+  const avatarFallbackName = encodeURIComponent(userName || nomAgence || 'User')
+  const concaveBgColor = isDark ? '#000000' : '#f8fafc'
+
   return (
     <>
       {/* 🧬 INJECTION CSS LOCALISÉE */}
@@ -142,25 +199,54 @@ export default function NavbarAgence() {
       `}</style>
 
       {/* --- 💻 DESKTOP SIDEBAR --- */}
-      <nav className="hidden md:flex flex-col justify-between w-64 bg-white/80 backdrop-blur-md border-r border-gray-100 fixed top-0 bottom-0 left-0 z-50 shadow-sm p-6 print:hidden">
+      <nav className={`hidden md:flex flex-col justify-between w-64 fixed top-0 bottom-0 left-0 z-50 p-6 print:hidden overflow-visible transition-colors duration-150 ${
+        isDark 
+          ? 'bg-gradient-to-b from-[#1C1C1E] via-[#161618] to-[#0E0E10] border-r border-[#2C2C2E]' 
+          : 'bg-gradient-to-b from-emerald-600 via-emerald-500 to-emerald-100'
+      }`}>
         
         {/* Section Haut : Logo & Agence */}
         <div className="flex flex-col gap-8">
-          <Link href="/" className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-emerald-500 rounded-xl flex items-center justify-center shadow-lg shadow-emerald-500/20 shrink-0">
-              <Building2 className="text-white w-5 h-5" />
+          <Link href="/" className="flex items-center gap-3 shrink-0">
+            <div className={`w-11 h-11 rounded-2xl flex items-center justify-center shadow-md shrink-0 ${
+              isDark ? 'bg-[#2C2C2E] text-[#34C759]' : 'bg-white text-emerald-600'
+            }`}>
+              <Building2 className="w-5 h-5" />
             </div>
-            <div className="flex flex-col min-w-0">
-              <span className="text-base font-black text-gray-900 tracking-tight leading-none uppercase truncate">{nomAgence}</span>
-              <span className="text-[9px] font-bold text-emerald-600 tracking-[0.15em] uppercase mt-1">Gestion Agence</span>
+            <div className="flex flex-col global-logo-text min-w-0">
+              {/* Drapeau du Mali */}
+              <div 
+                className="w-full h-[6px] rounded-[1px] flex overflow-hidden mb-1 shadow-[inset_0_1px_1px_rgba(255,255,255,0.6),_0_1px_2px_rgba(0,0,0,0.2)] border border-black/10"
+                title="Drapeau du Mali"
+              >
+                <div className="flex-1 bg-[#14B53A] bg-gradient-to-b from-white/30 via-transparent to-black/20" />
+                <div className="flex-1 bg-[#FCD116] bg-gradient-to-b from-white/30 via-transparent to-black/20" />
+                <div className="flex-1 bg-[#CE1126] bg-gradient-to-b from-white/30 via-transparent to-black/20" />
+              </div>
+
+              <span className="text-sm font-black text-white truncate uppercase tracking-tight drop-shadow-sm">
+                {nomAgence}
+              </span>
+              <span className={`text-[9px] font-semibold uppercase tracking-widest whitespace-nowrap mt-1 ${
+                isDark ? 'text-[#8E8E93]' : 'text-emerald-50/90'
+              }`}>
+                Gestion Agence
+              </span>
             </div>
           </Link>
 
-          {/* Section Milieu : Liens de navigation */}
-          <div className="flex flex-col gap-1.5">
+          {/* Section Milieu : Liens avec découpe concave */}
+          <div className="flex flex-col gap-2">
             {role === 'admin' && (
-              <Link href="/agence/admin" className="flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-black transition-all bg-amber-50 text-amber-700 hover:bg-amber-100 border border-amber-100/50 mb-2">
-                <ShieldCheck size={18} />
+              <Link 
+                href="/agence/admin" 
+                className={`flex items-center gap-3 px-4 py-3 rounded-2xl text-sm font-bold transition-all mb-2 shadow-sm ${
+                  isDark ? 'bg-[#FF9F0A]/20 text-[#FF9F0A] hover:bg-[#FF9F0A]/30 border border-[#FF9F0A]/30' : 'bg-amber-400 text-amber-900 hover:bg-amber-300'
+                }`}
+              >
+                <div className="w-8 h-8 rounded-xl bg-white/30 flex items-center justify-center shrink-0">
+                  <ShieldCheck size={16} />
+                </div>
                 <span>Admin</span>
               </Link>
             )}
@@ -171,14 +257,62 @@ export default function NavbarAgence() {
                 <Link 
                   key={item.name} 
                   href={item.href} 
-                  className={`flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-black transition-all ${
+                  className={`relative flex items-center gap-3 h-12 px-3 text-sm font-semibold transition-all duration-200 ${
                     isActive 
-                      ? 'bg-emerald-50 text-emerald-700' 
-                      : 'text-gray-500 hover:bg-gray-50 hover:text-gray-900'
+                      ? (isDark ? 'text-[#34C759] font-bold' : 'text-emerald-700 font-bold')
+                      : 'rounded-2xl text-white/90 hover:bg-white/15'
                   }`}
+                  style={
+                    isActive
+                      ? {
+                          background: concaveBgColor,
+                          borderRadius: '24px 0 0 24px',
+                          marginRight: '-24px',
+                          paddingRight: '24px',
+                        }
+                      : undefined
+                  }
                 >
-                  <item.icon size={18} className={isActive ? 'text-emerald-500' : 'text-gray-400'} />
-                  <span>{item.name}</span>
+                  {/* Patch concave HAUT */}
+                  {isActive && (
+                    <span
+                      aria-hidden
+                      style={{
+                        position: 'absolute',
+                        right: 0,
+                        top: -CONCAVE_R,
+                        width: CONCAVE_R,
+                        height: CONCAVE_R,
+                        background: `radial-gradient(circle at bottom right, ${concaveBgColor} ${CONCAVE_R}px, transparent ${CONCAVE_R + 1}px)`,
+                        pointerEvents: 'none',
+                      }}
+                    />
+                  )}
+
+                  <div className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 transition-all ${
+                    isActive 
+                      ? (isDark ? 'bg-[#1C1C1E]' : 'bg-emerald-50') 
+                      : 'bg-white/20'
+                  }`}>
+                    <item.icon size={16} className={isActive ? (isDark ? 'text-[#34C759]' : 'text-emerald-600') : 'text-white'} />
+                  </div>
+                  <span className="truncate">{item.name}</span>
+
+                  {/* Patch concave BAS */}
+                  {isActive && (
+                    <span
+                      aria-hidden
+                      style={{
+                        position: 'absolute',
+                        right: 0,
+                        bottom: -CONCAVE_R,
+                        width: CONCAVE_R,
+                        height: CONCAVE_R,
+                        background: `radial-gradient(circle at top right, ${concaveBgColor} ${CONCAVE_R}px, transparent ${CONCAVE_R + 1}px)`,
+                        pointerEvents: 'none',
+                      }}
+                    />
+                  )}
                 </Link>
               )
             })}
@@ -186,77 +320,101 @@ export default function NavbarAgence() {
         </div>
 
         {/* Section Bas : Profil & Déconnexion */}
-        <div className="pt-4 border-t border-gray-100 space-y-2">
+        <div className="pt-4 border-t border-white/20 space-y-2">
           <button
             onClick={handleLock}
-            className="w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-2xl bg-blue-50 border border-blue-100 text-sm font-black text-blue-700 hover:bg-blue-100 transition-colors"
+            className={`w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-2xl border text-sm font-black transition-all cursor-pointer ${
+              isDark 
+                ? 'bg-[#2C2C2E] border-[#38383A] text-[#F5F5F7] hover:bg-[#38383A]' 
+                : 'bg-white/15 border-white/25 text-white hover:bg-white/25'
+            }`}
             title="Verrouiller"
           >
             <LockKeyhole size={18} />
             <span>Verrouiller</span>
           </button>
 
-          <div className="flex items-center justify-between gap-3 rounded-2xl bg-gray-50 px-2 py-2">
+          <div className={`flex items-center justify-between gap-3 rounded-2xl px-2 py-2 ${
+            isDark ? 'bg-[#2C2C2E]/60 border border-[#38383A]' : 'bg-white/10'
+          }`}>
             <div className="flex items-center gap-3 min-w-0">
-              <div className="w-9 h-9 rounded-full bg-gray-100 border border-gray-200 shadow-sm overflow-hidden shrink-0">
-                <Image src={`https://ui-avatars.com/api/?name=${encodeURIComponent(userName || nomAgence || 'User')}&background=f0fdf4&color=047857`} alt="Avatar" width={36} height={36} />
+              <div className="w-9 h-9 rounded-full bg-white/20 border-2 border-white/40 overflow-hidden shadow-inner shrink-0">
+                <Image 
+                  src={`https://ui-avatars.com/api/?name=${avatarFallbackName}&background=f0fdf4&color=047857&bold=true`} 
+                  alt="Avatar" 
+                  width={36} 
+                  height={36} 
+                />
               </div>
               <div className="flex flex-col min-w-0">
-                <span className="text-xs font-bold text-gray-700 truncate">{userName || 'Utilisateur'}</span>
-                <span className="text-[10px] text-gray-400 capitalize">{role}</span>
+                <span className="text-xs font-bold text-white truncate">{userName || 'Utilisateur'}</span>
+                <span className={`text-[10px] uppercase font-medium ${isDark ? 'text-[#8E8E93]' : 'text-emerald-50/80'}`}>{role}</span>
               </div>
             </div>
-            <button onClick={handleLogout} className="p-2 text-gray-400 hover:text-red-600 transition-colors shrink-0" title="Déconnexion">
+            <button 
+              onClick={handleLogout} 
+              className="p-2 text-white/80 hover:text-white hover:bg-white/15 rounded-xl transition-all shrink-0 cursor-pointer" 
+              title="Déconnexion"
+            >
               <LogOut size={18} />
             </button>
           </div>
         </div>
       </nav>
 
-      {/* --- 📱 MOBILE NAV PREMIUM --- */}
+      {/* --- 📱 MOBILE BOTTOM NAV & DRAWER --- */}
       <div className="md:hidden">
         
         {/* BARRE DE NAVIGATION FIXE EN BAS */}
         <div 
-          className="fixed bottom-0 left-0 right-0 h-20 bg-white/80 backdrop-blur-md border-t border-slate-100 rounded-t-[2.2rem] shadow-[0_-10px_30px_rgba(0,0,0,0.04)] z-[90] flex items-center justify-between px-4 pb-2"
+          className={`fixed bottom-0 left-0 right-0 h-20 backdrop-blur-md border-t rounded-t-[2.2rem] z-[90] flex items-center justify-between px-4 pb-2 transition-colors duration-150 ${
+            isDark 
+              ? 'bg-[#1C1C1E]/95 border-[#2C2C2E] shadow-[0_-10px_30px_rgba(0,0,0,0.5)]' 
+              : 'bg-white/80 border-slate-100 shadow-[0_-10px_30px_rgba(0,0,0,0.04)]'
+          }`}
         >
-          {/* Éléments de gauche (Boutons 1 & 2) */}
+          {/* Éléments de gauche */}
           <div className="flex flex-1 justify-around items-center">
             {leftItems.map((item) => (
               <Link
                 key={item.name}
                 href={item.href}
-                className="flex flex-col items-center justify-center gap-1 w-14 h-14 text-slate-400 active:scale-90 transition-transform duration-150"
+                className={`flex flex-col items-center justify-center gap-1 w-14 h-14 active:scale-90 transition-transform duration-150 ${
+                  isDark ? 'text-[#8E8E93]' : 'text-slate-400'
+                }`}
               >
-                <item.icon size={22} className="text-slate-400" />
-                <span className="text-[10px] font-medium text-slate-400 truncate max-w-[65px]">{item.name}</span>
+                <item.icon size={22} className={isDark ? 'text-[#8E8E93]' : 'text-slate-400'} />
+                <span className={`text-[10px] font-medium truncate max-w-[65px] ${isDark ? 'text-[#8E8E93]' : 'text-slate-400'}`}>{item.name}</span>
               </Link>
             ))}
           </div>
 
-          {/* 3ÈME BOUTON CENTRAL : LE GRAND BOUTON ROND EMERAUDE (+ / X) */}
+          {/* Bouton central émeraude */}
           <div className="relative w-16 h-16 flex items-center justify-center shrink-0 -translate-y-4">
             <button
               onClick={() => setIsMenuOpen(!isMenuOpen)}
-              className={`w-16 h-16 rounded-full flex items-center justify-center text-white shadow-lg transition-all duration-300 active:scale-95 border-4 border-white
+              className={`w-16 h-16 rounded-full flex items-center justify-center text-white shadow-lg transition-all duration-300 active:scale-95 border-4 cursor-pointer
+                ${isDark ? 'border-[#1C1C1E]' : 'border-white'}
                 ${isMenuOpen 
                   ? 'bg-rose-500 rotate-45 shadow-rose-300' 
-                  : 'bg-emerald-600 shadow-emerald-200'}`}
+                  : (isDark ? 'bg-[#34C759] text-black shadow-[#34C759]/20' : 'bg-emerald-600 shadow-emerald-200')}`}
             >
               <Plus size={28} className="transition-transform duration-200" />
             </button>
           </div>
 
-          {/* Éléments de droite (Boutons 3 & 4) */}
+          {/* Éléments de droite */}
           <div className="flex flex-1 justify-around items-center">
             {rightItems.map((item) => (
               <Link
                 key={item.name}
                 href={item.href}
-                className="flex flex-col items-center justify-center gap-1 w-14 h-14 text-slate-400 active:scale-90 transition-transform duration-150"
+                className={`flex flex-col items-center justify-center gap-1 w-14 h-14 active:scale-90 transition-transform duration-150 ${
+                  isDark ? 'text-[#8E8E93]' : 'text-slate-400'
+                }`}
               >
-                <item.icon size={22} className="text-slate-400" />
-                <span className="text-[10px] font-medium text-slate-400 truncate max-w-[65px]">{item.name}</span>
+                <item.icon size={22} className={isDark ? 'text-[#8E8E93]' : 'text-slate-400'} />
+                <span className={`text-[10px] font-medium truncate max-w-[65px] ${isDark ? 'text-[#8E8E93]' : 'text-slate-400'}`}>{item.name}</span>
               </Link>
             ))}
           </div>
@@ -264,35 +422,40 @@ export default function NavbarAgence() {
 
         {/* MODALE DE FOND FLOUE */}
         <div 
-          className={`fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-[85] transition-opacity duration-300 
+          className={`fixed inset-0 bg-black/60 backdrop-blur-xs z-[85] transition-opacity duration-300 
             ${isMenuOpen ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'}`}
           onClick={() => setIsMenuOpen(false)}
         />
 
-        {/* COMPARTIMENT / TIROIR DE NAVIGATION MOBILE */}
+        {/* TIROIR DE NAVIGATION MOBILE */}
         <div 
-          className={`fixed bottom-0 left-0 right-0 z-[88] bg-white rounded-t-[2.5rem] border-t border-slate-100 shadow-2xl p-6 pb-28 max-h-[75vh] overflow-y-auto transition-transform duration-500 cubic-bezier(0.32, 0.94, 0.6, 1)
+          className={`fixed bottom-0 left-0 right-0 z-[88] rounded-t-[2.5rem] border-t shadow-2xl p-6 pb-28 max-h-[75vh] overflow-y-auto transition-transform duration-500 cubic-bezier(0.32, 0.94, 0.6, 1)
+            ${isDark ? 'bg-[#1C1C1E] border-[#2C2C2E]' : 'bg-white border-slate-100'}
             ${isMenuOpen ? 'translate-y-0' : 'translate-y-full'}`}
         >
-          <div className="w-12 h-1 bg-slate-200 rounded-full mx-auto mb-5" />
+          <div className={`w-12 h-1 rounded-full mx-auto mb-5 ${isDark ? 'bg-[#38383A]' : 'bg-slate-200'}`} />
 
-          <div className="flex items-center gap-4 mb-6 pb-4 border-b border-slate-100">
-            <div className="w-10 h-10 bg-emerald-50 border border-emerald-100 rounded-xl flex items-center justify-center text-emerald-600 font-bold shrink-0">
+          <div className={`flex items-center gap-4 mb-6 pb-4 border-b ${isDark ? 'border-[#2C2C2E]' : 'border-slate-100'}`}>
+            <div className={`w-10 h-10 border rounded-xl flex items-center justify-center font-bold shrink-0 ${
+              isDark ? 'bg-[#2C2C2E] border-[#38383A] text-[#34C759]' : 'bg-emerald-50 border-emerald-100 text-emerald-600'
+            }`}>
               <Building2 size={20} />
             </div>
             <div className="min-w-0 flex-1">
-              <p className="text-sm font-black text-slate-800 truncate uppercase">{nomAgence}</p>
-              <p className="text-[10px] font-bold text-emerald-600 uppercase tracking-wider">Menu Général</p>
+              <p className={`text-sm font-black truncate uppercase ${isDark ? 'text-[#F5F5F7]' : 'text-slate-800'}`}>{nomAgence}</p>
+              <p className={`text-[10px] font-bold uppercase tracking-wider ${isDark ? 'text-[#34C759]' : 'text-emerald-600'}`}>Menu Général</p>
             </div>
           </div>
 
-          {/* Grille complète du Drawer mobile */}
+          {/* Grille du Drawer mobile */}
           <div className="grid grid-cols-2 gap-2.5">
             {role === 'admin' && (
               <Link
                 href="/agence/admin"
                 onClick={() => setIsMenuOpen(false)}
-                className="flex flex-col items-center justify-center gap-2 p-3.5 rounded-2xl bg-amber-50 border border-amber-100 text-amber-700 active:scale-[0.98] transition-transform"
+                className={`flex flex-col items-center justify-center gap-2 p-3.5 rounded-2xl border active:scale-[0.98] transition-transform ${
+                  isDark ? 'bg-[#FF9F0A]/15 border-[#FF9F0A]/30 text-[#FF9F0A]' : 'bg-amber-50 border-amber-100 text-amber-700'
+                }`}
               >
                 <ShieldCheck size={20} />
                 <span className="text-[11px] font-black uppercase tracking-wide">Administration</span>
@@ -308,11 +471,11 @@ export default function NavbarAgence() {
                   onClick={() => setIsMenuOpen(false)}
                   className={`flex flex-col items-center justify-center gap-2 p-3.5 rounded-2xl border transition-all active:scale-[0.98]
                     ${isActive
-                      ? 'bg-emerald-600 border-emerald-600 text-white font-bold shadow-lg shadow-emerald-100'
-                      : 'bg-slate-50/50 border-slate-100 text-slate-600'
+                      ? (isDark ? 'bg-[#34C759] border-[#34C759] text-black font-bold' : 'bg-emerald-600 border-emerald-600 text-white font-bold shadow-lg shadow-emerald-100')
+                      : (isDark ? 'bg-[#2C2C2E] border-[#38383A] text-[#D1D1D6]' : 'bg-slate-50/50 border-slate-100 text-slate-600')
                     }`}
                 >
-                  <item.icon size={19} className={isActive ? 'text-white' : 'text-slate-400'} />
+                  <item.icon size={19} className={isActive ? (isDark ? 'text-black' : 'text-white') : (isDark ? 'text-[#8E8E93]' : 'text-slate-400')} />
                   <span className="text-[11px] font-bold tracking-tight text-center truncate w-full">
                     {item.name}
                   </span>
@@ -323,18 +486,23 @@ export default function NavbarAgence() {
             {/* Bouton de verrouillage */}
             <button
               onClick={handleLock}
-              className="flex flex-col items-center justify-center gap-2 p-3.5 rounded-2xl bg-blue-50 text-blue-700 border border-blue-100 col-span-2 active:scale-[0.98] transition-transform"
+              className={`flex flex-col items-center justify-center gap-2 p-3.5 rounded-2xl border col-span-2 active:scale-[0.98] transition-transform cursor-pointer ${
+                isDark ? 'bg-[#0A84FF]/15 text-[#0A84FF] border-[#0A84FF]/30' : 'bg-blue-50 text-blue-700 border-blue-100'
+              }`}
             >
               <LockKeyhole size={19} />
               <span className="text-[11px] font-black uppercase tracking-wider">Verrouiller</span>
             </button>
+
             {/* Bouton de déconnexion */}
             <button
               onClick={() => {
                 setIsMenuOpen(false)
                 handleLogout()
               }}
-              className="flex flex-col items-center justify-center gap-2 p-3.5 rounded-2xl bg-red-50 text-red-600 border border-red-100 col-span-2 mt-2 active:scale-[0.98] transition-transform"
+              className={`flex flex-col items-center justify-center gap-2 p-3.5 rounded-2xl border col-span-2 mt-2 active:scale-[0.98] transition-transform cursor-pointer ${
+                isDark ? 'bg-[#FF453A]/15 text-[#FF453A] border-[#FF453A]/30' : 'bg-red-50 text-red-600 border-red-100'
+              }`}
             >
               <LogOut size={19} />
               <span className="text-[11px] font-black uppercase tracking-wider">Déconnexion</span>

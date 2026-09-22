@@ -1,458 +1,805 @@
 'use client'
-import { useEffect, useState } from 'react'
-import { useQuery } from '@powersync/react'
-import { useYear } from '@/lib/YearContext'
-import { YearSelector } from '@/components/YearSelector'
+
+import React, { useState, useMemo, useEffect } from 'react'
 import Link from 'next/link'
-import { useRouter } from 'next/navigation'
-import { useWorkProfile } from '@/lib/ProfileContext'
-import { 
-  ArrowLeft, 
-  Plus, 
-  Search, 
-  TrendingUp, 
-  Plane, 
-  Globe, 
-  Coins, 
-  Receipt,
-  CheckCircle2,
-  Clock,
-  XCircle,
-  Phone,
-  Briefcase,
-  Download
+import { useQuery } from '@powersync/react'
+import { supabase, getUser } from '../../../lib/supabase'
+import {
+  ArrowLeft, Plus, Search, Calendar, ArrowRightLeft,
+  Plane, Globe, Hotel, Bus, Receipt, Package, FileText,
+  Smartphone, Filter, X, Moon, Sun
 } from 'lucide-react'
 
-interface Operation {
+// ─── Types ───────────────────────────────────────────────────────────────────
+
+type Operation = {
   id: string
   created_at: string
   type_activite: string
   client_nom: string
-  client_telephone?: string
-  description: string
-  compagnie_fournisseur?: string
-  reference_document?: string
+  client_telephone: string | null
+  compagnie_fournisseur: string | null
+  reference_document: string | null
+  description: string | null
   prix_achat: number
   prix_vente: number
   frais_annexes: number
   montant_verse: number
-  statut_paiement: 'PAYE' | 'AVANCE' | 'NON_PAYE'
-  mode_paiement: string
   benefice: number
+  statut_paiement: string
+  mode_paiement: string
+  montant_transfert?: number | null
 }
 
+const CATEGORIES: { id: string; label: string; icon: React.ElementType }[] = [
+  { id: 'TOUT', label: 'Toutes les opérations', icon: FileText },
+  { id: 'TRANSFERT', label: "Transferts d'argent", icon: ArrowRightLeft },
+  { id: 'BILLET', label: 'Billets d’avion', icon: Plane },
+  { id: 'VISA', label: 'Visas & Séjours', icon: Globe },
+  { id: 'HOTEL', label: 'Hôtels & Hébergements', icon: Hotel },
+  { id: 'TRANSPORT', label: 'Transports', icon: Bus },
+  { id: 'ASSURANCE', label: 'Assurances', icon: Receipt },
+  { id: 'PACKAGE', label: 'Packages Voyages', icon: Package },
+]
+
 export default function JournalOperations() {
-  const { selectedYear } = useYear()
-  const { isDirection, loading: profileLoading } = useWorkProfile()
-  const router = useRouter()
-  const [searchTerm, setSearchTerm] = useState('')
-  const { data: operations, isLoading: loading } = useQuery<Operation>(
-    'SELECT * FROM operations_agence ORDER BY created_at DESC',
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null)
+  const [agenceId, setAgenceId] = useState<string | null>(null)
+
+  // 🌓 GESTION DU THÈME SOMBRE (Synchronisé avec le reste de l'application)
+  const [isDark, setIsDark] = useState<boolean>(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('compta_theme_dark') === 'true'
+    }
+    return false
+  })
+
+  const toggleDarkMode = () => {
+    setIsDark(prev => {
+      const next = !prev
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('compta_theme_dark', String(next))
+      }
+      return next
+    })
+  }
+
+  // 1. Session & Profil Agence
+  useEffect(() => {
+    async function initUser() {
+      const { data } = await supabase.auth.getSession()
+      if (data.session?.user?.id) {
+        setCurrentUserId(data.session.user.id)
+      } else {
+        const { data: userData } = await getUser()
+        if (userData?.user?.id) setCurrentUserId(userData.user.id)
+      }
+    }
+    initUser()
+  }, [])
+
+  const { data: profile } = useQuery<{ agence_id: string }>(
+    `SELECT agence_id FROM profiles WHERE id = ? LIMIT 1`,
+    [currentUserId ?? '']
   )
 
   useEffect(() => {
-    if (!profileLoading && !isDirection) router.replace('/agence/dashboard')
-  }, [isDirection, profileLoading, router])
-
-  if (profileLoading || !isDirection) return null
-
-  const operationsFiltrees = (operations ?? []).filter(op => {
-    const matchYear = selectedYear === 'all' ? true : new Date(op.created_at).getFullYear() === selectedYear
-    const matchSearch =
-      op.client_nom.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      op.type_activite.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      (op.description || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
-      (op.client_telephone || '').includes(searchTerm)
-
-    return matchYear && matchSearch
-  })
-
-  const totalBenefice = operationsFiltrees.reduce((acc, curr) => acc + curr.benefice, 0)
-
-  // Rendu de l'icône de l'activité
-  const renderIcon = (type: string) => {
-    switch (type) {
-      case 'BILLET': return <Plane className="text-blue-600" size={18} />
-      case 'VISA': return <Globe className="text-purple-600" size={18} />
-      case 'TRANSFERT': return <Coins className="text-amber-600" size={18} />
-      default: return <Receipt className="text-teal-600" size={18} />
+    if (profile?.[0]?.agence_id) {
+      setAgenceId(profile[0].agence_id)
     }
-  }
+  }, [profile])
 
-  // Rendu du badge de règlement
-  const renderStatusBadge = (status: string, op: Operation) => {
-    const reste = op.prix_vente - (op.montant_verse || 0)
-    switch (status) {
-      case 'PAYE':
-        return (
-          <span className="inline-flex items-center gap-1 bg-emerald-50 text-emerald-700 px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider border border-emerald-200">
-            <CheckCircle2 size={12} /> Réglé
-          </span>
-        )
-      case 'AVANCE':
-        return (
-          <div className="flex flex-col items-end gap-0.5">
-            <span className="inline-flex items-center gap-1 bg-orange-50 text-orange-700 px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider border border-orange-200">
-              <Clock size={12} /> Avance
-            </span>
-            <span className="text-[9px] font-bold text-orange-600">Reste: {reste.toLocaleString()} F</span>
-          </div>
-        )
-      default:
-        return (
-          <span className="inline-flex items-center gap-1 bg-red-50 text-red-700 px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider border border-red-200">
-            <XCircle size={12} /> Dette
-          </span>
-        )
+  // 2. Requête SQLite locale PowerSync
+  const { data: operationsRaw = [] } = useQuery<Operation>(
+    `SELECT 
+      id, created_at, type_activite, client_nom, client_telephone,
+      compagnie_fournisseur, reference_document, description,
+      prix_achat, prix_vente, frais_annexes, montant_verse, benefice,
+      statut_paiement, mode_paiement, montant_transfert
+     FROM operations_agence
+     WHERE agence_id = ? OR agence_id IS NULL
+     ORDER BY created_at DESC`,
+    [agenceId ?? '']
+  )
+
+  // ─── Période temporelle (Mois en cours par défaut) ─────────────────────────
+
+  const now = new Date()
+  const currentMonthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
+  const currentYearKey = `${now.getFullYear()}`
+
+  const [filterPeriodType, setFilterPeriodType] = useState<'MOIS' | 'ANNEE' | 'TOUT'>('MOIS')
+  const [selectedMonth, setSelectedMonth] = useState<string>(currentMonthKey)
+  const [selectedYear, setSelectedYear] = useState<string>(currentYearKey)
+
+  // Filtres principaux
+  const [selectedCategory, setSelectedCategory] = useState<string>('TOUT')
+  const [searchQuery, setSearchQuery] = useState<string>('')
+  const [statusFilter, setStatusFilter] = useState<string>('TOUS')
+
+  // ─── Sous-Filtres spécifiques Transfert d'Argent ───────────────────────────
+  const [transfertOperateur, setTransfertOperateur] = useState<string>('TOUS')
+  const [transfertSens, setTransfertSens] = useState<'TOUS' | 'DEPOT' | 'RETRAIT'>('TOUS')
+
+  // Logique de génération des années basée sur l'historique
+  const anneesDisponibles = useMemo(() => {
+    const yearsSet = new Set<string>()
+    yearsSet.add(String(now.getFullYear()))
+
+    operationsRaw.forEach((op) => {
+      const d = new Date(op.created_at)
+      if (!isNaN(d.getTime())) {
+        yearsSet.add(String(d.getFullYear()))
+      }
+    })
+
+    return Array.from(yearsSet).sort((a, b) => Number(b) - Number(a))
+  }, [operationsRaw, now])
+
+  // Génération des 18 derniers mois pour le sélecteur
+  const optionsMois = useMemo(() => {
+    const list: { key: string; label: string }[] = []
+    const d = new Date()
+    for (let i = 0; i < 18; i++) {
+      const dateTarget = new Date(d.getFullYear(), d.getMonth() - i, 1)
+      const key = `${dateTarget.getFullYear()}-${String(dateTarget.getMonth() + 1).padStart(2, '0')}`
+      const label = dateTarget.toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' })
+      list.push({ key, label: label.charAt(0).toUpperCase() + label.slice(1) })
     }
-  }
+    return list
+  }, [])
 
-  // Fonction d'exportation PDF via la fenêtre d'impression native avec styles journalistiques financiers (Format A4 Paysage)
-  const exportToPdf = () => {
-    if (operationsFiltrees.length === 0) {
-      alert('Aucune donnée à exporter')
-      return
-    }
+  // Liste dynamique des opérateurs de transfert présents dans les données
+  const operateursPresents = useMemo(() => {
+    const ops = new Set<string>()
+    operationsRaw
+      .filter((op) => op.type_activite === 'TRANSFERT' && op.compagnie_fournisseur)
+      .forEach((op) => ops.add(op.compagnie_fournisseur!))
+    return Array.from(ops)
+  }, [operationsRaw])
 
-    const printWindow = window.open('', '_blank')
-    if (!printWindow) return
+  // ─── Filtrage Dynamique ───────────────────────────────────────────────────
 
-    const htmlContent = `
-      <html>
-      <head>
-        <title>JOURNAL DES OPÉRATIONS FINANCIÈRES</title>
-        <style>
-          @page { size: A4 landscape; margin: 15mm 10mm 15mm 10mm; }
-          body { font-family: "Georgia", "Times New Roman", serif; color: #1f2937; margin: 0; padding: 0; background-color: #ffffff; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-          .container { width: 100%; margin: 0 auto; }
-          
-          /* En-tête style grand quotidien / revue financière */
-          .journal-header { border-bottom: 3px double #111827; text-align: center; padding-bottom: 12px; margin-bottom: 25px; }
-          .journal-meta { display: flex; justify-content: space-between; font-family: "Arial", sans-serif; font-size: 9pt; font-weight: bold; text-transform: uppercase; letter-spacing: 1px; color: #4b5563; border-bottom: 1px solid #e5e7eb; padding-bottom: 5px; margin-bottom: 15px; }
-          .journal-title { font-family: "Times New Roman", serif; font-size: 28pt; font-weight: 900; letter-spacing: -0.5px; text-transform: uppercase; color: #111827; margin: 0; }
-          .journal-subtitle { font-family: "Arial", sans-serif; font-size: 10pt; font-weight: 500; color: #6b7280; margin-top: 5px; letter-spacing: 2px; text-transform: uppercase; }
-          
-          /* Structure du tableau financier */
-          table { width: 100%; border-collapse: collapse; table-layout: fixed; font-family: "Arial", sans-serif; margin-top: 10px; }
-          th { font-family: "Arial", sans-serif; font-weight: 700; font-size: 8.5pt; text-transform: uppercase; letter-spacing: 0.5px; color: #111827; background-color: #f8fafc; border-top: 1.5px solid #111827; border-bottom: 1.5px solid #111827; padding: 10px 6px; text-align: left; }
-          td { font-size: 9pt; padding: 10px 6px; border-bottom: 1px solid #e2e8f0; color: #334155; vertical-align: middle; word-wrap: break-word; }
-          
-          /* Alignements et colonnes strictes pour format Paysage */
-          .col-date { width: 9%; }
-          .col-type { width: 10%; text-transform: uppercase; font-weight: bold; font-size: 8pt; color: #1e3a8a; }
-          .col-client { width: 22%; }
-          .col-desc { width: 25%; font-size: 8.5pt; color: #475569; line-height: 1.3; }
-          .col-statut { width: 11%; text-align: center; }
-          .col-montant { width: 11%; text-align: right; font-weight: 700; color: #0f172a; }
-          .col-marge { width: 12%; text-align: right; font-weight: 700; }
-          
-          /* Typographies spécifiques du tableau */
-          .client-title { font-weight: 700; color: #111827; font-size: 9.5pt; }
-          .client-sub { font-size: 8pt; color: #64748b; margin-top: 2px; }
-          .desc-meta { font-size: 8pt; font-style: italic; color: #2563eb; margin-top: 3px; font-weight: 500; }
-          
-          /* Signaux financiers discrets et pros */
-          .badge-status { display: inline-block; padding: 3px 6px; border-radius: 4px; font-size: 7.5pt; font-weight: bold; text-align: center; letter-spacing: 0.5px; }
-          .status-paye { background-color: #f0fdf4; color: #166534; border: 1px solid #bbf7d0; }
-          .status-avance { background-color: #fff7ed; color: #9a3412; border: 1px solid #fed7aa; }
-          .status-dette { background-color: #fef2f2; color: #991b1b; border: 1px solid #fca5a5; }
-          
-          .marge-positive { color: #15803d; }
-          .marge-negative { color: #b91c1c; }
-          
-          /* Ligne des totaux comptables */
-          .total-row td { border-top: 1.5px solid #111827; border-bottom: 3px double #111827; font-family: "Arial", sans-serif; font-weight: bold; background-color: #f8fafc; padding: 14px 6px; }
-          .total-label { text-align: right; font-size: 10pt; color: #111827; letter-spacing: 0.5px; }
-          .total-value { text-align: right; font-size: 11pt; color: #15803d; }
-          
-          .journal-footer { margin-top: 35px; border-top: 1px solid #e2e8f0; padding-top: 10px; font-family: "Arial", sans-serif; font-size: 7.5pt; color: #94a3b8; text-align: center; letter-spacing: 1px; }
-        </style>
-      </head>
-      <body>
-        <div class="container">
-          <div class="journal-header">
-            <div class="journal-meta">
-              <div>SECTION : OPÉRATIONS ET RENTABILITÉ</div>
-              <div>ÉDITION DU : ${new Date().toLocaleDateString('fr-FR')} à ${new Date().toLocaleTimeString('fr-FR', {hour: '2-digit', minute:'2-digit'})}</div>
-            </div>
-            <h1 class="journal-title">Journal de l'Agence</h1>
-            <div class="journal-subtitle">Rapport Périodique des Flux Financiers & Marges Nettes</div>
-          </div>
-          
-          <table>
-            <thead>
-              <tr>
-                <th class="col-date">Date</th>
-                <th class="col-type">Activité</th>
-                <th class="col-client">Client / Contact</th>
-                <th class="col-desc">Désignation & Références</th>
-                <th class="col-statut">Règlement</th>
-                <th class="col-montant">C.A. (CFA)</th>
-                <th class="col-marge">Marge (CFA)</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${operationsFiltrees.map((op) => {
-                const reste = op.prix_vente - (op.montant_verse || 0);
-                const statusClass = op.statut_paiement === 'PAYE' ? 'status-paye' : op.statut_paiement === 'AVANCE' ? 'status-avance' : 'status-dette';
-                const statusLabel = op.statut_paiement === 'PAYE' ? 'RÉGLÉ' : op.statut_paiement === 'AVANCE' ? 'AVANCE' : 'DETTE';
-                const margeClass = op.benefice >= 0 ? 'marge-positive' : 'marge-negative';
-                
-                return `
-                <tr>
-                  <td>${new Date(op.created_at).toLocaleDateString('fr-FR')}</td>
-                  <td class="col-type">${op.type_activite}</td>
-                  <td>
-                    <div class="client-title">${op.client_nom}</div>
-                    ${op.client_telephone ? `<div class="client-sub">${op.client_telephone}</div>` : ''}
-                  </td>
-                  <td>
-                    <div>${op.description || '-'}</div>
-                    ${op.compagnie_fournisseur ? `<div class="desc-meta">${op.compagnie_fournisseur} ${op.reference_document ? `[${op.reference_document}]` : ''}</div>` : ''}
-                  </td>
-                  <td class="col-statut">
-                    <span class="badge-status ${statusClass}">${statusLabel}</span>
-                    ${op.statut_paiement === 'AVANCE' ? `<div style="font-size: 7.5pt; color: #c2410c; font-weight: bold; margin-top: 3px;">Solde : ${reste.toLocaleString('fr-FR')}</div>` : ''}
-                  </td>
-                  <td class="col-montant">${op.prix_vente.toLocaleString('fr-FR')}</td>
-                  <td class="col-marge ${margeClass}">
-                    ${op.benefice >= 0 ? '+' : ''}${op.benefice.toLocaleString('fr-FR')}
-                  </td>
-                </tr>
-                `
-              }).join('')}
-              <tr class="total-row">
-                <td colspan="5" class="total-label">BÉNÉFICE COMPTABLE NET GLOBAL</td>
-                <td colspan="2" class="total-value">${totalBenefice.toLocaleString('fr-FR')} CFA</td>
-              </tr>
-            </tbody>
-          </table>
-          <div class="journal-footer">
-            DOCUMENT FINANCIER CERTIFIÉ • SMART VISION MANAGEMENT ERP • CONFIDENTIEL
-          </div>
-        </div>
-        <script>
-          window.onload = function() {
-            window.print();
-            setTimeout(function() { window.close(); }, 500);
-          };
-        </script>
-      </body>
-      </html>
-    `
+  const operationsFiltrees = useMemo(() => {
+    return operationsRaw.filter((op) => {
+      const opDate = new Date(op.created_at)
+      if (isNaN(opDate.getTime())) return false
 
-    printWindow.document.write(htmlContent)
-    printWindow.document.close()
-  }
+      // 1. Filtrage Temporel
+      if (filterPeriodType === 'MOIS') {
+        const opMonthKey = `${opDate.getFullYear()}-${String(opDate.getMonth() + 1).padStart(2, '0')}`
+        if (opMonthKey !== selectedMonth) return false
+      } else if (filterPeriodType === 'ANNEE') {
+        if (String(opDate.getFullYear()) !== selectedYear) return false
+      }
+
+      // 2. Filtrage Catégorie
+      if (selectedCategory !== 'TOUT' && op.type_activite !== selectedCategory) {
+        return false
+      }
+
+      // 3. Sous-filtres spécifiques aux Transferts d'argent
+      if (selectedCategory === 'TRANSFERT') {
+        if (transfertOperateur !== 'TOUS' && op.compagnie_fournisseur !== transfertOperateur) {
+          return false
+        }
+
+        if (transfertSens !== 'TOUS') {
+          const desc = (op.description || '').toLowerCase()
+          const isRetrait = desc.includes('retrait')
+          if (transfertSens === 'RETRAIT' && !isRetrait) return false
+          if (transfertSens === 'DEPOT' && isRetrait) return false
+        }
+      }
+
+      // 4. Statut de paiement
+      if (statusFilter !== 'TOUS' && op.statut_paiement !== statusFilter) {
+        return false
+      }
+
+      // 5. Recherche textuelle
+      if (searchQuery.trim()) {
+        const q = searchQuery.toLowerCase()
+        const matchClient = op.client_nom?.toLowerCase().includes(q)
+        const matchCompagnie = op.compagnie_fournisseur?.toLowerCase().includes(q)
+        const matchRef = op.reference_document?.toLowerCase().includes(q)
+        const matchTel = op.client_telephone?.toLowerCase().includes(q)
+        if (!matchClient && !matchCompagnie && !matchRef && !matchTel) return false
+      }
+
+      return true
+    })
+  }, [
+    operationsRaw, filterPeriodType, selectedMonth, selectedYear,
+    selectedCategory, transfertOperateur, transfertSens, statusFilter, searchQuery
+  ])
+
+  // ─── Statistiques Financières de la Sélection ──────────────────────────────
+
+  const stats = useMemo(() => {
+    let ca = 0
+    let gain = 0
+    let encaisse = 0
+    let dette = 0
+
+    operationsFiltrees.forEach((op) => {
+      const vente = Number(op.prix_vente) || 0
+      const verse = Number(op.montant_verse) || 0
+      const ben = Number(op.benefice) || 0
+
+      ca += vente
+      gain += ben
+      encaisse += verse
+      if (op.statut_paiement === 'AVANCE' || op.statut_paiement === 'NON_PAYE') {
+        dette += Math.max(0, vente - verse)
+      }
+    })
+
+    return { ca, gain, encaisse, dette, totalOps: operationsFiltrees.length }
+  }, [operationsFiltrees])
+
+  // Compteurs par catégorie selon la période temporelle choisie
+  const countsByCategory = useMemo(() => {
+    const map: Record<string, number> = { TOUT: 0 }
+    operationsRaw.forEach((op) => {
+      const opDate = new Date(op.created_at)
+      if (filterPeriodType === 'MOIS') {
+        const opMonthKey = `${opDate.getFullYear()}-${String(opDate.getMonth() + 1).padStart(2, '0')}`
+        if (opMonthKey !== selectedMonth) return
+      } else if (filterPeriodType === 'ANNEE') {
+        if (String(opDate.getFullYear()) !== selectedYear) return
+      }
+      map.TOUT = (map.TOUT || 0) + 1
+      map[op.type_activite] = (map[op.type_activite] || 0) + 1
+    })
+    return map
+  }, [operationsRaw, filterPeriodType, selectedMonth, selectedYear])
 
   return (
-    <div className="min-h-screen bg-gray-50 pb-24 md:py-8 px-4">
-      <div className="max-w-6xl mx-auto">
-        
-        {/* EN-TÊTE ET GRILLE DE RÉSUMÉ */}
-        <div className="flex flex-col md:flex-row md:items-center justify-between mb-6 gap-4 pt-4 md:pt-0">
-          <div>
-            <Link href="/selection" className="inline-flex items-center text-gray-500 hover:text-gray-900 font-bold mb-1 text-sm transition-colors">
-              <ArrowLeft className="mr-1" size={16} />
-              Menu Principal
-            </Link>
-            <h1 className="text-2xl md:text-3xl font-black text-gray-900 tracking-tight uppercase">Journal Financier</h1>
-          </div>
-          
-          <div className="bg-white border border-gray-100 p-4 md:p-6 rounded-3xl shadow-sm flex items-center justify-between md:justify-start gap-4 w-full md:w-auto">
-            <div className="bg-emerald-50 text-emerald-600 p-3 rounded-2xl">
-              <TrendingUp size={24} />
-            </div>
-            <div>
-              <p className="text-[10px] font-black text-gray-400 uppercase tracking-wider">Bénéfice Net Filtre</p>
-              <p className="text-xl md:text-2xl font-black text-emerald-600">{totalBenefice.toLocaleString()} CFA</p>
-            </div>
-          </div>
-        </div>
-
-        <div className="mb-6 flex justify-end">
-          <YearSelector />
-        </div>
-
-        {/* RECHERCHE ET ACTIONS */}
-        <div className="flex flex-col sm:flex-row gap-3 mb-6">
-          <div className="relative flex-1">
-            <input 
-              type="text"
-              placeholder="Rechercher un client, téléphone, vol..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full pl-11 pr-4 py-3.5 rounded-2xl border-2 border-transparent bg-white font-bold text-sm focus:border-gray-950 outline-none shadow-sm transition-all"
-            />
-            <Search className="absolute left-4 top-4 text-gray-300" size={18} />
-          </div>
-          
-          {/* Boutons visibles uniquement sur PC/Tablette */}
-          <div className="hidden sm:flex gap-3">
-            <button 
-              onClick={exportToPdf}
-              className="bg-blue-600 hover:bg-blue-700 text-white px-6 rounded-2xl font-black text-sm uppercase flex items-center justify-center gap-2 transition-all shadow-md"
+    <div className={`min-h-screen pb-16 transition-colors duration-150 ${
+      isDark ? 'bg-[#000000] text-[#F5F5F7]' : 'bg-slate-50/50 text-slate-800'
+    }`}>
+      
+      {/* ─── BARRE SUPÉRIEURE ─── */}
+      <div className={`sticky top-0 z-30 backdrop-blur-md border-b px-4 lg:px-8 py-3 transition-colors ${
+        isDark ? 'bg-[#161618]/90 border-[#2C2C2E]' : 'bg-white/90 border-slate-200/80'
+      }`}>
+        <div className="max-w-7xl mx-auto flex items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <Link 
+              href="/agence/dashboard"
+              className={`p-1.5 rounded-lg transition-colors flex items-center ${
+                isDark ? 'text-[#8E8E93] hover:text-[#F5F5F7] hover:bg-[#2C2C2E]' : 'text-slate-500 hover:text-slate-900 hover:bg-slate-100'
+              }`}
             >
-              <Download size={18} /> Imprimer Journal PDF
+              <ArrowLeft size={18} />
+            </Link>
+            <div>
+              <h1 className={`text-sm sm:text-base font-bold tracking-tight leading-tight ${
+                isDark ? 'text-[#F5F5F7]' : 'text-slate-900'
+              }`}>
+                Journal des Ventes & Opérations
+              </h1>
+              <p className={`text-[11px] hidden sm:block ${isDark ? 'text-[#8E8E93]' : 'text-slate-400'}`}>
+                Historique comptable et ventilation des flux
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 sm:gap-3">
+            {/* 🌓 Bouton Mode Sombre : masqué sur mobile */}
+            <button
+              type="button"
+              onClick={toggleDarkMode}
+              className={`hidden md:flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold border transition-colors cursor-pointer ${
+                isDark 
+                  ? 'bg-[#2C2C2E] border-[#38383A] text-[#FFD60A] hover:bg-[#3A3A3C]' 
+                  : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-100 shadow-xs'
+              }`}
+              title={isDark ? 'Basculer en mode clair' : 'Basculer en mode sombre'}
+            >
+              {isDark ? <Sun size={14} className="text-[#FFD60A]" /> : <Moon size={14} className="text-slate-600" />}
+              <span>{isDark ? 'Mode clair' : 'Mode sombre'}</span>
             </button>
-            <Link href="/agence/nouvelle-operation" className="bg-gray-900 hover:bg-black text-white px-6 rounded-2xl font-black text-sm uppercase flex items-center justify-center gap-2 transition-all shadow-md">
-              <Plus size={18} /> Nouvelle Vente
+
+            <Link
+              href="/agence/nouvelle-operation"
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition-colors ${
+                isDark ? 'bg-[#FFFFFF] hover:bg-[#E5E5EA] text-[#000000]' : 'bg-slate-900 hover:bg-black text-white'
+              }`}
+            >
+              <Plus size={15} />
+              <span>Nouvelle Vente</span>
             </Link>
           </div>
         </div>
+      </div>
 
-        {/* AFFICHAGE CONSOLE/MOBILE : CARTES NATIVES INDIVIDUELLES */}
-        <div className="grid grid-cols-1 gap-3 sm:hidden">
-          {loading ? (
-            <div className="text-center py-12 text-sm font-bold text-gray-400 animate-pulse">Chargement en cours...</div>
-          ) : operationsFiltrees.map((op) => (
-            <div key={op.id} className="bg-white border border-gray-100 rounded-2xl p-4 shadow-sm space-y-3">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2.5">
-                  <div className="p-2 bg-gray-50 rounded-xl border border-gray-100">
-                    {renderIcon(op.type_activite)}
-                  </div>
-                  <div>
-                    <span className="text-xs font-black text-gray-900 uppercase tracking-tight block">{op.type_activite}</span>
-                    <span className="text-[10px] font-bold text-gray-400">{new Date(op.created_at).toLocaleDateString('fr-FR')}</span>
-                  </div>
-                </div>
-                {renderStatusBadge(op.statut_paiement, op)}
+      <div className="max-w-7xl mx-auto px-4 lg:px-8 py-4 sm:py-5 space-y-4">
+
+        {/* ─── SÉLECTION DE PÉRIODE ─── */}
+        <div className={`p-3.5 rounded-2xl border flex flex-col md:flex-row items-start md:items-center justify-between gap-3 transition-colors ${
+          isDark ? 'bg-[#1C1C1E] border-[#2C2C2E]' : 'bg-white border-slate-200/80'
+        }`}>
+          
+          <div className={`flex items-center gap-1.5 p-1 rounded-xl w-full sm:w-auto ${
+            isDark ? 'bg-[#2C2C2E]' : 'bg-slate-100'
+          }`}>
+            <button
+              onClick={() => setFilterPeriodType('MOIS')}
+              className={`flex-1 sm:flex-none px-3 py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer ${
+                filterPeriodType === 'MOIS' 
+                  ? (isDark ? 'bg-[#1C1C1E] text-[#F5F5F7] shadow-xs' : 'bg-white text-slate-900 shadow-xs') 
+                  : (isDark ? 'text-[#8E8E93] hover:text-[#F5F5F7]' : 'text-slate-600 hover:text-slate-900')
+              }`}
+            >
+              Mois
+            </button>
+            <button
+              onClick={() => setFilterPeriodType('ANNEE')}
+              className={`flex-1 sm:flex-none px-3 py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer ${
+                filterPeriodType === 'ANNEE' 
+                  ? (isDark ? 'bg-[#1C1C1E] text-[#F5F5F7] shadow-xs' : 'bg-white text-slate-900 shadow-xs') 
+                  : (isDark ? 'text-[#8E8E93] hover:text-[#F5F5F7]' : 'text-slate-600 hover:text-slate-900')
+              }`}
+            >
+              Année
+            </button>
+            <button
+              onClick={() => setFilterPeriodType('TOUT')}
+              className={`flex-1 sm:flex-none px-3 py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer ${
+                filterPeriodType === 'TOUT' 
+                  ? (isDark ? 'bg-[#1C1C1E] text-[#F5F5F7] shadow-xs' : 'bg-white text-slate-900 shadow-xs') 
+                  : (isDark ? 'text-[#8E8E93] hover:text-[#F5F5F7]' : 'text-slate-600 hover:text-slate-900')
+              }`}
+            >
+              Tout afficher
+            </button>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
+            {filterPeriodType === 'MOIS' && (
+              <div className="flex items-center gap-2 w-full sm:w-auto">
+                <Calendar size={15} className={`shrink-0 ${isDark ? 'text-[#8E8E93]' : 'text-slate-400'}`} />
+                <select
+                  value={selectedMonth}
+                  onChange={(e) => setSelectedMonth(e.target.value)}
+                  className={`flex-1 sm:flex-none p-1.5 border rounded-xl text-xs font-bold outline-none ${
+                    isDark ? 'bg-[#2C2C2E] border-[#38383A] text-[#F5F5F7]' : 'bg-slate-50 border-slate-200 text-slate-800'
+                  }`}
+                >
+                  {optionsMois.map((m) => (
+                    <option key={m.key} value={m.key}>
+                      {m.label} {m.key === currentMonthKey ? '(Mois en cours)' : ''}
+                    </option>
+                  ))}
+                </select>
               </div>
+            )}
 
-              <div className="border-t border-b border-gray-50 py-2 space-y-1">
-                <div className="font-black text-gray-900 text-sm">{op.client_nom}</div>
-                {op.client_telephone && (
-                  <a href={`tel:${op.client_telephone}`} className="inline-flex items-center gap-1 text-xs font-bold text-blue-600 active:text-blue-800">
-                    <Phone size={12} /> {op.client_telephone}
-                  </a>
-                )}
-                <div className="text-xs text-gray-500 line-clamp-2 font-medium">{op.description || 'Aucune description'}</div>
-                {op.compagnie_fournisseur && (
-                  <div className="text-[10px] text-gray-400 font-bold flex items-center gap-1">
-                    <Briefcase size={10} /> {op.compagnie_fournisseur} {op.reference_document ? `(${op.reference_document})` : ''}
-                  </div>
-                )}
+            {filterPeriodType === 'ANNEE' && (
+              <div className="flex items-center gap-2 w-full sm:w-auto">
+                <Calendar size={15} className={`shrink-0 ${isDark ? 'text-[#8E8E93]' : 'text-slate-400'}`} />
+                <select
+                  value={selectedYear}
+                  onChange={(e) => setSelectedYear(e.target.value)}
+                  className={`p-1.5 border rounded-xl text-xs font-bold outline-none ${
+                    isDark ? 'bg-[#2C2C2E] border-[#38383A] text-[#F5F5F7]' : 'bg-slate-50 border-slate-200 text-slate-800'
+                  }`}
+                >
+                  {anneesDisponibles.map((y) => (
+                    <option key={y} value={y}>
+                      Année {y} {y === currentYearKey ? '(En cours)' : ''}
+                    </option>
+                  ))}
+                </select>
               </div>
+            )}
+          </div>
+        </div>
 
-              <div className="flex items-center justify-between pt-0.5">
-                <div>
-                  <span className="text-[9px] font-black text-gray-400 uppercase block tracking-wider">Prix Client</span>
-                  <span className="text-sm font-black text-gray-900">{op.prix_vente.toLocaleString()} F</span>
-                </div>
-                <div className="text-right">
-                  <span className="text-[9px] font-black text-gray-400 uppercase block tracking-wider">Bénéfice</span>
-                  <span className={`text-sm font-black ${op.benefice >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
-                    {op.benefice >= 0 ? '+' : ''}{op.benefice.toLocaleString()} F
-                  </span>
-                </div>
+        {/* ─── BLOCS INDICATEURS FINANCIERS FLAT ─── */}
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5">
+          <div className={`p-3.5 rounded-xl border transition-colors ${
+            isDark ? 'bg-[#1C1C1E] border-[#2C2C2E]' : 'bg-white border-slate-200/80'
+          }`}>
+            <span className={`text-[10px] font-bold uppercase tracking-wider block mb-0.5 ${
+              isDark ? 'text-[#8E8E93]' : 'text-slate-400'
+            }`}>Chiffre d'Affaires</span>
+            <div className={`text-base sm:text-xl font-extrabold ${
+              isDark ? 'text-[#F5F5F7]' : 'text-slate-900'
+            }`}>{stats.ca.toLocaleString('fr-FR')} CFA</div>
+            <span className={`text-[10px] font-medium block ${
+              isDark ? 'text-[#8E8E93]' : 'text-slate-500'
+            }`}>{stats.totalOps} transaction(s)</span>
+          </div>
+
+          <div className={`p-3.5 rounded-xl border transition-colors ${
+            isDark ? 'bg-[#1C1C1E] border-[#34C759]/30' : 'bg-white border-slate-200/80'
+          }`}>
+            <span className={`text-[10px] font-bold uppercase tracking-wider block mb-0.5 ${
+              isDark ? 'text-[#34C759]' : 'text-emerald-600'
+            }`}>Bénéfice Net Agence</span>
+            <div className={`text-base sm:text-xl font-extrabold ${
+              isDark ? 'text-[#34C759]' : 'text-emerald-600'
+            }`}>{stats.gain.toLocaleString('fr-FR')} CFA</div>
+            <span className={`text-[10px] font-semibold block ${
+              isDark ? 'text-[#30D158]' : 'text-emerald-700/80'
+            }`}>
+              {stats.ca > 0 ? `${((stats.gain / stats.ca) * 100).toFixed(1)}% marge` : '0% marge'}
+            </span>
+          </div>
+
+          <div className={`p-3.5 rounded-xl border transition-colors ${
+            isDark ? 'bg-[#1C1C1E] border-[#2C2C2E]' : 'bg-white border-slate-200/80'
+          }`}>
+            <span className={`text-[10px] font-bold uppercase tracking-wider block mb-0.5 ${
+              isDark ? 'text-[#8E8E93]' : 'text-slate-400'
+            }`}>Encaissé Réel</span>
+            <div className={`text-base sm:text-xl font-extrabold ${
+              isDark ? 'text-[#F5F5F7]' : 'text-slate-900'
+            }`}>{stats.encaisse.toLocaleString('fr-FR')} CFA</div>
+            <span className={`text-[10px] font-medium block ${
+              isDark ? 'text-[#8E8E93]' : 'text-slate-400'
+            }`}>Espèces & Mobile</span>
+          </div>
+
+          <div className={`p-3.5 rounded-xl border transition-colors ${
+            isDark ? 'bg-[#1C1C1E] border-[#FF9F0A]/30' : 'bg-white border-slate-200/80'
+          }`}>
+            <span className={`text-[10px] font-bold uppercase tracking-wider block mb-0.5 ${
+              isDark ? 'text-[#FF9F0A]' : 'text-amber-600'
+            }`}>Créances / Dettes</span>
+            <div className={`text-base sm:text-xl font-extrabold ${
+              isDark ? 'text-[#FFD60A]' : 'text-amber-700'
+            }`}>{stats.dette.toLocaleString('fr-FR')} CFA</div>
+            <span className={`text-[10px] font-semibold block ${
+              isDark ? 'text-[#FF9F0A]' : 'text-amber-600/80'
+            }`}>À recouvrer</span>
+          </div>
+        </div>
+
+        {/* ─── FILTRAGE DES CATÉGORIES PRINCIPALES ─── */}
+        <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none">
+          {CATEGORIES.map((cat) => {
+            const Icon = cat.icon
+            const count = countsByCategory[cat.id] || 0
+            const isSelected = selectedCategory === cat.id
+
+            return (
+              <button
+                key={cat.id}
+                onClick={() => {
+                  setSelectedCategory(cat.id)
+                  if (cat.id !== 'TRANSFERT') {
+                    setTransfertOperateur('TOUS')
+                    setTransfertSens('TOUS')
+                  }
+                }}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap border transition-colors cursor-pointer ${
+                  isSelected
+                    ? (isDark ? 'bg-[#FFFFFF] text-[#000000] border-[#FFFFFF]' : 'bg-slate-900 text-white border-slate-900')
+                    : (isDark ? 'bg-[#1C1C1E] text-[#8E8E93] border-[#2C2C2E] hover:text-[#F5F5F7]' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50')
+                }`}
+              >
+                <Icon size={13} className={isSelected ? (isDark ? 'text-[#000000]' : 'text-white') : (isDark ? 'text-[#8E8E93]' : 'text-slate-400')} />
+                <span>{cat.label}</span>
+                <span className={`px-1.5 py-0.2 rounded-md text-[10px] font-bold ${
+                  isSelected 
+                    ? (isDark ? 'bg-black/20 text-[#000000]' : 'bg-white/20 text-white') 
+                    : (isDark ? 'bg-[#2C2C2E] text-[#D1D1D6]' : 'bg-slate-100 text-slate-500')
+                }`}>
+                  {count}
+                </span>
+              </button>
+            )
+          })}
+        </div>
+
+        {/* ─── SOUS-SECTION DÉDIÉE : FILTRES TRANSFERT D'ARGENT ─── */}
+        {selectedCategory === 'TRANSFERT' && (
+          <div className={`p-3 rounded-xl border space-y-2.5 transition-colors ${
+            isDark ? 'bg-[#1C1C1E] border-[#34C759]/30' : 'bg-white border-emerald-200/80'
+          }`}>
+            <div className={`flex flex-wrap items-center justify-between gap-2 border-b pb-2 ${
+              isDark ? 'border-[#2C2C2E]' : 'border-slate-100'
+            }`}>
+              <span className={`text-[11px] font-bold uppercase tracking-wider flex items-center gap-1.5 ${
+                isDark ? 'text-[#34C759]' : 'text-emerald-900'
+              }`}>
+                <Smartphone size={13} className={isDark ? 'text-[#34C759]' : 'text-emerald-600'} />
+                Filtrer les transferts d'argent
+              </span>
+
+              {/* Sélecteur Sens : Dépôt ou Retrait */}
+              <div className={`flex items-center gap-1 p-0.5 rounded-lg text-[11px] font-bold ${
+                isDark ? 'bg-[#2C2C2E]' : 'bg-slate-100'
+              }`}>
+                <button
+                  onClick={() => setTransfertSens('TOUS')}
+                  className={`px-2 py-1 rounded-md transition-colors cursor-pointer ${
+                    transfertSens === 'TOUS' 
+                      ? (isDark ? 'bg-[#1C1C1E] text-[#F5F5F7] shadow-xs' : 'bg-white text-slate-900 shadow-xs') 
+                      : (isDark ? 'text-[#8E8E93] hover:text-[#F5F5F7]' : 'text-slate-500 hover:text-slate-800')
+                  }`}
+                >
+                  Tous flux
+                </button>
+                <button
+                  onClick={() => setTransfertSens('DEPOT')}
+                  className={`px-2 py-1 rounded-md transition-colors cursor-pointer ${
+                    transfertSens === 'DEPOT' 
+                      ? (isDark ? 'bg-[#1C1C1E] text-[#34C759] shadow-xs' : 'bg-white text-emerald-800 shadow-xs') 
+                      : (isDark ? 'text-[#8E8E93] hover:text-[#34C759]' : 'text-slate-500 hover:text-slate-800')
+                  }`}
+                >
+                  ↗ Dépôts / Envois
+                </button>
+                <button
+                  onClick={() => setTransfertSens('RETRAIT')}
+                  className={`px-2 py-1 rounded-md transition-colors cursor-pointer ${
+                    transfertSens === 'RETRAIT' 
+                      ? (isDark ? 'bg-[#1C1C1E] text-[#0A84FF] shadow-xs' : 'bg-white text-blue-800 shadow-xs') 
+                      : (isDark ? 'text-[#8E8E93] hover:text-[#0A84FF]' : 'text-slate-500 hover:text-slate-800')
+                  }`}
+                >
+                  ↙ Retraits
+                </button>
               </div>
             </div>
-          ))}
-        </div>
 
-        {/* AFFICHAGE GRAND ÉCRAN / TABLETTE : TABLEAU MODERNISÉ */}
-        <div className="hidden sm:block bg-white rounded-3xl shadow-sm border border-gray-100 overflow-hidden">
-          <table className="w-full text-left border-collapse table-fixed">
-            <thead>
-              <tr className="bg-gray-50/70 border-b border-gray-200">
-                <th className="w-[18%] px-6 py-4 text-[11px] font-bold text-gray-500 uppercase tracking-wider">Service / Date</th>
-                <th className="w-[28%] px-6 py-4 text-[11px] font-bold text-gray-500 uppercase tracking-wider">Client & Document</th>
-                <th className="w-[22%] px-6 py-4 text-[11px] font-bold text-gray-500 uppercase tracking-wider">Règlement</th>
-                <th className="w-[16%] px-6 py-4 text-[11px] font-bold text-gray-500 uppercase tracking-wider text-right">Vente (CFA)</th>
-                <th className="w-[16%] px-6 py-4 text-[11px] font-bold text-gray-500 uppercase tracking-wider text-right">Marge (CFA)</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-100">
-              {loading ? (
-                <tr>
-                  <td colSpan={5} className="py-16 text-center text-sm font-semibold text-gray-400 italic">Chargement des transactions...</td>
-                </tr>
-              ) : operationsFiltrees.map((op) => (
-                <tr key={op.id} className="hover:bg-gray-50/50 transition-colors">
-                  {/* SERVICE / DATE */}
-                  <td className="px-6 py-4 vertical-align-middle">
-                    <div className="flex items-center gap-3">
-                      <div className="p-2 bg-gray-100 rounded-xl flex-shrink-0">
-                        {renderIcon(op.type_activite)}
-                      </div>
-                      <div className="overflow-hidden">
-                        <span className="block font-bold text-gray-900 text-xs tracking-wide uppercase truncate">{op.type_activite}</span>
-                        <span className="block text-[11px] font-medium text-gray-400 mt-0.5">{new Date(op.created_at).toLocaleDateString('fr-FR')}</span>
-                      </div>
-                    </div>
-                  </td>
+            {/* Boutons rapides par Opérateur */}
+            <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5 scrollbar-none">
+              <button
+                onClick={() => setTransfertOperateur('TOUS')}
+                className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-colors border cursor-pointer ${
+                  transfertOperateur === 'TOUS'
+                    ? (isDark ? 'bg-[#34C759] text-black border-[#34C759] font-bold' : 'bg-emerald-600 text-white border-emerald-600')
+                    : (isDark ? 'bg-[#2C2C2E] text-[#8E8E93] border-[#38383A] hover:bg-[#3A3A3C]' : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100')
+                }`}
+              >
+                Tous opérateurs
+              </button>
 
-                  {/* CLIENT & DETAILS */}
-                  <td className="px-6 py-4">
-                    <div className="font-semibold text-gray-900 text-sm truncate">{op.client_nom}</div>
-                    <div className="flex flex-col gap-0.5 mt-1 text-[11px]">
-                      {op.client_telephone && (
-                        <span className="font-medium text-gray-500 flex items-center gap-1">
-                          <Phone size={10} className="text-gray-400" /> {op.client_telephone}
-                        </span>
-                      )}
-                      {(op.compagnie_fournisseur || op.description) && (
-                        <span className="text-gray-400 italic truncate max-w-full">
-                          {op.compagnie_fournisseur ? `${op.compagnie_fournisseur} ` : ''}
-                          {op.reference_document ? `(${op.reference_document}) ` : ''}
-                          {op.description ? `• ${op.description}` : ''}
-                        </span>
-                      )}
-                    </div>
-                  </td>
-
-                  {/* REGLEMENT */}
-                  <td className="px-6 py-4">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <div className="flex-shrink-0">
-                        {renderStatusBadge(op.statut_paiement, op)}
-                      </div>
-                      <span className="text-[10px] font-semibold text-gray-500 bg-gray-100 px-2.5 py-1 rounded-full uppercase tracking-wider">
-                        {op.mode_paiement.replace('_', ' ')}
-                      </span>
-                    </div>
-                  </td>
-
-                  {/* VENTE */}
-                  <td className="px-6 py-4 text-right font-bold text-gray-900 text-sm">
-                    {op.prix_vente.toLocaleString()}
-                  </td>
-
-                  {/* MARGE / BENEFICE */}
-                  <td className="px-6 py-4 text-right">
-                    <span className={`font-bold text-sm ${op.benefice >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
-                      {op.benefice >= 0 ? '+' : ''}{op.benefice.toLocaleString()}
-                    </span>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-
-        {/* CAS DE LISTE VIDE */}
-        {!loading && operationsFiltrees.length === 0 && (
-          <div className="py-16 text-center text-xs font-black text-gray-400 uppercase tracking-widest bg-white rounded-3xl border border-gray-100 shadow-sm mt-4">
-            Aucune transaction trouvée
+              {operateursPresents.map((opNom) => {
+                const isOpSelected = transfertOperateur === opNom
+                return (
+                  <button
+                    key={opNom}
+                    onClick={() => setTransfertOperateur(opNom)}
+                    className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold whitespace-nowrap transition-colors border cursor-pointer ${
+                      isOpSelected
+                        ? (isDark ? 'bg-[#34C759] text-black border-[#34C759] font-bold' : 'bg-emerald-600 text-white border-emerald-600')
+                        : (isDark ? 'bg-[#2C2C2E] text-[#D1D1D6] border-[#38383A] hover:bg-[#3A3A3C]' : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100')
+                    }`}
+                  >
+                    {opNom}
+                  </button>
+                )
+              })}
+            </div>
           </div>
         )}
 
-        {/* FLOATING ACTION BUTTON (FAB) MOBILE — Style App Native Optimisé */}
-        <div className="sm:hidden fixed bottom-20 right-4 flex flex-col gap-3 z-50">
-          <button 
-            onClick={exportToPdf}
-            className="w-12 h-12 bg-blue-600 text-white rounded-full flex items-center justify-center shadow-2xl active:scale-90 transition-transform"
-            title="Imprimer Journal PDF"
-          >
-            <Download size={16} />
-          </button>
-          <Link 
-            href="/agence/nouvelle-operation" 
-            className="w-12 h-12 bg-gray-955 bg-gray-950 text-white rounded-full flex items-center justify-center shadow-2xl active:scale-90 transition-transform"
-          >
-            <Plus size={16} />
-          </Link>
+        {/* ─── BARRE DE RECHERCHE & STATUT ─── */}
+        <div className={`p-2.5 rounded-2xl border flex flex-col sm:flex-row items-center gap-2 transition-colors ${
+          isDark ? 'bg-[#1C1C1E] border-[#2C2C2E]' : 'bg-white border-slate-200/80'
+        }`}>
+          <div className="relative flex-1 w-full">
+            <Search size={14} className={`absolute left-3 top-2.5 ${isDark ? 'text-[#8E8E93]' : 'text-slate-400'}`} />
+            <input
+              type="text"
+              placeholder="Rechercher par client, tél, n° référence, opérateur..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className={`w-full pl-8 pr-3 py-1.5 rounded-xl text-xs font-medium outline-none border transition-colors ${
+                isDark 
+                  ? 'bg-[#2C2C2E] border-[#38383A] text-[#F5F5F7] placeholder:text-[#636366] focus:border-[#545458]' 
+                  : 'bg-slate-50 border-transparent focus:border-slate-300 text-slate-900'
+              }`}
+            />
+          </div>
+
+          <div className="flex items-center gap-2 w-full sm:w-auto">
+            <select
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value)}
+              className={`w-full sm:w-auto p-1.5 border rounded-xl text-xs font-semibold outline-none transition-colors ${
+                isDark ? 'bg-[#2C2C2E] border-[#38383A] text-[#F5F5F7]' : 'bg-slate-50 border-slate-200 text-slate-700'
+              }`}
+            >
+              <option value="TOUS">Tous les statuts</option>
+              <option value="PAYE">Payés intégralement</option>
+              <option value="AVANCE">Avances en cours</option>
+              <option value="NON_PAYE">Dettes / Non payés</option>
+            </select>
+          </div>
+        </div>
+
+        {/* ─── TABLEAU DES OPÉRATIONS (DESKTOP) & LISTE MOBILE ─── */}
+        <div className={`rounded-2xl border overflow-hidden transition-colors ${
+          isDark ? 'bg-[#1C1C1E] border-[#2C2C2E]' : 'bg-white border-slate-200/80'
+        }`}>
+          {operationsFiltrees.length === 0 ? (
+            <div className="p-10 text-center">
+              <FileText size={28} className={`mx-auto mb-2 ${isDark ? 'text-[#38383A]' : 'text-slate-300'}`} />
+              <p className={`text-xs font-bold ${isDark ? 'text-[#F5F5F7]' : 'text-slate-700'}`}>Aucune opération trouvée</p>
+              <p className={`text-[11px] mt-0.5 ${isDark ? 'text-[#8E8E93]' : 'text-slate-400'}`}>Modifiez vos filtres de période ou de catégorie.</p>
+            </div>
+          ) : (
+            <>
+              {/* VUE TABLEAU (Grand Écran) */}
+              <div className="hidden md:block overflow-x-auto">
+                <table className="w-full text-left border-collapse text-xs">
+                  <thead>
+                    <tr className={`border-b font-bold uppercase tracking-wider text-[10px] ${
+                      isDark ? 'border-[#2C2C2E] bg-[#121214] text-[#8E8E93]' : 'border-slate-100 bg-slate-50/50 text-slate-400'
+                    }`}>
+                      <th className="py-2.5 px-4">Date</th>
+                      <th className="py-2.5 px-4">Service</th>
+                      <th className="py-2.5 px-4">Client</th>
+                      <th className="py-2.5 px-4">Opérateur / Détail</th>
+                      <th className="py-2.5 px-4 text-right">Montant Total</th>
+                      <th className="py-2.5 px-4 text-right">Gain Net</th>
+                      <th className="py-2.5 px-4 text-center">Statut</th>
+                    </tr>
+                  </thead>
+                  <tbody className={`divide-y ${
+                    isDark ? 'divide-[#2C2C2E] text-[#F5F5F7]' : 'divide-slate-100 text-slate-800'
+                  }`}>
+                    {operationsFiltrees.map((op) => {
+                      const dateObj = new Date(op.created_at)
+                      const isPaye = op.statut_paiement === 'PAYE'
+                      const isAvance = op.statut_paiement === 'AVANCE'
+                      const detteLigne = Math.max(0, (op.prix_vente || 0) - (op.montant_verse || 0))
+                      const isTransfert = op.type_activite === 'TRANSFERT'
+                      const desc = (op.description || '').toLowerCase()
+                      const isRetrait = desc.includes('retrait')
+
+                      return (
+                        <tr key={op.id} className={`transition-colors ${
+                          isDark ? 'hover:bg-[#2C2C2E]/40' : 'hover:bg-slate-50/60'
+                        }`}>
+                          <td className={`py-2.5 px-4 whitespace-nowrap text-[11px] ${
+                            isDark ? 'text-[#8E8E93]' : 'text-slate-500'
+                          }`}>
+                            {dateObj.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' })} &bull; {dateObj.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}
+                          </td>
+                          <td className="py-2.5 px-4 whitespace-nowrap">
+                            <span className={`font-bold ${isDark ? 'text-[#F5F5F7]' : 'text-slate-900'}`}>{op.type_activite}</span>
+                            {isTransfert && (
+                              <span className={`ml-1.5 px-1.5 py-0.5 rounded text-[9px] font-bold ${
+                                isRetrait 
+                                  ? (isDark ? 'bg-[#0A84FF]/20 text-[#0A84FF]' : 'bg-blue-50 text-blue-700')
+                                  : (isDark ? 'bg-[#34C759]/20 text-[#34C759]' : 'bg-emerald-50 text-emerald-700')
+                              }`}>
+                                {isRetrait ? 'Retrait' : 'Dépôt'}
+                              </span>
+                            )}
+                          </td>
+                          <td className="py-2.5 px-4">
+                            <div className={`font-bold ${isDark ? 'text-[#F5F5F7]' : 'text-slate-900'}`}>{op.client_nom || 'Client Comptoir'}</div>
+                            {op.client_telephone && <div className={`text-[10px] ${isDark ? 'text-[#8E8E93]' : 'text-slate-400'}`}>{op.client_telephone}</div>}
+                          </td>
+                          <td className="py-2.5 px-4">
+                            <div className={`font-semibold ${isDark ? 'text-[#D1D1D6]' : 'text-slate-700'}`}>{op.compagnie_fournisseur || '—'}</div>
+                            {op.reference_document && <div className={`text-[10px] truncate max-w-[150px] ${isDark ? 'text-[#8E8E93]' : 'text-slate-400'}`}>{op.reference_document}</div>}
+                          </td>
+                          <td className={`py-2.5 px-4 text-right whitespace-nowrap font-bold ${
+                            isDark ? 'text-[#F5F5F7]' : 'text-slate-900'
+                          }`}>
+                            {Number(op.prix_vente).toLocaleString('fr-FR')} CFA
+                          </td>
+                          <td className={`py-2.5 px-4 text-right whitespace-nowrap font-bold ${
+                            isDark ? 'text-[#34C759]' : 'text-emerald-600'
+                          }`}>
+                            +{Number(op.benefice).toLocaleString('fr-FR')} CFA
+                          </td>
+                          <td className="py-2.5 px-4 text-center whitespace-nowrap">
+                            {isPaye && (
+                              <span className={`px-2 py-0.5 rounded text-[10px] font-bold border ${
+                                isDark 
+                                  ? 'bg-[#34C759]/15 text-[#34C759] border-[#34C759]/30' 
+                                  : 'bg-emerald-50 text-emerald-700 border-emerald-100'
+                              }`}>
+                                Payé
+                              </span>
+                            )}
+                            {isAvance && (
+                              <span className={`px-2 py-0.5 rounded text-[10px] font-bold border ${
+                                isDark 
+                                  ? 'bg-[#FF9F0A]/15 text-[#FF9F0A] border-[#FF9F0A]/30' 
+                                  : 'bg-amber-50 text-amber-800 border-amber-100'
+                              }`}>
+                                Avance (-{detteLigne.toLocaleString('fr-FR')})
+                              </span>
+                            )}
+                            {!isPaye && !isAvance && (
+                              <span className={`px-2 py-0.5 rounded text-[10px] font-bold border ${
+                                isDark 
+                                  ? 'bg-[#FF453A]/15 text-[#FF453A] border-[#FF453A]/30' 
+                                  : 'bg-red-50 text-red-700 border-red-100'
+                              }`}>
+                                Dette
+                              </span>
+                            )}
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* VUE MOBILE FLUIDE */}
+              <div className={`md:hidden divide-y ${
+                isDark ? 'divide-[#2C2C2E]' : 'divide-slate-100'
+              }`}>
+                {operationsFiltrees.map((op) => {
+                  const dateObj = new Date(op.created_at)
+                  const detteLigne = Math.max(0, (op.prix_vente || 0) - (op.montant_verse || 0))
+                  const isTransfert = op.type_activite === 'TRANSFERT'
+                  const desc = (op.description || '').toLowerCase()
+                  const isRetrait = desc.includes('retrait')
+
+                  return (
+                    <div key={op.id} className="p-3 space-y-1.5">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-1">
+                          <span className={`text-[10px] font-bold uppercase tracking-wider ${
+                            isDark ? 'text-[#8E8E93]' : 'text-slate-400'
+                          }`}>
+                            {op.type_activite}
+                          </span>
+                          {isTransfert && (
+                            <span className={`px-1 rounded text-[9px] font-bold ${
+                              isRetrait 
+                                ? (isDark ? 'bg-[#0A84FF]/20 text-[#0A84FF]' : 'bg-blue-50 text-blue-700')
+                                : (isDark ? 'bg-[#34C759]/20 text-[#34C759]' : 'bg-emerald-50 text-emerald-700')
+                            }`}>
+                              {isRetrait ? 'Retrait' : 'Dépôt'}
+                            </span>
+                          )}
+                          <span className={`text-[10px] ${isDark ? 'text-[#8E8E93]' : 'text-slate-400'}`}>
+                            &bull; {dateObj.toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' })}
+                          </span>
+                        </div>
+
+                        <span className={`text-[9px] font-bold px-1.5 py-0.2 rounded ${
+                          op.statut_paiement === 'PAYE'
+                            ? (isDark ? 'bg-[#34C759]/15 text-[#34C759]' : 'bg-emerald-50 text-emerald-700')
+                            : op.statut_paiement === 'AVANCE'
+                            ? (isDark ? 'bg-[#FF9F0A]/15 text-[#FF9F0A]' : 'bg-amber-50 text-amber-800')
+                            : (isDark ? 'bg-[#FF453A]/15 text-[#FF453A]' : 'bg-red-50 text-red-700')
+                        }`}>
+                          {op.statut_paiement === 'PAYE' ? 'Payé' : op.statut_paiement === 'AVANCE' ? 'Avance' : 'Dette'}
+                        </span>
+                      </div>
+
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <div className={`text-xs font-bold ${isDark ? 'text-[#F5F5F7]' : 'text-slate-900'}`}>{op.client_nom || 'Client Comptoir'}</div>
+                          <div className={`text-[11px] ${isDark ? 'text-[#8E8E93]' : 'text-slate-500'}`}>{op.compagnie_fournisseur || '—'}</div>
+                        </div>
+                        <div className="text-right">
+                          <div className={`text-xs font-bold ${isDark ? 'text-[#F5F5F7]' : 'text-slate-900'}`}>{Number(op.prix_vente).toLocaleString('fr-FR')} CFA</div>
+                          <div className={`text-[10px] font-semibold ${isDark ? 'text-[#34C759]' : 'text-emerald-600'}`}>+{Number(op.benefice).toLocaleString('fr-FR')} CFA</div>
+                        </div>
+                      </div>
+
+                      {op.statut_paiement === 'AVANCE' && detteLigne > 0 && (
+                        <div className={`text-[10px] font-semibold px-2 py-0.5 rounded ${
+                          isDark ? 'bg-[#FF9F0A]/15 text-[#FF9F0A]' : 'bg-amber-50/60 text-amber-700'
+                        }`}>
+                          Reste dû : {detteLigne.toLocaleString('fr-FR')} CFA
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+            </>
+          )}
         </div>
 
       </div>
