@@ -36,31 +36,42 @@ export default function RootLayout({
   children: React.ReactNode
 }) {
   return (
-    <html lang="fr" suppressHydrationWarning>
+    <html lang="fr" suppressHydrationWarning className="overscroll-y-contain">
       <head>
+        {/* 🛡️ VERROUILLAGE GLOBAL DU PULL-TO-REFRESH & DE L'OVERSCROLL BLANC */}
+        <style dangerouslySetInnerHTML={{
+          __html: `
+            html, body {
+              overscroll-behavior-y: contain !important;
+              -webkit-overflow-scrolling: touch;
+            }
+          `
+        }} />
+
+        {/* Initialisation instantanée du thème pour éviter tout flash blanc */}
         <script dangerouslySetInnerHTML={{
-          __html: "try { const w = window; if (localStorage.getItem('app-theme') === 'dark') document.documentElement.classList.add('dark'); if (w.location.protocol.startsWith('tauri') || w.location.hostname === 'tauri.localhost' || '__TAURI_INTERNALS__' in w || '__TAURI__' in w) document.documentElement.dataset.tauri = 'true' } catch (_) {}"
+          __html: "try { const w = window; const isDark = localStorage.getItem('compta_theme_dark') === 'true' || localStorage.getItem('app-theme') === 'dark'; if (isDark) { document.documentElement.classList.add('dark'); document.documentElement.style.backgroundColor = '#000000'; } if (w.location.protocol.startsWith('tauri') || w.location.hostname === 'tauri.localhost' || '__TAURI_INTERNALS__' in w || '__TAURI__' in w) document.documentElement.dataset.tauri = 'true'; } catch (_) {}"
         }} />
       </head>
-      <body className="min-h-screen m-0 p-0 antialiased text-slate-900 bg-transparent flex flex-col">
+      <body className="min-h-screen m-0 p-0 antialiased text-slate-900 bg-transparent flex flex-col overscroll-y-contain">
         <AppCacheGuard />
         <ClientPowerSyncWrapper>
           <AuthGuard>
             <ProfileProvider>
               <ProfileRouteGuard>
                 <UIProvider>
-            <NativeBackButton />
-            <ThemeColorSync />
+                  <NativeBackButton />
+                  <ThemeColorSync />
 
-            <div className="lg:hidden">
-              <TopBarContainer />
-            </div>
+                  <div className="lg:hidden">
+                    <TopBarContainer />
+                  </div>
 
-            <main className="flex-1 flex flex-col min-h-screen lg:pl-64 transition-all duration-300">
-              {children}
-            </main>
+                  <main className="flex-1 flex flex-col min-h-screen lg:pl-64 transition-all duration-300">
+                    {children}
+                  </main>
 
-            <PwaInstaller />
+                  <PwaInstaller />
                 </UIProvider>
               </ProfileRouteGuard>
             </ProfileProvider>

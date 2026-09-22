@@ -1,4 +1,4 @@
-'use client' // On passe le layout en Client Component pour écouter l'URL en temps réel sans bug
+'use client'
 
 import '../globals.css'
 import Navbar from '../../components/Navbar'
@@ -14,60 +14,65 @@ export default function HajjLayout({ children }: { children: React.ReactNode }) 
     <YearProvider scope="hajj">
       <div className="min-h-screen antialiased flex flex-col w-full bg-slate-50">
       
-      {/* 🛡️ INJECTION CSS DE NETTOYAGE ABSOLU (Uniquement sur PC >= 1024px) */}
-      <style dangerouslySetInnerHTML={{
-        __html: `
-          @media (min-width: 1024px) {
-            /* 1. On neutralise les limites de largeur des pages */
-            .max-w-4xl, .max-w-5xl, .max-w-6xl, .max-w-7xl {
-              max-width: 100% !important;
-            }
-            
-            /* 2. Élimination de TOUT padding/margin haut qui pourrait venir du body ou du layout global */
-            body, html {
-              padding-top: 0px !important;
-              margin-top: 0px !important;
+        {/* 🛡️ INJECTION CSS NATIVE : Verrouillage overscroll & pull-to-refresh Android + Nettoyage PC */}
+        <style dangerouslySetInnerHTML={{
+          __html: `
+            /* 🚫 Bloque le pull-to-refresh de Chrome Android et l'overscroll élastique iOS */
+            html, body {
+              overscroll-behavior-y: contain !important;
             }
 
-            /* 3. On force le contenu principal à coller tout en haut */
-            .hajj-main-content {
-              padding-top: 0px !important;
-              margin-top: 0px !important;
-            }
-            
-            /* 4. On s'assure que la div résiduelle de la Navbar est bien écrasée */
-            nav + div, .hidden.lg\\:block.h-20 {
-              height: 0px !important;
-              display: none !important;
-              margin: 0 !important;
-              padding: 0 !important;
-            }
-          }
-        `
-      }} />
+            @media (min-width: 1024px) {
+              /* 1. On neutralise les limites de largeur des pages */
+              .max-w-4xl, .max-w-5xl, .max-w-6xl, .max-w-7xl {
+                max-width: 100% !important;
+              }
+              
+              /* 2. Élimination de TOUT padding/margin haut qui pourrait venir du body ou du layout global */
+              body, html {
+                padding-top: 0px !important;
+                margin-top: 0px !important;
+              }
 
-      {/* Ta Navbar existante */}
-      <Navbar />
-      
-      {/* Sur mobile : padding-top s'adapte aux encoches. 
-          Sur PC : Le CSS injecté ci-dessus force tout à 0px. */}
-      <main 
-        className="flex-1 w-full flex flex-col relative hajj-main-content tauri-safe-area"
-        style={{ paddingTop: 'env(safe-area-inset-top)' }}
-      >
+              /* 3. On force le contenu principal à coller tout en haut */
+              .hajj-main-content {
+                padding-top: 0px !important;
+                margin-top: 0px !important;
+              }
+              
+              /* 4. On s'assure que la div résiduelle de la Navbar est bien écrasée */
+              nav + div, .hidden.lg\\:block.h-20 {
+                height: 0px !important;
+                display: none !important;
+                margin: 0 !important;
+                padding: 0 !important;
+              }
+            }
+          `
+        }} />
+
+        {/* Ta Navbar existante */}
+        <Navbar />
         
-        {/* La barre supérieure mobile (masquée sur PC) */}
-        <div 
-          className="shadow-none fixed top-0 left-0 w-full z-[9999] pointer-events-none transition-colors duration-200 lg:hidden"
-          style={{ 
-            height: 'env(safe-area-inset-top)',
-            backgroundColor: isDashboard ? '#2563eb' : '#ffffff'
-          }}
-        />
+        {/* Sur mobile : padding-top s'adapte aux encoches. 
+            Sur PC : Le CSS injecté ci-dessus force tout à 0px. */}
+        <main 
+          className="flex-1 w-full flex flex-col relative hajj-main-content tauri-safe-area"
+          style={{ paddingTop: 'env(safe-area-inset-top)' }}
+        >
+          
+          {/* La barre supérieure mobile (masquée sur PC) */}
+          <div 
+            className="shadow-none fixed top-0 left-0 w-full z-[9999] pointer-events-none transition-colors duration-200 lg:hidden"
+            style={{ 
+              height: 'env(safe-area-inset-top)',
+              backgroundColor: isDashboard ? '#2563eb' : '#ffffff'
+            }}
+          />
 
-        {children}
-      </main>
-      
+          {children}
+        </main>
+        
       </div>
     </YearProvider>
   )
