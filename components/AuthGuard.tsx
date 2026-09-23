@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, useRef } from 'react'
 import { usePathname, useRouter } from 'next/navigation'
 import { supabase, getSession, isOfflineMode } from '@/lib/supabase'
 import { Lock } from 'lucide-react'
@@ -18,6 +18,7 @@ export default function AuthGuard({ children }: { children: React.ReactNode }) {
   const router = useRouter()
   const [ready, setReady] = useState(false)
   const [authenticated, setAuthenticated] = useState(false)
+  const isRedirectingRef = useRef(false)
 
   // 🌓 Détection du thème sombre pour l'écran de chargement
   const [isDark, setIsDark] = useState<boolean>(() => {
@@ -45,7 +46,7 @@ export default function AuthGuard({ children }: { children: React.ReactNode }) {
     return pathname === '/login' || pathname.startsWith('/auth')
   }, [pathname])
 
-  // 1. Souscription unique à la session Supabase
+  // 1. Souscription et vérification de la session
   useEffect(() => {
     let mounted = true
 
@@ -55,7 +56,6 @@ export default function AuthGuard({ children }: { children: React.ReactNode }) {
       setReady(true)
     }
 
-    // Récupération initiale avec timeout anti-blocage
     withTimeout(getSession())
       .then(({ data: { session } }) => {
         applySession(Boolean(session?.user) || (isOfflineMode() && Boolean(session)))
@@ -64,7 +64,6 @@ export default function AuthGuard({ children }: { children: React.ReactNode }) {
         applySession(false)
       })
 
-    // Écouteur de changement d'état d'authentification
     const { data: authListener } = supabase.auth.onAuthStateChange((event, session) => {
       if (!mounted) return
       const hasSession = Boolean(session?.user)
@@ -72,7 +71,8 @@ export default function AuthGuard({ children }: { children: React.ReactNode }) {
       if (event === 'SIGNED_OUT') {
         setAuthenticated(false)
         setReady(true)
-        if (!isPublicRoute) {
+        if (!isPublicRoute && !isRedirectingRef.current) {
+          isRedirectingRef.current = true
           router.replace('/login')
         }
         return
@@ -88,18 +88,23 @@ export default function AuthGuard({ children }: { children: React.ReactNode }) {
     }
   }, [isPublicRoute, router])
 
-  // 2. Redirection vers /login si non authentifié sur une route privée
+  // 2. Redirection sécurisée si non authentifié sur route protégée
   useEffect(() => {
-    if (!ready || isPublicRoute) return
-    if (!authenticated) {
+    if (!ready || isPublicRoute) {
+      isRedirectingRef.current = false
+      return
+    }
+
+    if (!authenticated && !isRedirectingRef.current) {
+      isRedirectingRef.current = true
       router.replace('/login')
     }
   }, [authenticated, isPublicRoute, ready, router])
 
-  // Si on est sur une route publique (ex: /login), affichage direct sans bloquer
+  // Route publique : rendu immédiat
   if (isPublicRoute) return <>{children}</>
 
-  // Écran d'attente animé adapté au Dark Mode
+  // Écran d'attente animé
   if (!ready || !authenticated) {
     return (
       <main className={`fixed inset-0 z-50 flex flex-col items-center justify-center p-6 select-none transition-colors duration-150 ${

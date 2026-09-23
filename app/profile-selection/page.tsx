@@ -40,7 +40,7 @@ export default function ProfileSelectionPage() {
   const [modalCreateOpen, setModalCreateOpen] = useState(false)
   const [modalPinOpen, setModalPinOpen] = useState(false)
 
-  // Saisie du PIN (déverrouillage principal)
+  // Saisie du PIN (déverrouillage principal - strictement 4 chiffres)
   const [pin, setPin] = useState('')
   const [showKeypadOnDesktop, setShowKeypadOnDesktop] = useState(false)
   const desktopInputRef = useRef<HTMLInputElement>(null)
@@ -62,7 +62,7 @@ export default function ProfileSelectionPage() {
     } as React.CSSProperties,
   } as const
 
-  // Champs création (état PIN indépendant pour éviter les collisions)
+  // Champs création
   const [name, setName] = useState('')
   const [type, setType] = useState<WorkProfileType>('agent')
   const [createPin, setCreatePin] = useState('')
@@ -203,10 +203,10 @@ export default function ProfileSelectionPage() {
     }
   }, [isBiometricAvailable, selectedCandidate])
 
-  // Déverrouillage par code PIN
+  // Déverrouillage par code PIN (4 chiffres)
   const handleOpenProfile = (codeToTest?: string) => {
     const activePin = codeToTest || pin
-    if (!selectedCandidate || activePin.length < 4) return
+    if (!selectedCandidate || activePin.length !== 4) return
 
     setError(null)
     startTransition(async () => {
@@ -227,13 +227,13 @@ export default function ProfileSelectionPage() {
     })
   }
 
-  // Saisie tactile sécurisée (déclenche uniquement à 6 chiffres pour ne pas bloquer les PINs longs)
+  // Saisie tactile : bloqué à 4 chiffres et déclenchement automatique dès le 4e chiffre
   const handleDigitPress = (digit: string) => {
-    if (pin.length < 6) {
+    if (pin.length < 4) {
       const nextPin = pin + digit
       setPin(nextPin)
       setError(null)
-      if (nextPin.length === 6 && selectedCandidate) {
+      if (nextPin.length === 4 && selectedCandidate) {
         handleOpenProfile(nextPin)
       }
     }
@@ -259,7 +259,7 @@ export default function ProfileSelectionPage() {
         handleDeleteDigit()
       } else if (e.key === 'Enter') {
         e.preventDefault()
-        if (pin.length >= 4) {
+        if (pin.length === 4) {
           handleOpenProfile()
         }
       }
@@ -284,7 +284,7 @@ export default function ProfileSelectionPage() {
     })
   }
 
-  // Création profil
+  // Création profil : strictement 4 chiffres
   const handleCreateProfile = async (e: React.FormEvent) => {
     e.preventDefault()
     setError(null)
@@ -294,8 +294,8 @@ export default function ProfileSelectionPage() {
       setError('Nom requis.')
       return
     }
-    if (createPin.length < 4 || createPin.length > 6) {
-      setError('Le code PIN doit comporter 4 à 6 chiffres.')
+    if (createPin.length !== 4) {
+      setError('Le code PIN doit comporter exactement 4 chiffres.')
       return
     }
 
@@ -316,19 +316,19 @@ export default function ProfileSelectionPage() {
     })
   }
 
-  // Modification PIN
+  // Modification PIN : strictement 4 chiffres
   const handleChangePin = async (e: React.FormEvent) => {
     e.preventDefault()
     setError(null)
     setSuccess(null)
 
     if (!targetProfileId) return
-    if (newPin !== confirmPin) {
-      setError('Les codes PIN ne correspondent pas.')
+    if (newPin.length !== 4) {
+      setError('Le nouveau code PIN doit comporter exactement 4 chiffres.')
       return
     }
-    if (newPin.length < 4 || newPin.length > 6) {
-      setError('Le nouveau PIN doit comporter 4 à 6 chiffres.')
+    if (newPin !== confirmPin) {
+      setError('Les codes PIN ne correspondent pas.')
       return
     }
 
@@ -435,6 +435,7 @@ export default function ProfileSelectionPage() {
               {selectedCandidate?.profile_type === 'direction' ? 'Direction' : 'Agent'}
             </p>
 
+            {/* 4 Indicateurs de saisie */}
             <div className="flex justify-center items-center gap-3.5 my-7">
               {[0, 1, 2, 3].map((index) => (
                 <div
@@ -657,12 +658,12 @@ export default function ProfileSelectionPage() {
               name="pin-code-field"
               inputMode="numeric"
               pattern="[0-9]*"
-              maxLength={6}
+              maxLength={4}
               value={pin}
               onChange={(e) => {
-                const val = e.target.value.replace(/\D/g, '')
+                const val = e.target.value.replace(/\D/g, '').slice(0, 4)
                 setPin(val)
-                if (val.length === 6) handleOpenProfile(val)
+                if (val.length === 4) handleOpenProfile(val)
               }}
               className="opacity-0 absolute -z-10"
               autoFocus
@@ -742,7 +743,7 @@ export default function ProfileSelectionPage() {
             <div className="w-full mt-6">
               <button
                 type="button"
-                disabled={pin.length < 4 || isPending}
+                disabled={pin.length !== 4 || isPending}
                 onClick={() => handleOpenProfile()}
                 className="w-full py-4 rounded-2xl bg-blue-600 hover:bg-blue-700 active:scale-98 text-white text-xs font-black uppercase tracking-wider flex items-center justify-center gap-2 transition shadow-lg shadow-blue-600/25 disabled:opacity-40 disabled:cursor-not-allowed"
               >
@@ -810,15 +811,15 @@ export default function ProfileSelectionPage() {
               </div>
 
               <div>
-                <label className="text-[11px] font-black uppercase text-slate-400 block mb-1">Code PIN (4 à 6 chiffres)</label>
+                <label className="text-[11px] font-black uppercase text-slate-400 block mb-1">Code PIN (4 chiffres)</label>
                 <input
                   type="text"
                   name="new-profile-pin"
                   inputMode="numeric"
                   pattern="[0-9]*"
-                  maxLength={6}
+                  maxLength={4}
                   value={createPin}
-                  onChange={(e) => setCreatePin(e.target.value.replace(/\D/g, ''))}
+                  onChange={(e) => setCreatePin(e.target.value.replace(/\D/g, '').slice(0, 4))}
                   placeholder="••••"
                   required
                   className="w-full px-3.5 py-3 rounded-xl border border-slate-200 bg-slate-50 text-sm font-bold tracking-widest text-slate-900 focus:bg-white focus:border-blue-600 outline-none transition"
@@ -829,7 +830,7 @@ export default function ProfileSelectionPage() {
               <div className="space-y-2 pt-4">
                 <button
                   type="submit"
-                  disabled={isPending || !name.trim() || createPin.length < 4}
+                  disabled={isPending || !name.trim() || createPin.length !== 4}
                   className="w-full py-3.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-black uppercase tracking-wider disabled:opacity-40 shadow-lg shadow-blue-600/25 transition"
                 >
                   {isPending ? 'Enregistrement...' : 'Créer le profil'}
@@ -875,9 +876,9 @@ export default function ProfileSelectionPage() {
                   name="current-pin-code"
                   inputMode="numeric"
                   pattern="[0-9]*"
-                  maxLength={6}
+                  maxLength={4}
                   value={oldPin}
-                  onChange={(e) => setOldPin(e.target.value.replace(/\D/g, ''))}
+                  onChange={(e) => setOldPin(e.target.value.replace(/\D/g, '').slice(0, 4))}
                   placeholder="••••"
                   required
                   className="w-full px-3.5 py-3 rounded-xl border border-slate-200 bg-slate-50 text-sm font-bold tracking-widest text-slate-900 focus:bg-white focus:border-blue-600 outline-none transition"
@@ -886,15 +887,15 @@ export default function ProfileSelectionPage() {
               </div>
 
               <div>
-                <label className="text-[11px] font-black uppercase text-slate-400 block mb-1">Nouveau PIN</label>
+                <label className="text-[11px] font-black uppercase text-slate-400 block mb-1">Nouveau PIN (4 chiffres)</label>
                 <input
                   type="text"
                   name="updated-pin-code"
                   inputMode="numeric"
                   pattern="[0-9]*"
-                  maxLength={6}
+                  maxLength={4}
                   value={newPin}
-                  onChange={(e) => setNewPin(e.target.value.replace(/\D/g, ''))}
+                  onChange={(e) => setNewPin(e.target.value.replace(/\D/g, '').slice(0, 4))}
                   placeholder="••••"
                   required
                   className="w-full px-3.5 py-3 rounded-xl border border-slate-200 bg-slate-50 text-sm font-bold tracking-widest text-slate-900 focus:bg-white focus:border-blue-600 outline-none transition"
@@ -909,9 +910,9 @@ export default function ProfileSelectionPage() {
                   name="confirm-updated-pin"
                   inputMode="numeric"
                   pattern="[0-9]*"
-                  maxLength={6}
+                  maxLength={4}
                   value={confirmPin}
-                  onChange={(e) => setConfirmPin(e.target.value.replace(/\D/g, ''))}
+                  onChange={(e) => setConfirmPin(e.target.value.replace(/\D/g, '').slice(0, 4))}
                   placeholder="••••"
                   required
                   className="w-full px-3.5 py-3 rounded-xl border border-slate-200 bg-slate-50 text-sm font-bold tracking-widest text-slate-900 focus:bg-white focus:border-blue-600 outline-none transition"
@@ -929,7 +930,7 @@ export default function ProfileSelectionPage() {
                 </button>
                 <button
                   type="submit"
-                  disabled={isPending || oldPin.length < 4 || newPin.length < 4 || confirmPin.length < 4}
+                  disabled={isPending || oldPin.length !== 4 || newPin.length !== 4 || confirmPin.length !== 4}
                   className="flex-1 py-3.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-black uppercase tracking-wider disabled:opacity-40 shadow-lg shadow-blue-600/25 transition"
                 >
                   {isPending ? 'Mise à jour...' : 'Valider'}
