@@ -14,6 +14,7 @@ import {
   Lock,
   X,
   Trash2,
+  ShieldAlert,
 } from 'lucide-react'
 import { useWorkProfile, type WorkProfileType } from '@/lib/ProfileContext'
 import { usePowerSync } from '@powersync/react'
@@ -37,11 +38,20 @@ export default function ProfileSelectionPage() {
   const [isInitializing, setIsInitializing] = useState(true)
   const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null)
 
-  // Modales
+  // Modales d'action
   const [modalCreateOpen, setModalCreateOpen] = useState(false)
   const [modalPinOpen, setModalPinOpen] = useState(false)
 
-  // Saisie du PIN (permet 4 à 6 chiffres pour les anciens comptes)
+  // 🛡️ Modale d'autorisation Direction (PIN Directeur requis)
+  const [modalAdminPinOpen, setModalAdminPinOpen] = useState(false)
+  const [adminPin, setAdminPin] = useState('')
+  const [pendingAction, setPendingAction] = useState<
+    | { type: 'CREATE'; profileType: WorkProfileType }
+    | { type: 'DELETE'; profileId: string; profileName: string }
+    | null
+  >(null)
+
+  // Saisie du PIN (déverrouillage principal)
   const [pin, setPin] = useState('')
   const [showKeypadOnDesktop, setShowKeypadOnDesktop] = useState(false)
   const desktopInputRef = useRef<HTMLInputElement>(null)
@@ -182,14 +192,15 @@ export default function ProfileSelectionPage() {
 
   // Focus automatique du clavier sur PC
   useEffect(() => {
-    if (!isInitializing && !modalCreateOpen && !modalPinOpen) {
+    if (!isInitializing && !modalCreateOpen && !modalPinOpen && !modalAdminPinOpen) {
       desktopInputRef.current?.focus()
     }
-  }, [isInitializing, modalCreateOpen, modalPinOpen, selectedProfileId])
+  }, [isInitializing, modalCreateOpen, modalPinOpen, modalAdminPinOpen, selectedProfileId])
 
   const selectedCandidate = profiles.find((p) => p.id === selectedProfileId) || profiles[0]
+  const directionProfile = profiles.find((p) => p.profile_type === 'direction')
   const agentCount = profiles.filter((p) => p.profile_type === 'agent').length
-  const hasDirection = profiles.some((p) => p.profile_type === 'direction')
+  const hasDirection = Boolean(directionProfile)
 
   // Règle biométrique : PIN obligatoire 1x par jour
   const canUseBiometricsNow = useMemo(() => {
@@ -247,7 +258,7 @@ export default function ProfileSelectionPage() {
 
   // Écoute des touches physiques clavier (PC)
   useEffect(() => {
-    if (isInitializing || modalCreateOpen || modalPinOpen) return
+    if (isInitializing || modalCreateOpen || modalPinOpen || modalAdminPinOpen) return
 
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.target instanceof HTMLInputElement && e.target !== desktopInputRef.current) return
@@ -268,7 +279,7 @@ export default function ProfileSelectionPage() {
 
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [isInitializing, modalCreateOpen, modalPinOpen, pin, selectedCandidate])
+  }, [isInitializing, modalCreateOpen, modalPinOpen, modalAdminPinOpen, pin, selectedCandidate])
 
   // Déverrouillage biométrique
   const handleBiometricUnlock = async () => {
@@ -283,6 +294,92 @@ export default function ProfileSelectionPage() {
         setError(err instanceof Error ? err.message : 'Authentification annulée.')
       }
     })
+  }
+
+  // ─── 🛡️ GESTION DU CONTRÔLE PAR LE CODE PIN DU DIRECTEUR ───
+
+  // Demander le PIN directeur avant de créer
+  const requestCreateProfile = (profileType: WorkProfileType) => {
+    setError(null)
+    setSuccess(null)
+    // S'il n'y a pas encore de direction, on autorise directement la création de la direction
+    if (!hasDirection && profileType === 'direction') {
+      setType('direction')
+      setCreatePin('')
+      setModalCreateOpen(true)
+      return
+    }
+
+    setPendingAction({ type: 'CREATE', profileType })
+    setAdminPin('')
+    setModalAdminPinOpen(true)
+  }
+
+  // Demander le PIN directeur avant de supprimer
+  const requestDeleteProfile = (profileId: string, profileName: string) => {
+    setError(null)
+    setSuccess(null)
+    setPendingAction({ type: 'DELETE', profileId, profileName })
+    setAdminPin('')
+    setModalAdminPinOpen(true)
+  }
+
+  // Validation du PIN Directeur pour débloquer l'opération
+  const handleVerifyDirectorPin = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!directionProfile) {
+      setError('Profil Direction introuvable.')
+      return
+    }
+    if (adminPin.length < 4 || adminPin.length > 6) {
+      setError('Code PIN invalide (4 à 6 chiffres).')
+      return
+    }
+
+    startTransition(async () => {
+      try {
+        // Validation cryptographique du PIN directeur via selectProfile temporaire
+        await selectProfile(directionProfile, adminPin)
+        setModalAdminPinOpen(false)
+        setAdminPin('')
+
+        // Exécution de l'action débloquée
+        if (pendingAction?.type === 'CREATE') {
+          setType(pendingAction.profileType)
+          setCreatePin('')
+          setModalCreateOpen(true)
+        } else if (pendingAction?.type === 'DELETE') {
+          await executeDeleteProfile(pendingAction.profileId, pendingAction.profileName)
+        }
+        setPendingAction(null)
+      } catch {
+        setError('Code PIN du Directeur incorrect. Accès refusé.')
+      }
+    })
+  }
+
+  // Exécution effective de la suppression après validation du PIN Directeur
+  const executeDeleteProfile = async (profileId: string, profileName: string) => {
+    if (!window.confirm(`Confirmez-vous la suppression définitive du profil "${profileName}" ?`)) {
+      return
+    }
+
+    try {
+      await db.execute('DELETE FROM account_profiles WHERE id = ?', [profileId])
+      await supabase.from('account_profiles').delete().eq('id', profileId)
+
+      localStorage.removeItem(`bio_enrolled_${profileId}`)
+      localStorage.removeItem(`last_pin_date_${profileId}`)
+
+      if (selectedProfileId === profileId) {
+        const remaining = profiles.filter((p) => p.id !== profileId)
+        setSelectedProfileId(remaining[0]?.id || null)
+      }
+
+      setSuccess(`Profil "${profileName}" supprimé avec succès.`)
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Erreur lors de la suppression.')
+    }
   }
 
   // Création profil : strictement 4 chiffres
@@ -347,39 +444,6 @@ export default function ProfileSelectionPage() {
         setSuccess('Code PIN modifié avec succès (passé à 4 chiffres).')
       } catch (err: unknown) {
         setError(err instanceof Error ? err.message : 'Erreur lors de la mise à jour.')
-      }
-    })
-  }
-
-  // Suppression d'un profil
-  const handleDeleteProfile = async (profileId: string, profileName: string) => {
-    if (!window.confirm(`Voulez-vous vraiment supprimer définitivement le profil "${profileName}" ?`)) {
-      return
-    }
-
-    setError(null)
-    setSuccess(null)
-
-    startTransition(async () => {
-      try {
-        // 1. Suppression SQLite locale
-        await db.execute('DELETE FROM account_profiles WHERE id = ?', [profileId])
-
-        // 2. Suppression distante Supabase
-        await supabase.from('account_profiles').delete().eq('id', profileId)
-
-        // Nettoyage biométrique
-        localStorage.removeItem(`bio_enrolled_${profileId}`)
-        localStorage.removeItem(`last_pin_date_${profileId}`)
-
-        if (selectedProfileId === profileId) {
-          const remaining = profiles.filter((p) => p.id !== profileId)
-          setSelectedProfileId(remaining[0]?.id || null)
-        }
-
-        setSuccess(`Profil "${profileName}" supprimé avec succès.`)
-      } catch (err: unknown) {
-        setError(err instanceof Error ? err.message : 'Erreur lors de la suppression du profil.')
       }
     })
   }
@@ -452,12 +516,7 @@ export default function ProfileSelectionPage() {
             {agentCount < 2 && (
               <button
                 type="button"
-                onClick={() => {
-                  setType('agent')
-                  setCreatePin('')
-                  setError(null)
-                  setModalCreateOpen(true)
-                }}
+                onClick={() => requestCreateProfile('agent')}
                 className="w-8 h-8 rounded-full bg-white border border-dashed border-blue-300 text-blue-600 flex items-center justify-center active:scale-95 transition shrink-0"
               >
                 <Plus size={14} />
@@ -577,7 +636,7 @@ export default function ProfileSelectionPage() {
               </button>
               <button
                 type="button"
-                onClick={() => handleDeleteProfile(selectedCandidate.id, selectedCandidate.name)}
+                onClick={() => requestDeleteProfile(selectedCandidate.id, selectedCandidate.name)}
                 className="font-bold text-rose-500 hover:text-rose-700 transition"
               >
                 Supprimer
@@ -588,12 +647,7 @@ export default function ProfileSelectionPage() {
           {!hasDirection && (
             <button
               type="button"
-              onClick={() => {
-                setType('direction')
-                setCreatePin('')
-                setError(null)
-                setModalCreateOpen(true)
-              }}
+              onClick={() => requestCreateProfile('direction')}
               className="ml-auto font-bold text-blue-600 transition"
             >
               Créer Direction
@@ -612,12 +666,7 @@ export default function ProfileSelectionPage() {
             {agentCount < 2 && (
               <button
                 type="button"
-                onClick={() => {
-                  setType('agent')
-                  setCreatePin('')
-                  setError(null)
-                  setModalCreateOpen(true)
-                }}
+                onClick={() => requestCreateProfile('agent')}
                 className="text-xs font-bold text-blue-600 hover:text-blue-700 flex items-center gap-1 transition"
               >
                 <Plus size={14} />
@@ -696,7 +745,7 @@ export default function ProfileSelectionPage() {
                       title="Supprimer ce profil"
                       onClick={(e) => {
                         e.stopPropagation()
-                        handleDeleteProfile(p.id, p.name)
+                        requestDeleteProfile(p.id, p.name)
                       }}
                       className={`p-1.5 rounded-lg transition ${
                         isSelected
@@ -825,7 +874,80 @@ export default function ProfileSelectionPage() {
         )}
       </div>
 
-      {/* --- MODALE CRÉATION DE PROFIL --- */}
+      {/* --- 🛡️ MODALE CONTRÔLE : PIN DIRECTION REQUIS --- */}
+      {modalAdminPinOpen && (
+        <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="w-full max-w-md bg-white border border-slate-200 rounded-3xl p-6 sm:p-8 shadow-2xl relative animate-in fade-in zoom-in-95 duration-150">
+            <button
+              type="button"
+              onClick={() => {
+                setModalAdminPinOpen(false)
+                setPendingAction(null)
+                setAdminPin('')
+              }}
+              className="absolute top-5 right-5 p-1.5 rounded-full text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition"
+            >
+              <X size={18} />
+            </button>
+
+            <div className="w-12 h-12 rounded-2xl bg-blue-50 text-blue-600 flex items-center justify-center mb-4">
+              <ShieldAlert size={24} />
+            </div>
+
+            <h2 className="text-base font-black text-slate-900">Autorisation Direction requise</h2>
+            <p className="text-xs text-slate-500 mt-1 font-semibold leading-relaxed">
+              Pour {pendingAction?.type === 'CREATE' ? 'créer un nouveau profil' : `supprimer le profil "${pendingAction && 'profileName' in pendingAction ? pendingAction.profileName : ''}"`}, veuillez entrer le code PIN du Directeur ({directionProfile?.name || 'Direction'}).
+            </p>
+
+            {error && <p className="text-xs text-rose-600 font-bold mt-3">{error}</p>}
+
+            <form onSubmit={handleVerifyDirectorPin} className="space-y-4 mt-6">
+              <div>
+                <label className="text-[11px] font-black uppercase text-slate-400 block mb-1">
+                  Code PIN du Directeur (4 à 6 chiffres)
+                </label>
+                <input
+                  type="text"
+                  name="director-pin-code"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
+                  maxLength={6}
+                  value={adminPin}
+                  onChange={(e) => setAdminPin(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                  placeholder="••••"
+                  autoFocus
+                  required
+                  className="w-full px-3.5 py-3 rounded-xl border border-slate-200 bg-slate-50 text-sm font-bold tracking-widest text-slate-900 focus:bg-white focus:border-blue-600 outline-none transition"
+                  {...pinInputProps}
+                />
+              </div>
+
+              <div className="pt-2 flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setModalAdminPinOpen(false)
+                    setPendingAction(null)
+                    setAdminPin('')
+                  }}
+                  className="flex-1 py-3 rounded-xl border border-slate-200 text-slate-600 text-xs font-black uppercase tracking-wider hover:bg-slate-50 transition"
+                >
+                  Annuler
+                </button>
+                <button
+                  type="submit"
+                  disabled={isPending || adminPin.length < 4}
+                  className="flex-1 py-3 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-black uppercase tracking-wider disabled:opacity-40 shadow-lg shadow-blue-600/25 transition"
+                >
+                  {isPending ? 'Vérification...' : 'Confirmer'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* --- MODALE CRÉATION DE PROFIL (Débloquée après PIN Directeur) --- */}
       {modalCreateOpen && (
         <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4">
           <div className="w-full max-w-md bg-white border border-blue-100/80 rounded-3xl p-6 sm:p-8 shadow-2xl relative animate-in fade-in zoom-in-95 duration-150">
