@@ -8,6 +8,7 @@ import ClientPowerSyncWrapper from '@/components/ClientPowerSyncWrapper'
 import AppCacheGuard from '@/components/AppCacheGuard'
 import AuthGuard from '@/components/AuthGuard'
 import ProfileProvider, { ProfileRouteGuard } from '@/lib/ProfileContext'
+import AppUpdateBanner from '@/components/AppUpdateBanner'
 
 export const metadata = {
   title: 'Agence Pro',
@@ -54,6 +55,10 @@ export default function RootLayout({
         }} />
       </head>
       <body className="min-h-screen m-0 p-0 antialiased text-slate-900 bg-transparent flex flex-col overscroll-y-contain">
+        
+        {/* 🚀 BANNIÈRE DE MISE À JOUR DISPONIBLE (Affichage prioritaire z-[999999]) */}
+        <AppUpdateBanner />
+
         <AppCacheGuard />
         <ClientPowerSyncWrapper>
           <AuthGuard>

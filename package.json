@@ -4,7 +4,10 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
+    "version:generate": "node -e \"const fs = require('fs'); if (!fs.existsSync('./public')) fs.mkdirSync('./public'); const version = { buildTime: Date.now(), commit: process.env.VERCEL_GIT_COMMIT_SHA || process.env.COMMIT_REF || Date.now().toString() }; fs.writeFileSync('./public/version.json', JSON.stringify(version, null, 2)); console.log('Version générée :', version.commit);\"",
+    "prebuild": "npm run version:generate",
     "build": "next build",
+    "prebuild:static": "npm run version:generate",
     "build:static": "cross-env STATIC_EXPORT=true next build",
     "clean:caches": "node scripts/clean-caches.mjs",
     "setup:hooks": "git config core.hooksPath .githooks",

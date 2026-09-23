@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react'
 import { supabase, getSession } from '@/lib/supabase'
 import { useRouter } from 'next/navigation'
-import { Lock, Mail, Loader2, AlertCircle, ShieldCheck, CheckSquare, Square } from 'lucide-react'
+import { Lock, Mail, Loader2, AlertCircle, ShieldCheck, CheckSquare, Square, KeyRound, X, CheckCircle2 } from 'lucide-react'
 
 // Fonction utilitaire pour éviter qu'une promesse Supabase ne freeze indéfiniment
 function withTimeout<T>(promise: Promise<T>, ms = 10000, errorMsg = 'Le serveur met trop de temps à répondre.'): Promise<T> {
@@ -21,12 +21,25 @@ export default function LoginPage() {
   const [error, setError] = useState('')
   const router = useRouter()
 
+  // ─── États pour la modale de changement de mot de passe ───
+  const [showChangePasswordModal, setShowChangePasswordModal] = useState(false)
+  const [changeEmail, setChangeEmail] = useState('')
+  const [oldPassword, setOldPassword] = useState('')
+  const [newPassword, setNewPassword] = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
+  const [changeLoading, setChangeLoading] = useState(false)
+  const [changeError, setChangeError] = useState('')
+  const [changeSuccess, setChangeSuccess] = useState('')
+
   // 1. Pré-remplissage et auto-redirection propre si session déjà active
   useEffect(() => {
     const savedEmail = localStorage.getItem('remembered_email')
     const savedPassword = localStorage.getItem('remembered_password')
 
-    if (savedEmail) setEmail(savedEmail)
+    if (savedEmail) {
+      setEmail(savedEmail)
+      setChangeEmail(savedEmail)
+    }
     if (savedPassword) setPassword(savedPassword)
 
     async function checkExistingSession() {
@@ -104,7 +117,7 @@ export default function LoginPage() {
         throw new Error("Votre compte n'est lié à aucune agence active.")
       }
 
-      // ÉTAPE C : Redirection fluide Next.js sans crash de rechargement brutal
+      // ÉTAPE C : Redirection fluide Next.js
       router.replace('/profile-selection')
 
     } catch (err: unknown) {
@@ -118,6 +131,108 @@ export default function LoginPage() {
       }
     } finally {
       setLoading(false)
+    }
+  }
+
+  // ─── Gestion du changement de mot de passe après vérification de l'ancien ───
+  const handleChangePassword = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (changeLoading) return
+
+    setChangeError('')
+    setChangeSuccess('')
+
+    if (!changeEmail.trim()) {
+      setChangeError('Veuillez saisir votre email professionnel.')
+      return
+    }
+
+    if (!oldPassword) {
+      setChangeError('Veuillez entrer votre ancien mot de passe.')
+      return
+    }
+
+    if (newPassword.length < 6) {
+      setChangeError('Le nouveau mot de passe doit contenir au moins 6 caractères.')
+      return
+    }
+
+    if (newPassword !== confirmPassword) {
+      setChangeError('Les deux nouveaux mots de passe ne correspondent pas.')
+      return
+    }
+
+    if (newPassword === oldPassword) {
+      setChangeError("Le nouveau mot de passe doit être différent de l'ancien.")
+      return
+    }
+
+    setChangeLoading(true)
+
+    try {
+      if (typeof navigator !== 'undefined' && !navigator.onLine) {
+        throw new Error('Connexion Internet requise pour effectuer cette action.')
+      }
+
+      // 1. Authentification avec l'ancien mot de passe pour valider l'identité
+      const authRes = await withTimeout(
+        supabase.auth.signInWithPassword({
+          email: changeEmail.trim(),
+          password: oldPassword,
+        }),
+        10000,
+        'Vérification impossible : délai dépassé.'
+      )
+
+      if (authRes.error) {
+        throw new Error('Votre ancien mot de passe est incorrect.')
+      }
+
+      // 2. Mise à jour vers le nouveau mot de passe
+      const updateRes = await withTimeout(
+        supabase.auth.updateUser({
+          password: newPassword,
+        }),
+        10000,
+        'Mise à jour impossible : délai dépassé.'
+      )
+
+      if (updateRes.error) {
+        throw updateRes.error
+      }
+
+      // 3. Déconnexion immédiate pour laisser l'utilisateur se reconnecter proprement
+      await supabase.auth.signOut({ scope: 'local' })
+
+      // 4. Mise à jour des identifiants mémorisés si nécessaire
+      if (localStorage.getItem('remembered_email') === changeEmail.trim()) {
+        localStorage.setItem('remembered_password', newPassword)
+      }
+
+      // 5. Mise à jour de l'état principal du formulaire
+      setEmail(changeEmail.trim())
+      setPassword(newPassword)
+
+      setChangeSuccess('Mot de passe mis à jour avec succès ! Vous pouvez maintenant vous connecter.')
+      setOldPassword('')
+      setNewPassword('')
+      setConfirmPassword('')
+
+      setTimeout(() => {
+        setShowChangePasswordModal(false)
+        setChangeSuccess('')
+      }, 2500)
+
+    } catch (err: unknown) {
+      console.error('[LoginPage] Erreur changement mot de passe:', err)
+      const msg = err instanceof Error ? err.message : 'Erreur inconnue'
+      if (msg.includes('Invalid login credentials')) {
+        setChangeError('Ancien mot de passe ou email incorrect.')
+      } else {
+        setChangeError(msg)
+      }
+    } finally {
+      setChangeLoading(false)
     }
   }
 
@@ -146,7 +261,10 @@ export default function LoginPage() {
                 name="email"
                 autoComplete="username"
                 value={email}
-                onChange={(e) => setEmail(e.target.value)}
+                onChange={(e) => {
+                  setEmail(e.target.value)
+                  if (!changeEmail) setChangeEmail(e.target.value)
+                }}
                 className="w-full pl-12 pr-4 py-3.5 bg-slate-50 border border-slate-200/80 rounded-2xl font-bold text-slate-800 text-sm focus:bg-white focus:border-blue-600 focus:ring-4 focus:ring-blue-100 transition-all outline-none"
                 placeholder="nom@agence.com"
                 required
@@ -155,9 +273,23 @@ export default function LoginPage() {
           </div>
 
           <div className="space-y-1.5">
-            <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider ml-2">
-              Mot de passe
-            </label>
+            <div className="flex items-center justify-between ml-2 mr-1">
+              <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider">
+                Mot de passe
+              </label>
+              <button
+                type="button"
+                onClick={() => {
+                  setChangeEmail(email)
+                  setChangeError('')
+                  setChangeSuccess('')
+                  setShowChangePasswordModal(true)
+                }}
+                className="text-[11px] font-bold text-blue-600 hover:text-blue-700 transition-colors"
+              >
+                Changer mot de passe ?
+              </button>
+            </div>
             <div className="relative">
               <Lock className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
               <input
@@ -197,7 +329,7 @@ export default function LoginPage() {
           <button
             type="submit"
             disabled={loading}
-            className="w-full py-4 bg-blue-600 hover:bg-blue-700 text-white rounded-2xl font-black text-xs uppercase tracking-wider transition-all shadow-lg shadow-blue-600/25 flex items-center justify-center gap-2 disabled:opacity-50 active:scale-98"
+            className="w-full py-4 bg-blue-600 hover:bg-blue-700 text-white rounded-2xl font-black text-xs uppercase tracking-wider transition-all shadow-lg shadow-blue-600/25 flex items-center justify-center gap-2 disabled:opacity-50 active:scale-98 cursor-pointer"
           >
             {loading ? (
               <>
@@ -217,6 +349,152 @@ export default function LoginPage() {
           </p>
         </div>
       </div>
+
+      {/* ─── MODALE : MODIFICATION DU MOT DE PASSE APRÈS SAISIE DE L'ANCIEN ─── */}
+      {showChangePasswordModal && (
+        <div 
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-in fade-in"
+          onClick={() => {
+            if (!changeLoading) setShowChangePasswordModal(false)
+          }}
+        >
+          <div 
+            className="w-full max-w-md bg-white rounded-3xl p-6 sm:p-8 shadow-2xl border border-slate-100 space-y-5 animate-in zoom-in-95 duration-200"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center shrink-0">
+                  <KeyRound size={18} />
+                </div>
+                <div>
+                  <h2 className="text-base font-black text-slate-900 leading-tight">Changer le mot de passe</h2>
+                  <p className="text-[11px] text-slate-400 font-semibold">Vérification de l'ancien mot de passe</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                disabled={changeLoading}
+                onClick={() => setShowChangePasswordModal(false)}
+                className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 transition-colors"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <form onSubmit={handleChangePassword} className="space-y-4">
+              <div className="space-y-1">
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider ml-1">
+                  Email du compte *
+                </label>
+                <div className="relative">
+                  <Mail className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
+                  <input
+                    type="email"
+                    required
+                    value={changeEmail}
+                    onChange={(e) => setChangeEmail(e.target.value)}
+                    className="w-full pl-10 pr-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-800 outline-none focus:border-blue-600 focus:bg-white transition-all"
+                    placeholder="nom@agence.com"
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider ml-1">
+                  Ancien mot de passe *
+                </label>
+                <div className="relative">
+                  <Lock className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
+                  <input
+                    type="password"
+                    required
+                    value={oldPassword}
+                    onChange={(e) => setOldPassword(e.target.value)}
+                    className="w-full pl-10 pr-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-800 outline-none focus:border-blue-600 focus:bg-white transition-all"
+                    placeholder="Votre mot de passe actuel"
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider ml-1">
+                  Nouveau mot de passe *
+                </label>
+                <div className="relative">
+                  <Lock className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
+                  <input
+                    type="password"
+                    required
+                    minLength={6}
+                    value={newPassword}
+                    onChange={(e) => setNewPassword(e.target.value)}
+                    className="w-full pl-10 pr-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-800 outline-none focus:border-blue-600 focus:bg-white transition-all"
+                    placeholder="Au moins 6 caractères"
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider ml-1">
+                  Confirmer le nouveau mot de passe *
+                </label>
+                <div className="relative">
+                  <Lock className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
+                  <input
+                    type="password"
+                    required
+                    minLength={6}
+                    value={confirmPassword}
+                    onChange={(e) => setConfirmPassword(e.target.value)}
+                    className="w-full pl-10 pr-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-800 outline-none focus:border-blue-600 focus:bg-white transition-all"
+                    placeholder="Retapez le nouveau mot de passe"
+                  />
+                </div>
+              </div>
+
+              {changeError && (
+                <div className="p-3 bg-rose-50 border border-rose-200/80 rounded-xl flex items-center gap-2 text-rose-600 font-bold text-xs">
+                  <AlertCircle size={15} className="shrink-0" />
+                  <span>{changeError}</span>
+                </div>
+              )}
+
+              {changeSuccess && (
+                <div className="p-3 bg-emerald-50 border border-emerald-200/80 rounded-xl flex items-center gap-2 text-emerald-700 font-bold text-xs">
+                  <CheckCircle2 size={15} className="shrink-0" />
+                  <span>{changeSuccess}</span>
+                </div>
+              )}
+
+              <div className="flex items-center justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  disabled={changeLoading}
+                  onClick={() => setShowChangePasswordModal(false)}
+                  className="px-4 py-2.5 text-xs font-bold text-slate-500 hover:text-slate-800 rounded-xl transition-colors cursor-pointer"
+                >
+                  Annuler
+                </button>
+                <button
+                  type="submit"
+                  disabled={changeLoading}
+                  className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-black rounded-xl uppercase tracking-wider transition-all flex items-center gap-2 disabled:opacity-50 cursor-pointer shadow-md shadow-blue-600/20"
+                >
+                  {changeLoading ? (
+                    <>
+                      <Loader2 size={14} className="animate-spin" />
+                      <span>Vérification...</span>
+                    </>
+                  ) : (
+                    <span>Valider le changement</span>
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
