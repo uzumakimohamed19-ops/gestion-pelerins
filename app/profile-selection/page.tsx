@@ -13,6 +13,7 @@ import {
   ArrowRight,
   Lock,
   X,
+  Trash2,
 } from 'lucide-react'
 import { useWorkProfile, type WorkProfileType } from '@/lib/ProfileContext'
 import { usePowerSync } from '@powersync/react'
@@ -40,7 +41,7 @@ export default function ProfileSelectionPage() {
   const [modalCreateOpen, setModalCreateOpen] = useState(false)
   const [modalPinOpen, setModalPinOpen] = useState(false)
 
-  // Saisie du PIN (déverrouillage principal - strictement 4 chiffres)
+  // Saisie du PIN (permet 4 à 6 chiffres pour les anciens comptes)
   const [pin, setPin] = useState('')
   const [showKeypadOnDesktop, setShowKeypadOnDesktop] = useState(false)
   const desktopInputRef = useRef<HTMLInputElement>(null)
@@ -171,7 +172,7 @@ export default function ProfileSelectionPage() {
   // Synchronisation avec les mises à jour réactives de PowerSync
   useEffect(() => {
     if (profiles.length > 0) {
-      if (!selectedProfileId) {
+      if (!selectedProfileId || !profiles.some((p) => p.id === selectedProfileId)) {
         setSelectedProfileId(profiles[0].id)
       }
       setModalCreateOpen(false)
@@ -203,10 +204,10 @@ export default function ProfileSelectionPage() {
     }
   }, [isBiometricAvailable, selectedCandidate])
 
-  // Déverrouillage par code PIN (4 chiffres)
+  // Déverrouillage par code PIN (compatible 4 à 6 chiffres pour les anciens PINs)
   const handleOpenProfile = (codeToTest?: string) => {
     const activePin = codeToTest || pin
-    if (!selectedCandidate || activePin.length !== 4) return
+    if (!selectedCandidate || activePin.length < 4) return
 
     setError(null)
     startTransition(async () => {
@@ -227,13 +228,13 @@ export default function ProfileSelectionPage() {
     })
   }
 
-  // Saisie tactile : bloqué à 4 chiffres et déclenchement automatique dès le 4e chiffre
+  // Saisie tactile : supporte jusqu'à 6 chiffres, tentative automatique à 4 et 6 chiffres
   const handleDigitPress = (digit: string) => {
-    if (pin.length < 4) {
+    if (pin.length < 6) {
       const nextPin = pin + digit
       setPin(nextPin)
       setError(null)
-      if (nextPin.length === 4 && selectedCandidate) {
+      if ((nextPin.length === 4 || nextPin.length === 6) && selectedCandidate) {
         handleOpenProfile(nextPin)
       }
     }
@@ -259,7 +260,7 @@ export default function ProfileSelectionPage() {
         handleDeleteDigit()
       } else if (e.key === 'Enter') {
         e.preventDefault()
-        if (pin.length === 4) {
+        if (pin.length >= 4) {
           handleOpenProfile()
         }
       }
@@ -316,13 +317,17 @@ export default function ProfileSelectionPage() {
     })
   }
 
-  // Modification PIN : strictement 4 chiffres
+  // Modification PIN : Ancien PIN de 4 à 6 chiffres, Nouveau PIN strictement 4 chiffres
   const handleChangePin = async (e: React.FormEvent) => {
     e.preventDefault()
     setError(null)
     setSuccess(null)
 
     if (!targetProfileId) return
+    if (oldPin.length < 4 || oldPin.length > 6) {
+      setError("L'ancien code PIN doit comporter entre 4 et 6 chiffres.")
+      return
+    }
     if (newPin.length !== 4) {
       setError('Le nouveau code PIN doit comporter exactement 4 chiffres.')
       return
@@ -339,9 +344,42 @@ export default function ProfileSelectionPage() {
         setNewPin('')
         setConfirmPin('')
         setModalPinOpen(false)
-        setSuccess('Code PIN modifié avec succès.')
+        setSuccess('Code PIN modifié avec succès (passé à 4 chiffres).')
       } catch (err: unknown) {
         setError(err instanceof Error ? err.message : 'Erreur lors de la mise à jour.')
+      }
+    })
+  }
+
+  // Suppression d'un profil
+  const handleDeleteProfile = async (profileId: string, profileName: string) => {
+    if (!window.confirm(`Voulez-vous vraiment supprimer définitivement le profil "${profileName}" ?`)) {
+      return
+    }
+
+    setError(null)
+    setSuccess(null)
+
+    startTransition(async () => {
+      try {
+        // 1. Suppression SQLite locale
+        await db.execute('DELETE FROM account_profiles WHERE id = ?', [profileId])
+
+        // 2. Suppression distante Supabase
+        await supabase.from('account_profiles').delete().eq('id', profileId)
+
+        // Nettoyage biométrique
+        localStorage.removeItem(`bio_enrolled_${profileId}`)
+        localStorage.removeItem(`last_pin_date_${profileId}`)
+
+        if (selectedProfileId === profileId) {
+          const remaining = profiles.filter((p) => p.id !== profileId)
+          setSelectedProfileId(remaining[0]?.id || null)
+        }
+
+        setSuccess(`Profil "${profileName}" supprimé avec succès.`)
+      } catch (err: unknown) {
+        setError(err instanceof Error ? err.message : 'Erreur lors de la suppression du profil.')
       }
     })
   }
@@ -435,7 +473,7 @@ export default function ProfileSelectionPage() {
               {selectedCandidate?.profile_type === 'direction' ? 'Direction' : 'Agent'}
             </p>
 
-            {/* 4 Indicateurs de saisie */}
+            {/* Indicateurs dynamiques de saisie */}
             <div className="flex justify-center items-center gap-3.5 my-7">
               {[0, 1, 2, 3].map((index) => (
                 <div
@@ -447,6 +485,9 @@ export default function ProfileSelectionPage() {
                   }`}
                 />
               ))}
+              {pin.length > 4 && (
+                <div className="w-3.5 h-3.5 rounded-full bg-blue-600 scale-125 shadow-sm shadow-blue-600/40 animate-pulse" />
+              )}
             </div>
 
             {error && (
@@ -519,20 +560,29 @@ export default function ProfileSelectionPage() {
 
         <div className="pt-4 pb-2 flex items-center justify-between text-xs text-slate-400 border-t border-slate-200/60">
           {selectedCandidate && (
-            <button
-              type="button"
-              onClick={() => {
-                setTargetProfileId(selectedCandidate.id)
-                setOldPin('')
-                setNewPin('')
-                setConfirmPin('')
-                setError(null)
-                setModalPinOpen(true)
-              }}
-              className="font-bold text-slate-500 hover:text-blue-600 transition"
-            >
-              Changer de code PIN
-            </button>
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                onClick={() => {
+                  setTargetProfileId(selectedCandidate.id)
+                  setOldPin('')
+                  setNewPin('')
+                  setConfirmPin('')
+                  setError(null)
+                  setModalPinOpen(true)
+                }}
+                className="font-bold text-slate-500 hover:text-blue-600 transition"
+              >
+                Changer PIN
+              </button>
+              <button
+                type="button"
+                onClick={() => handleDeleteProfile(selectedCandidate.id, selectedCandidate.name)}
+                className="font-bold text-rose-500 hover:text-rose-700 transition"
+              >
+                Supprimer
+              </button>
+            </div>
           )}
 
           {!hasDirection && (
@@ -590,13 +640,13 @@ export default function ProfileSelectionPage() {
                     setError(null)
                     desktopInputRef.current?.focus()
                   }}
-                  className={`p-3.5 rounded-2xl border transition-all cursor-pointer flex items-center justify-between gap-3 ${
+                  className={`p-3.5 rounded-2xl border transition-all cursor-pointer flex items-center justify-between gap-2 ${
                     isSelected
                       ? 'border-blue-600 bg-blue-600 text-white shadow-lg shadow-blue-600/25 ring-2 ring-blue-100'
                       : 'border-slate-200 bg-slate-50/70 text-slate-700 hover:border-blue-300 hover:bg-blue-50/40'
                   }`}
                 >
-                  <div className="flex items-center gap-3 truncate">
+                  <div className="flex items-center gap-2.5 truncate">
                     <div
                       className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${
                         isSelected
@@ -620,26 +670,43 @@ export default function ProfileSelectionPage() {
                     </div>
                   </div>
 
-                  <button
-                    type="button"
-                    title="Modifier le code PIN"
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      setTargetProfileId(p.id)
-                      setOldPin('')
-                      setNewPin('')
-                      setConfirmPin('')
-                      setError(null)
-                      setModalPinOpen(true)
-                    }}
-                    className={`p-1.5 rounded-lg transition ${
-                      isSelected
-                        ? 'text-blue-100 hover:text-white hover:bg-white/20'
-                        : 'text-slate-400 hover:text-blue-600 hover:bg-blue-50'
-                    }`}
-                  >
-                    <KeyRound size={15} />
-                  </button>
+                  <div className="flex items-center gap-1 shrink-0">
+                    <button
+                      type="button"
+                      title="Modifier le code PIN"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        setTargetProfileId(p.id)
+                        setOldPin('')
+                        setNewPin('')
+                        setConfirmPin('')
+                        setError(null)
+                        setModalPinOpen(true)
+                      }}
+                      className={`p-1.5 rounded-lg transition ${
+                        isSelected
+                          ? 'text-blue-100 hover:text-white hover:bg-white/20'
+                          : 'text-slate-400 hover:text-blue-600 hover:bg-blue-50'
+                      }`}
+                    >
+                      <KeyRound size={15} />
+                    </button>
+                    <button
+                      type="button"
+                      title="Supprimer ce profil"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        handleDeleteProfile(p.id, p.name)
+                      }}
+                      className={`p-1.5 rounded-lg transition ${
+                        isSelected
+                          ? 'text-blue-100 hover:text-rose-200 hover:bg-rose-500/20'
+                          : 'text-slate-400 hover:text-rose-600 hover:bg-rose-50'
+                      }`}
+                    >
+                      <Trash2 size={15} />
+                    </button>
+                  </div>
                 </div>
               )
             })}
@@ -658,12 +725,12 @@ export default function ProfileSelectionPage() {
               name="pin-code-field"
               inputMode="numeric"
               pattern="[0-9]*"
-              maxLength={4}
+              maxLength={6}
               value={pin}
               onChange={(e) => {
-                const val = e.target.value.replace(/\D/g, '').slice(0, 4)
+                const val = e.target.value.replace(/\D/g, '').slice(0, 6)
                 setPin(val)
-                if (val.length === 4) handleOpenProfile(val)
+                if (val.length === 4 || val.length === 6) handleOpenProfile(val)
               }}
               className="opacity-0 absolute -z-10"
               autoFocus
@@ -684,6 +751,9 @@ export default function ProfileSelectionPage() {
                   }`}
                 />
               ))}
+              {pin.length > 4 && (
+                <div className="w-3.5 h-3.5 rounded-full bg-blue-600 scale-125 shadow-sm shadow-blue-600/40 animate-pulse" />
+              )}
             </div>
 
             {error && (
@@ -743,7 +813,7 @@ export default function ProfileSelectionPage() {
             <div className="w-full mt-6">
               <button
                 type="button"
-                disabled={pin.length !== 4 || isPending}
+                disabled={pin.length < 4 || isPending}
                 onClick={() => handleOpenProfile()}
                 className="w-full py-4 rounded-2xl bg-blue-600 hover:bg-blue-700 active:scale-98 text-white text-xs font-black uppercase tracking-wider flex items-center justify-center gap-2 transition shadow-lg shadow-blue-600/25 disabled:opacity-40 disabled:cursor-not-allowed"
               >
@@ -870,16 +940,18 @@ export default function ProfileSelectionPage() {
 
             <form onSubmit={handleChangePin} className="space-y-4">
               <div>
-                <label className="text-[11px] font-black uppercase text-slate-400 block mb-1">Ancien PIN</label>
+                <label className="text-[11px] font-black uppercase text-slate-400 block mb-1">
+                  Ancien PIN (4 à 6 chiffres)
+                </label>
                 <input
                   type="text"
                   name="current-pin-code"
                   inputMode="numeric"
                   pattern="[0-9]*"
-                  maxLength={4}
+                  maxLength={6}
                   value={oldPin}
-                  onChange={(e) => setOldPin(e.target.value.replace(/\D/g, '').slice(0, 4))}
-                  placeholder="••••"
+                  onChange={(e) => setOldPin(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                  placeholder="Votre ancien code (4 ou 6 chiffres)"
                   required
                   className="w-full px-3.5 py-3 rounded-xl border border-slate-200 bg-slate-50 text-sm font-bold tracking-widest text-slate-900 focus:bg-white focus:border-blue-600 outline-none transition"
                   {...pinInputProps}
@@ -887,7 +959,9 @@ export default function ProfileSelectionPage() {
               </div>
 
               <div>
-                <label className="text-[11px] font-black uppercase text-slate-400 block mb-1">Nouveau PIN (4 chiffres)</label>
+                <label className="text-[11px] font-black uppercase text-slate-400 block mb-1">
+                  Nouveau PIN (4 chiffres)
+                </label>
                 <input
                   type="text"
                   name="updated-pin-code"
@@ -904,7 +978,9 @@ export default function ProfileSelectionPage() {
               </div>
 
               <div>
-                <label className="text-[11px] font-black uppercase text-slate-400 block mb-1">Confirmer le nouveau PIN</label>
+                <label className="text-[11px] font-black uppercase text-slate-400 block mb-1">
+                  Confirmer le nouveau PIN (4 chiffres)
+                </label>
                 <input
                   type="text"
                   name="confirm-updated-pin"
@@ -930,7 +1006,13 @@ export default function ProfileSelectionPage() {
                 </button>
                 <button
                   type="submit"
-                  disabled={isPending || oldPin.length !== 4 || newPin.length !== 4 || confirmPin.length !== 4}
+                  disabled={
+                    isPending ||
+                    oldPin.length < 4 ||
+                    oldPin.length > 6 ||
+                    newPin.length !== 4 ||
+                    confirmPin.length !== 4
+                  }
                   className="flex-1 py-3.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-black uppercase tracking-wider disabled:opacity-40 shadow-lg shadow-blue-600/25 transition"
                 >
                   {isPending ? 'Mise à jour...' : 'Valider'}
