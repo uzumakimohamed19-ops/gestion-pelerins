@@ -7,7 +7,6 @@ import {
   Delete,
   Fingerprint,
   KeyRound,
-  ArrowLeft,
   ShieldCheck,
   UserRound,
   Keyboard,
@@ -36,15 +35,16 @@ export default function ProfileSelectionPage() {
   // 1. Initialisation verrouillée sur l'animation orbitale
   const [isInitializing, setIsInitializing] = useState(true)
   const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null)
-  
-  // Modale de création et de code PIN (fermées par défaut)
+
+  // Modales
   const [modalCreateOpen, setModalCreateOpen] = useState(false)
   const [modalPinOpen, setModalPinOpen] = useState(false)
 
-  // Saisie du PIN
+  // Saisie du PIN (déverrouillage principal)
   const [pin, setPin] = useState('')
   const [showKeypadOnDesktop, setShowKeypadOnDesktop] = useState(false)
   const desktopInputRef = useRef<HTMLInputElement>(null)
+  
   const pinInputProps = {
     autoComplete: 'one-time-code',
     autoCorrect: 'off',
@@ -62,9 +62,10 @@ export default function ProfileSelectionPage() {
     } as React.CSSProperties,
   } as const
 
-  // Champs création
+  // Champs création (état PIN indépendant pour éviter les collisions)
   const [name, setName] = useState('')
   const [type, setType] = useState<WorkProfileType>('agent')
+  const [createPin, setCreatePin] = useState('')
 
   // Champs modification PIN
   const [targetProfileId, setTargetProfileId] = useState<string | null>(null)
@@ -77,7 +78,7 @@ export default function ProfileSelectionPage() {
   const [success, setSuccess] = useState<string | null>(null)
   const [isPending, startTransition] = useTransition()
 
-  // 2. Élimination du clignotement multi-appareils (Vérification locale + secours Supabase direct)
+  // 2. Vérification locale + secours Supabase direct
   useEffect(() => {
     let isMounted = true
 
@@ -97,7 +98,7 @@ export default function ProfileSelectionPage() {
           return
         }
 
-        // Étape A : Vérification instantanée dans SQLite local
+        // Étape A : Vérification dans SQLite local
         const localRows = await db.getAll<{ id: string }>(
           'SELECT id FROM account_profiles WHERE user_id = ?',
           [uid]
@@ -105,7 +106,7 @@ export default function ProfileSelectionPage() {
 
         if (localRows && localRows.length > 0) {
           if (isMounted) {
-            setSelectedProfileId(localRows[0].id)
+            setSelectedProfileId((prev) => prev || localRows[0].id)
             setModalCreateOpen(false)
             setIsInitializing(false)
             try {
@@ -115,7 +116,7 @@ export default function ProfileSelectionPage() {
           return
         }
 
-        // Étape B : Nouvel appareil ! SQLite est vide parce que PowerSync n'a pas encore fini de répliquer.
+        // Étape B : Secours Supabase distant (première synchronisation)
         const { data: remoteProfiles } = await supabase
           .from('account_profiles')
           .select('id, name, profile_type, pin_hash, created_at, updated_at')
@@ -149,7 +150,7 @@ export default function ProfileSelectionPage() {
           return
         }
 
-        // Étape C : Zéro profil ni en local, ni sur le serveur Supabase
+        // Étape C : Aucun profil existant
         if (isMounted) {
           setModalCreateOpen(true)
           setIsInitializing(false)
@@ -186,7 +187,6 @@ export default function ProfileSelectionPage() {
   }, [isInitializing, modalCreateOpen, modalPinOpen, selectedProfileId])
 
   const selectedCandidate = profiles.find((p) => p.id === selectedProfileId) || profiles[0]
-  const targetCandidate = profiles.find((p) => p.id === targetProfileId)
   const agentCount = profiles.filter((p) => p.profile_type === 'agent').length
   const hasDirection = profiles.some((p) => p.profile_type === 'direction')
 
@@ -203,12 +203,37 @@ export default function ProfileSelectionPage() {
     }
   }, [isBiometricAvailable, selectedCandidate])
 
+  // Déverrouillage par code PIN
+  const handleOpenProfile = (codeToTest?: string) => {
+    const activePin = codeToTest || pin
+    if (!selectedCandidate || activePin.length < 4) return
+
+    setError(null)
+    startTransition(async () => {
+      try {
+        await selectProfile(selectedCandidate, activePin)
+
+        const today = new Date().toISOString().split('T')[0]
+        localStorage.setItem(`bio_enrolled_${selectedCandidate.id}`, 'true')
+        localStorage.setItem(`last_pin_date_${selectedCandidate.id}`, today)
+        localStorage.setItem('has_created_profile_marker', 'true')
+
+        router.push('/')
+      } catch (err: unknown) {
+        setPin('')
+        setError(err instanceof Error ? err.message : 'Code PIN incorrect.')
+        desktopInputRef.current?.focus()
+      }
+    })
+  }
+
+  // Saisie tactile sécurisée (déclenche uniquement à 6 chiffres pour ne pas bloquer les PINs longs)
   const handleDigitPress = (digit: string) => {
     if (pin.length < 6) {
       const nextPin = pin + digit
       setPin(nextPin)
       setError(null)
-      if (nextPin.length >= 4 && selectedCandidate) {
+      if (nextPin.length === 6 && selectedCandidate) {
         handleOpenProfile(nextPin)
       }
     }
@@ -244,30 +269,6 @@ export default function ProfileSelectionPage() {
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [isInitializing, modalCreateOpen, modalPinOpen, pin, selectedCandidate])
 
-  // Déverrouillage par code PIN
-  const handleOpenProfile = (codeToTest?: string) => {
-    const activePin = codeToTest || pin
-    if (!selectedCandidate || activePin.length < 4) return
-
-    setError(null)
-    startTransition(async () => {
-      try {
-        await selectProfile(selectedCandidate, activePin)
-
-        const today = new Date().toISOString().split('T')[0]
-        localStorage.setItem(`bio_enrolled_${selectedCandidate.id}`, 'true')
-        localStorage.setItem(`last_pin_date_${selectedCandidate.id}`, today)
-        localStorage.setItem('has_created_profile_marker', 'true')
-
-        router.push('/')
-      } catch (err: unknown) {
-        setPin('')
-        setError(err instanceof Error ? err.message : 'Code PIN incorrect.')
-        desktopInputRef.current?.focus()
-      }
-    })
-  }
-
   // Déverrouillage biométrique
   const handleBiometricUnlock = async () => {
     if (!selectedCandidate) return
@@ -293,18 +294,18 @@ export default function ProfileSelectionPage() {
       setError('Nom requis.')
       return
     }
-    if (pin.length < 4 || pin.length > 6) {
+    if (createPin.length < 4 || createPin.length > 6) {
       setError('Le code PIN doit comporter 4 à 6 chiffres.')
       return
     }
 
     startTransition(async () => {
       try {
-        await createProfile(name, type, pin)
+        await createProfile(name.trim(), type, createPin)
         try {
           localStorage.setItem('has_created_profile_marker', 'true')
         } catch {}
-        setPin('')
+        setCreatePin('')
         setName('')
         setModalCreateOpen(false)
         setIsInitializing(false)
@@ -415,7 +416,7 @@ export default function ProfileSelectionPage() {
                 type="button"
                 onClick={() => {
                   setType('agent')
-                  setPin('')
+                  setCreatePin('')
                   setError(null)
                   setModalCreateOpen(true)
                 }}
@@ -538,7 +539,7 @@ export default function ProfileSelectionPage() {
               type="button"
               onClick={() => {
                 setType('direction')
-                setPin('')
+                setCreatePin('')
                 setError(null)
                 setModalCreateOpen(true)
               }}
@@ -562,7 +563,7 @@ export default function ProfileSelectionPage() {
                 type="button"
                 onClick={() => {
                   setType('agent')
-                  setPin('')
+                  setCreatePin('')
                   setError(null)
                   setModalCreateOpen(true)
                 }}
@@ -661,7 +662,7 @@ export default function ProfileSelectionPage() {
               onChange={(e) => {
                 const val = e.target.value.replace(/\D/g, '')
                 setPin(val)
-                if (val.length >= 4) handleOpenProfile(val)
+                if (val.length === 6) handleOpenProfile(val)
               }}
               className="opacity-0 absolute -z-10"
               autoFocus
@@ -753,7 +754,7 @@ export default function ProfileSelectionPage() {
         )}
       </div>
 
-      {/* --- MODALE CRÉATION DE PROFIL (Complètement fermée par défaut) --- */}
+      {/* --- MODALE CRÉATION DE PROFIL --- */}
       {modalCreateOpen && (
         <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4">
           <div className="w-full max-w-md bg-white border border-blue-100/80 rounded-3xl p-6 sm:p-8 shadow-2xl relative animate-in fade-in zoom-in-95 duration-150">
@@ -816,8 +817,8 @@ export default function ProfileSelectionPage() {
                   inputMode="numeric"
                   pattern="[0-9]*"
                   maxLength={6}
-                  value={pin}
-                  onChange={(e) => setPin(e.target.value.replace(/\D/g, ''))}
+                  value={createPin}
+                  onChange={(e) => setCreatePin(e.target.value.replace(/\D/g, ''))}
                   placeholder="••••"
                   required
                   className="w-full px-3.5 py-3 rounded-xl border border-slate-200 bg-slate-50 text-sm font-bold tracking-widest text-slate-900 focus:bg-white focus:border-blue-600 outline-none transition"
@@ -828,7 +829,7 @@ export default function ProfileSelectionPage() {
               <div className="space-y-2 pt-4">
                 <button
                   type="submit"
-                  disabled={isPending || !name || pin.length < 4}
+                  disabled={isPending || !name.trim() || createPin.length < 4}
                   className="w-full py-3.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-black uppercase tracking-wider disabled:opacity-40 shadow-lg shadow-blue-600/25 transition"
                 >
                   {isPending ? 'Enregistrement...' : 'Créer le profil'}

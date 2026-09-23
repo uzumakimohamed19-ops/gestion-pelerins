@@ -2,6 +2,7 @@
 
 import React, { useEffect, useState, useRef } from "react";
 import { App } from "@capacitor/app";
+import { Capacitor } from "@capacitor/core";
 import { PowerSyncContext } from "@powersync/react";
 import { powersync } from "@/lib/powersync/db";
 import { SupabaseConnector } from "@/lib/powersync/SupabaseConnector";
@@ -16,6 +17,7 @@ export default function ClientPowerSyncWrapper({
   const [ready, setReady] = useState(false);
   const connectorRef = useRef<SupabaseConnector | null>(null);
   const isConnectingRef = useRef(false);
+  const reconnectTimersRef = useRef<number[]>([]);
 
   useEffect(() => {
     let isMounted = true;
@@ -25,13 +27,18 @@ export default function ClientPowerSyncWrapper({
     }
     const connector = connectorRef.current;
 
+    const clearReconnectTimers = () => {
+      reconnectTimersRef.current.forEach((t) => window.clearTimeout(t));
+      reconnectTimersRef.current = [];
+    };
+
     const connectToPowerSync = async () => {
       if (!isMounted || isConnectingRef.current || powersync.connected) return;
 
       try {
         isConnectingRef.current = true;
         const { data: { session } } = await getSession();
-        
+
         if (!session) {
           console.log("🟡 PowerSync : En attente d'une session utilisateur Supabase...");
           return;
@@ -54,9 +61,18 @@ export default function ClientPowerSyncWrapper({
     const reconnectAfterNetworkRecovery = () => {
       if (!isMounted || isConnectingRef.current || powersync.connected) return;
 
+      clearReconnectTimers();
       void connectToPowerSync();
-      window.setTimeout(() => void connectToPowerSync(), 1500);
-      window.setTimeout(() => void connectToPowerSync(), 5000);
+
+      const t1 = window.setTimeout(() => {
+        if (isMounted && !powersync.connected) void connectToPowerSync();
+      }, 2000);
+
+      const t2 = window.setTimeout(() => {
+        if (isMounted && !powersync.connected) void connectToPowerSync();
+      }, 6000);
+
+      reconnectTimersRef.current = [t1, t2];
     };
 
     const init = async () => {
@@ -78,24 +94,35 @@ export default function ClientPowerSyncWrapper({
     const handleOnline = () => {
       reconnectAfterNetworkRecovery();
     };
+
     const handleVisibilityChange = () => {
-      if (document.visibilityState === 'visible') void connectToPowerSync();
+      if (document.visibilityState === "visible") void connectToPowerSync();
     };
-    window.addEventListener('online', handleOnline);
-    document.addEventListener('visibilitychange', handleVisibilityChange);
 
+    window.addEventListener("online", handleOnline);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+
+    // Écouteur Capacitor sécurisé (seulement sur plateforme native)
     let appStateListener: { remove: () => Promise<void> } | undefined;
-    void App.addListener('appStateChange', ({ isActive }) => {
-      if (isActive) reconnectAfterNetworkRecovery();
-    }).then((listener) => {
-      if (isMounted) {
-        appStateListener = listener;
-      } else {
-        void listener.remove();
+    if (Capacitor.isNativePlatform()) {
+      try {
+        void App.addListener("appStateChange", ({ isActive }) => {
+          if (isActive) reconnectAfterNetworkRecovery();
+        }).then((listener) => {
+          if (isMounted) {
+            appStateListener = listener;
+          } else {
+            void listener.remove();
+          }
+        }).catch(() => {
+          /* ignore si non supporté */
+        });
+      } catch {
+        /* ignore si non disponible */
       }
-    });
+    }
 
-    // Écouter INITIAL_SESSION, SIGNED_IN et TOKEN_REFRESHED
+    // Écoute des événements d'authentification Supabase
     const { data: authListener } = supabase.auth.onAuthStateChange(async (event, session) => {
       if (!isMounted) return;
       console.log(`ℹ️ Supabase Auth Event : ${event}`);
@@ -103,6 +130,8 @@ export default function ClientPowerSyncWrapper({
       if (session && (event === "SIGNED_IN" || event === "INITIAL_SESSION" || event === "TOKEN_REFRESHED")) {
         await connectToPowerSync();
       } else if (event === "SIGNED_OUT") {
+        clearReconnectTimers();
+        isConnectingRef.current = false;
         try {
           await powersync.disconnect();
           console.log("⚪ PowerSync : Déconnecté");
@@ -114,9 +143,10 @@ export default function ClientPowerSyncWrapper({
 
     return () => {
       isMounted = false;
+      clearReconnectTimers();
       authListener.subscription.unsubscribe();
-      window.removeEventListener('online', handleOnline);
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener("online", handleOnline);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
       void appStateListener?.remove();
     };
   }, []);
