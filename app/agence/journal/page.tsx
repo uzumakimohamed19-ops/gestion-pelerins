@@ -1,13 +1,14 @@
 'use client'
 
-import React, { useState, useMemo, useEffect } from 'react'
+import React, { useState, useMemo, useEffect, useTransition } from 'react'
 import Link from 'next/link'
-import { useQuery } from '@powersync/react'
+import { useQuery, usePowerSync } from '@powersync/react'
 import { supabase, getUser } from '../../../lib/supabase'
+import { useWorkProfile } from '@/lib/ProfileContext'
 import {
   ArrowLeft, Plus, Search, Calendar, ArrowRightLeft,
   Plane, Globe, Hotel, Bus, Receipt, Package, FileText,
-  Smartphone, Filter, X, Moon, Sun
+  Smartphone, Filter, X, Moon, Sun, Trash2, ShieldAlert
 } from 'lucide-react'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -43,10 +44,19 @@ const CATEGORIES: { id: string; label: string; icon: React.ElementType }[] = [
 ]
 
 export default function JournalOperations() {
+  const db = usePowerSync()
+  const { profiles, selectProfile } = useWorkProfile()
+
   const [currentUserId, setCurrentUserId] = useState<string | null>(null)
   const [agenceId, setAgenceId] = useState<string | null>(null)
 
-  // 🌓 GESTION DU THÈME SOMBRE (Synchronisé avec le reste de l'application)
+  // 🛡️ États pour la suppression sécurisée avec le PIN du Directeur
+  const [operationToDelete, setOperationToDelete] = useState<Operation | null>(null)
+  const [directorPin, setDirectorPin] = useState('')
+  const [deleteError, setDeleteError] = useState<string | null>(null)
+  const [isDeleting, startDeleteTransition] = useTransition()
+
+  // 🌓 GESTION DU THÈME SOMBRE
   const [isDark, setIsDark] = useState<boolean>(() => {
     if (typeof window !== 'undefined') {
       return localStorage.getItem('compta_theme_dark') === 'true'
@@ -102,6 +112,11 @@ export default function JournalOperations() {
     [agenceId ?? '']
   )
 
+  // Profil Directeur pour vérification du PIN
+  const directionProfile = useMemo(() => {
+    return profiles.find(p => p.profile_type === 'direction')
+  }, [profiles])
+
   // ─── Période temporelle (Mois en cours par défaut) ─────────────────────────
 
   const now = new Date()
@@ -121,7 +136,6 @@ export default function JournalOperations() {
   const [transfertOperateur, setTransfertOperateur] = useState<string>('TOUS')
   const [transfertSens, setTransfertSens] = useState<'TOUS' | 'DEPOT' | 'RETRAIT'>('TOUS')
 
-  // Logique de génération des années basée sur l'historique
   const anneesDisponibles = useMemo(() => {
     const yearsSet = new Set<string>()
     yearsSet.add(String(now.getFullYear()))
@@ -136,7 +150,6 @@ export default function JournalOperations() {
     return Array.from(yearsSet).sort((a, b) => Number(b) - Number(a))
   }, [operationsRaw, now])
 
-  // Génération des 18 derniers mois pour le sélecteur
   const optionsMois = useMemo(() => {
     const list: { key: string; label: string }[] = []
     const d = new Date()
@@ -149,7 +162,6 @@ export default function JournalOperations() {
     return list
   }, [])
 
-  // Liste dynamique des opérateurs de transfert présents dans les données
   const operateursPresents = useMemo(() => {
     const ops = new Set<string>()
     operationsRaw
@@ -165,7 +177,6 @@ export default function JournalOperations() {
       const opDate = new Date(op.created_at)
       if (isNaN(opDate.getTime())) return false
 
-      // 1. Filtrage Temporel
       if (filterPeriodType === 'MOIS') {
         const opMonthKey = `${opDate.getFullYear()}-${String(opDate.getMonth() + 1).padStart(2, '0')}`
         if (opMonthKey !== selectedMonth) return false
@@ -173,12 +184,10 @@ export default function JournalOperations() {
         if (String(opDate.getFullYear()) !== selectedYear) return false
       }
 
-      // 2. Filtrage Catégorie
       if (selectedCategory !== 'TOUT' && op.type_activite !== selectedCategory) {
         return false
       }
 
-      // 3. Sous-filtres spécifiques aux Transferts d'argent
       if (selectedCategory === 'TRANSFERT') {
         if (transfertOperateur !== 'TOUS' && op.compagnie_fournisseur !== transfertOperateur) {
           return false
@@ -192,12 +201,10 @@ export default function JournalOperations() {
         }
       }
 
-      // 4. Statut de paiement
       if (statusFilter !== 'TOUS' && op.statut_paiement !== statusFilter) {
         return false
       }
 
-      // 5. Recherche textuelle
       if (searchQuery.trim()) {
         const q = searchQuery.toLowerCase()
         const matchClient = op.client_nom?.toLowerCase().includes(q)
@@ -214,7 +221,7 @@ export default function JournalOperations() {
     selectedCategory, transfertOperateur, transfertSens, statusFilter, searchQuery
   ])
 
-  // ─── Statistiques Financières de la Sélection ──────────────────────────────
+  // ─── Statistiques Financières ──────────────────────────────────────────────
 
   const stats = useMemo(() => {
     let ca = 0
@@ -238,7 +245,6 @@ export default function JournalOperations() {
     return { ca, gain, encaisse, dette, totalOps: operationsFiltrees.length }
   }, [operationsFiltrees])
 
-  // Compteurs par catégorie selon la période temporelle choisie
   const countsByCategory = useMemo(() => {
     const map: Record<string, number> = { TOUT: 0 }
     operationsRaw.forEach((op) => {
@@ -254,6 +260,46 @@ export default function JournalOperations() {
     })
     return map
   }, [operationsRaw, filterPeriodType, selectedMonth, selectedYear])
+
+  // ─── Logique de Suppression avec PIN Directeur ──────────────────────────────
+
+  const handleConfirmerSuppression = (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!operationToDelete) return
+
+    if (!directionProfile) {
+      setDeleteError("Aucun profil Directeur trouvé pour autoriser cette action.")
+      return
+    }
+
+    if (directorPin.length < 4 || directorPin.length > 6) {
+      setDeleteError("Le code PIN doit comporter 4 à 6 chiffres.")
+      return
+    }
+
+    setDeleteError(null)
+
+    startDeleteTransition(async () => {
+      try {
+        // 1. Validation de l'autorisation avec le PIN du Directeur
+        await selectProfile(directionProfile, directorPin)
+
+        const opId = operationToDelete.id
+
+        // 2. Suppression locale dans PowerSync (se répercute automatiquement)
+        await db.execute('DELETE FROM operations_agence WHERE id = ?', [opId])
+
+        // 3. Suppression directe de secours sur Supabase Cloud
+        await supabase.from('operations_agence').delete().eq('id', opId)
+
+        // Réinitialisation
+        setOperationToDelete(null)
+        setDirectorPin('')
+      } catch {
+        setDeleteError("Code PIN du Directeur incorrect. Suppression refusée.")
+      }
+    })
+  }
 
   return (
     <div className={`min-h-screen pb-16 transition-colors duration-150 ${
@@ -287,7 +333,6 @@ export default function JournalOperations() {
           </div>
 
           <div className="flex items-center gap-2 sm:gap-3">
-            {/* 🌓 Bouton Mode Sombre : masqué sur mobile */}
             <button
               type="button"
               onClick={toggleDarkMode}
@@ -398,7 +443,7 @@ export default function JournalOperations() {
           </div>
         </div>
 
-        {/* ─── BLOCS INDICATEURS FINANCIERS FLAT ─── */}
+        {/* ─── BLOCS INDICATEURS FINANCIERS ─── */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5">
           <div className={`p-3.5 rounded-xl border transition-colors ${
             isDark ? 'bg-[#1C1C1E] border-[#2C2C2E]' : 'bg-white border-slate-200/80'
@@ -496,7 +541,7 @@ export default function JournalOperations() {
           })}
         </div>
 
-        {/* ─── SOUS-SECTION DÉDIÉE : FILTRES TRANSFERT D'ARGENT ─── */}
+        {/* ─── SOUS-SECTION FILTRES TRANSFERT D'ARGENT ─── */}
         {selectedCategory === 'TRANSFERT' && (
           <div className={`p-3 rounded-xl border space-y-2.5 transition-colors ${
             isDark ? 'bg-[#1C1C1E] border-[#34C759]/30' : 'bg-white border-emerald-200/80'
@@ -511,7 +556,6 @@ export default function JournalOperations() {
                 Filtrer les transferts d'argent
               </span>
 
-              {/* Sélecteur Sens : Dépôt ou Retrait */}
               <div className={`flex items-center gap-1 p-0.5 rounded-lg text-[11px] font-bold ${
                 isDark ? 'bg-[#2C2C2E]' : 'bg-slate-100'
               }`}>
@@ -548,7 +592,6 @@ export default function JournalOperations() {
               </div>
             </div>
 
-            {/* Boutons rapides par Opérateur */}
             <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5 scrollbar-none">
               <button
                 onClick={() => setTransfertOperateur('TOUS')}
@@ -642,6 +685,7 @@ export default function JournalOperations() {
                       <th className="py-2.5 px-4 text-right">Montant Total</th>
                       <th className="py-2.5 px-4 text-right">Gain Net</th>
                       <th className="py-2.5 px-4 text-center">Statut</th>
+                      <th className="py-2.5 px-4 text-center">Action</th>
                     </tr>
                   </thead>
                   <tbody className={`divide-y ${
@@ -724,6 +768,24 @@ export default function JournalOperations() {
                               </span>
                             )}
                           </td>
+                          <td className="py-2.5 px-4 text-center whitespace-nowrap">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setOperationToDelete(op)
+                                setDirectorPin('')
+                                setDeleteError(null)
+                              }}
+                              className={`p-1.5 rounded-lg transition-colors cursor-pointer ${
+                                isDark 
+                                  ? 'text-[#8E8E93] hover:text-[#FF453A] hover:bg-[#FF453A]/10' 
+                                  : 'text-slate-400 hover:text-rose-600 hover:bg-rose-50'
+                              }`}
+                              title="Supprimer cette opération"
+                            >
+                              <Trash2 size={15} />
+                            </button>
+                          </td>
                         </tr>
                       )
                     })}
@@ -743,7 +805,7 @@ export default function JournalOperations() {
                   const isRetrait = desc.includes('retrait')
 
                   return (
-                    <div key={op.id} className="p-3 space-y-1.5">
+                    <div key={op.id} className="p-3 space-y-2">
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-1">
                           <span className={`text-[10px] font-bold uppercase tracking-wider ${
@@ -765,15 +827,31 @@ export default function JournalOperations() {
                           </span>
                         </div>
 
-                        <span className={`text-[9px] font-bold px-1.5 py-0.2 rounded ${
-                          op.statut_paiement === 'PAYE'
-                            ? (isDark ? 'bg-[#34C759]/15 text-[#34C759]' : 'bg-emerald-50 text-emerald-700')
-                            : op.statut_paiement === 'AVANCE'
-                            ? (isDark ? 'bg-[#FF9F0A]/15 text-[#FF9F0A]' : 'bg-amber-50 text-amber-800')
-                            : (isDark ? 'bg-[#FF453A]/15 text-[#FF453A]' : 'bg-red-50 text-red-700')
-                        }`}>
-                          {op.statut_paiement === 'PAYE' ? 'Payé' : op.statut_paiement === 'AVANCE' ? 'Avance' : 'Dette'}
-                        </span>
+                        <div className="flex items-center gap-2">
+                          <span className={`text-[9px] font-bold px-1.5 py-0.2 rounded ${
+                            op.statut_paiement === 'PAYE'
+                              ? (isDark ? 'bg-[#34C759]/15 text-[#34C759]' : 'bg-emerald-50 text-emerald-700')
+                              : op.statut_paiement === 'AVANCE'
+                              ? (isDark ? 'bg-[#FF9F0A]/15 text-[#FF9F0A]' : 'bg-amber-50 text-amber-800')
+                              : (isDark ? 'bg-[#FF453A]/15 text-[#FF453A]' : 'bg-red-50 text-red-700')
+                          }`}>
+                            {op.statut_paiement === 'PAYE' ? 'Payé' : op.statut_paiement === 'AVANCE' ? 'Avance' : 'Dette'}
+                          </span>
+
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setOperationToDelete(op)
+                              setDirectorPin('')
+                              setDeleteError(null)
+                            }}
+                            className={`p-1 rounded transition-colors ${
+                              isDark ? 'text-[#8E8E93] hover:text-[#FF453A]' : 'text-slate-400 hover:text-rose-600'
+                            }`}
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
                       </div>
 
                       <div className="flex items-center justify-between">
@@ -803,6 +881,107 @@ export default function JournalOperations() {
         </div>
 
       </div>
+
+      {/* ─── 🛡️ MODALE DE CONFIRMATION AVEC PIN DIRECTEUR ─── */}
+      {operationToDelete && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className={`w-full max-w-md rounded-3xl p-6 sm:p-7 shadow-2xl relative border animate-in fade-in zoom-in-95 duration-150 ${
+            isDark ? 'bg-[#1C1C1E] border-[#2C2C2E]' : 'bg-white border-slate-200'
+          }`}>
+            <button
+              type="button"
+              onClick={() => {
+                setOperationToDelete(null)
+                setDirectorPin('')
+                setDeleteError(null)
+              }}
+              className="absolute top-5 right-5 p-1.5 rounded-full text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition"
+            >
+              <X size={18} />
+            </button>
+
+            <div className={`w-12 h-12 rounded-2xl flex items-center justify-center mb-4 ${
+              isDark ? 'bg-[#FF453A]/15 text-[#FF453A]' : 'bg-rose-50 text-rose-600'
+            }`}>
+              <ShieldAlert size={24} />
+            </div>
+
+            <h2 className={`text-base font-black ${isDark ? 'text-[#F5F5F7]' : 'text-slate-900'}`}>
+              Suppression d'une Opération
+            </h2>
+            <p className={`text-xs mt-1 leading-relaxed ${isDark ? 'text-[#8E8E93]' : 'text-slate-500'}`}>
+              Cette action supprimera définitivement cette vente ({operationToDelete.type_activite} &bull; {Number(operationToDelete.prix_vente).toLocaleString('fr-FR')} CFA) de la comptabilité locale et du serveur cloud.
+            </p>
+
+            <div className={`p-2.5 rounded-xl border my-4 text-xs font-semibold ${
+              isDark ? 'bg-[#2C2C2E] border-[#38383A] text-[#D1D1D6]' : 'bg-slate-50 border-slate-200 text-slate-700'
+            }`}>
+              Client : <strong className={isDark ? 'text-white' : 'text-slate-900'}>{operationToDelete.client_nom || 'Client Comptoir'}</strong>
+            </div>
+
+            {deleteError && (
+              <p className="text-xs text-rose-600 font-bold mb-3 p-2 rounded-lg bg-rose-500/10 border border-rose-500/20">
+                {deleteError}
+              </p>
+            )}
+
+            <form onSubmit={handleConfirmerSuppression} className="space-y-4">
+              <div>
+                <label className={`text-[10px] font-black uppercase tracking-wider block mb-1 ${
+                  isDark ? 'text-[#8E8E93]' : 'text-slate-400'
+                }`}>
+                  Code PIN du Directeur ({directionProfile?.name || 'Direction'})
+                </label>
+                <input
+                  type="password"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
+                  maxLength={6}
+                  value={directorPin}
+                  onChange={(e) => setDirectorPin(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                  placeholder="••••"
+                  autoFocus
+                  required
+                  className={`w-full px-3.5 py-3 rounded-xl border text-sm font-bold tracking-widest outline-none transition ${
+                    isDark 
+                      ? 'bg-[#2C2C2E] border-[#38383A] text-[#F5F5F7] focus:border-[#545458]' 
+                      : 'bg-slate-50 border-slate-200 text-slate-900 focus:bg-white focus:border-rose-600'
+                  }`}
+                  style={{
+                    WebkitTextSecurity: 'disc',
+                  } as React.CSSProperties}
+                />
+              </div>
+
+              <div className="pt-2 flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setOperationToDelete(null)
+                    setDirectorPin('')
+                    setDeleteError(null)
+                  }}
+                  className={`flex-1 py-3.5 rounded-xl text-xs font-black uppercase tracking-wider transition ${
+                    isDark 
+                      ? 'border border-[#2C2C2E] text-[#8E8E93] hover:bg-[#2C2C2E]' 
+                      : 'border border-slate-200 text-slate-600 hover:bg-slate-50'
+                  }`}
+                >
+                  Annuler
+                </button>
+                <button
+                  type="submit"
+                  disabled={isDeleting || directorPin.length < 4}
+                  className="flex-1 py-3.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-black uppercase tracking-wider disabled:opacity-40 shadow-lg shadow-rose-600/25 transition cursor-pointer"
+                >
+                  {isDeleting ? 'Suppression…' : 'Supprimer'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
     </div>
   )
 }
