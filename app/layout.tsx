@@ -39,7 +39,7 @@ export default function RootLayout({
   return (
     <html lang="fr" suppressHydrationWarning className="overscroll-y-contain">
       <head>
-        {/* 🛡️ VERROUILLAGE GLOBAL DU PULL-TO-REFRESH & DE L'OVERSCROLL BLANC */}
+        {/* Verrouillage overscroll et étirement élastique */}
         <style dangerouslySetInnerHTML={{
           __html: `
             html, body {
@@ -49,16 +49,19 @@ export default function RootLayout({
           `
         }} />
 
-        {/* Initialisation instantanée du thème pour éviter tout flash blanc */}
+        {/* Initialisation instantanée de la couleur de l'encoche iOS dès le premier render */}
         <script dangerouslySetInnerHTML={{
-          __html: "try { const w = window; const isDark = localStorage.getItem('compta_theme_dark') === 'true' || localStorage.getItem('app-theme') === 'dark'; if (isDark) { document.documentElement.classList.add('dark'); document.documentElement.style.backgroundColor = '#000000'; } if (w.location.protocol.startsWith('tauri') || w.location.hostname === 'tauri.localhost' || '__TAURI_INTERNALS__' in w || '__TAURI__' in w) document.documentElement.dataset.tauri = 'true'; } catch (_) {}"
+          __html: `try {
+            const isDark = localStorage.getItem('compta_theme_dark') === 'true' || localStorage.getItem('app-theme') === 'dark';
+            const color = isDark ? '#000000' : '#ffffff';
+            document.documentElement.style.backgroundColor = color;
+            if (isDark) document.documentElement.classList.add('dark');
+          } catch (_) {}`
         }} />
       </head>
-      <body className="min-h-screen m-0 p-0 antialiased text-slate-900 bg-transparent flex flex-col overscroll-y-contain">
-        
-        {/* 🚀 BANNIÈRE DE MISE À JOUR DISPONIBLE (Affichage prioritaire z-[999999]) */}
+      {/* ⚠️ Retrait de "bg-transparent" : sur iOS, le body doit être opaque pour peindre l'encoche */}
+      <body className="min-h-screen m-0 p-0 antialiased text-slate-900 flex flex-col overscroll-y-contain bg-white dark:bg-black transition-colors duration-150">
         <AppUpdateBanner />
-
         <AppCacheGuard />
         <ClientPowerSyncWrapper>
           <AuthGuard>
@@ -68,6 +71,7 @@ export default function RootLayout({
                   <NativeBackButton />
                   <ThemeColorSync />
 
+                  {/* Bande physique qui remplit l'encoche sur iPhone */}
                   <div className="lg:hidden">
                     <TopBarContainer />
                   </div>

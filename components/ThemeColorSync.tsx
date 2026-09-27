@@ -24,7 +24,6 @@ export default function ThemeColorSync() {
       let color = LIGHT_DEFAULT
 
       if (isDark && isAgence) {
-        // En mode sombre pour tout le pôle agence : barre d'état noire pure
         color = DARK_THEME
       } else if (isAgenceDashboard) {
         color = AGENCE_DASHBOARD_THEME
@@ -34,7 +33,7 @@ export default function ThemeColorSync() {
         color = LIGHT_DEFAULT
       }
 
-      // 1. Mise à jour de TOUTES les balises theme-color (y compris celles injectées par Next.js viewport)
+      // 1. Mise à jour pour Android Chrome
       const themeMetas = document.querySelectorAll('meta[name="theme-color"]')
       if (themeMetas.length > 0) {
         themeMetas.forEach(meta => meta.setAttribute('content', color))
@@ -45,20 +44,26 @@ export default function ThemeColorSync() {
         document.head.appendChild(newMeta)
       }
 
-      // 2. Synchronisation iOS Safari / PWA
+      // 2. CORRECTION CRITIQUE POUR IPHONE (PWA Standalone & Safari) :
+      // On colore directement le html et le body avec la couleur active.
+      // Sur iOS, l'encoche adopte immédiatement la couleur du document sous-jacent.
+      document.documentElement.style.backgroundColor = color
+      document.body.style.backgroundColor = color
+
+      // 3. Barre de statut iOS :
+      // Utiliser 'default' permet à iOS d'adapter le contraste des icônes (heure, batterie)
+      // automatiquement selon la couleur claire ou foncée.
       let appleMeta = document.querySelector('meta[name="apple-mobile-web-app-status-bar-style"]') as HTMLMetaElement | null
       if (!appleMeta) {
         appleMeta = document.createElement('meta')
         appleMeta.name = 'apple-mobile-web-app-status-bar-style'
         document.head.appendChild(appleMeta)
       }
-      appleMeta.content = isDark || isAgenceDashboard ? 'black-translucent' : 'default'
+      appleMeta.content = isDark || isAgenceDashboard || isHajjDashboard ? 'black-translucent' : 'default'
     }
 
-    // Exécution immédiate au changement de page
     updateStatusBarColor()
 
-    // Écoute des événements de bascule de thème sans actualisation
     window.addEventListener('storage', updateStatusBarColor)
     window.addEventListener('theme-change', updateStatusBarColor)
 
