@@ -1,65 +1,46 @@
 'use client'
 
-import { useEffect } from 'react'
+import '../globals.css'
 import Navbar from '../../components/Navbar'
 import { usePathname } from 'next/navigation'
 import { YearProvider } from '@/lib/YearContext'
 
-const HAJJ_BLUE = '#2563eb'
-
 export default function HajjLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
 
-  // 🔵 Synchronisation immédiate de l'encoche iOS & du document racine
-  useEffect(() => {
-    if (typeof document === 'undefined') return
-
-    // Teinter html et body en bleu Hajj pour éviter tout flash blanc sous l'encoche
-    document.documentElement.style.backgroundColor = HAJJ_BLUE
-    document.body.style.backgroundColor = HAJJ_BLUE
-
-    // Mettre à jour la meta theme-color pour Safari et Chrome
-    const themeMetas = document.querySelectorAll('meta[name="theme-color"]')
-    themeMetas.forEach(meta => meta.setAttribute('content', HAJJ_BLUE))
-
-    return () => {
-      // Nettoyage en quittant le module Hajj
-      document.documentElement.style.backgroundColor = ''
-      document.body.style.backgroundColor = ''
-    }
-  }, [pathname])
+  const isDashboard = pathname === '/hajj' || pathname === '/hajj/dashboard'
 
   return (
     <YearProvider scope="hajj">
-      <div 
-        className="min-h-screen antialiased flex flex-col w-full"
-        style={{ backgroundColor: HAJJ_BLUE }}
-      >
+      <div className="min-h-screen antialiased flex flex-col w-full bg-slate-50">
       
-        {/* 🛡️ INJECTION CSS NATIVE : Verrouillage overscroll & pleine largeur PC */}
+        {/* 🛡️ INJECTION CSS NATIVE : Verrouillage overscroll & pull-to-refresh Android + Nettoyage PC */}
         <style dangerouslySetInnerHTML={{
           __html: `
+            /* 🚫 Bloque le pull-to-refresh de Chrome Android et l'overscroll élastique iOS */
             html, body {
-              background-color: ${HAJJ_BLUE} !important;
               overscroll-behavior-y: contain !important;
-              -webkit-overflow-scrolling: touch;
             }
 
             @media (min-width: 1024px) {
+              /* 1. On neutralise les limites de largeur des pages */
               .max-w-4xl, .max-w-5xl, .max-w-6xl, .max-w-7xl {
                 max-width: 100% !important;
               }
               
+              /* 2. Élimination de TOUT padding/margin haut qui pourrait venir du body ou du layout global */
               body, html {
                 padding-top: 0px !important;
                 margin-top: 0px !important;
               }
 
+              /* 3. On force le contenu principal à coller tout en haut */
               .hajj-main-content {
                 padding-top: 0px !important;
                 margin-top: 0px !important;
               }
               
+              /* 4. On s'assure que la div résiduelle de la Navbar est bien écrasée */
               nav + div, .hidden.lg\\:block.h-20 {
                 height: 0px !important;
                 display: none !important;
@@ -70,24 +51,25 @@ export default function HajjLayout({ children }: { children: React.ReactNode }) 
           `
         }} />
 
-        {/* 📱 Bande physique d'encoche iOS (Fixée à top: 0, peinte en bleu Hajj) */}
-        <div 
-          className="fixed top-0 left-0 right-0 z-[9999] pointer-events-none transition-colors duration-150 lg:hidden"
-          style={{ 
-            height: 'env(safe-area-inset-top, 44px)',
-            backgroundColor: HAJJ_BLUE
-          }}
-          aria-hidden="true"
-        />
-
-        {/* Barre de navigation Hajj */}
+        {/* Ta Navbar existante */}
         <Navbar />
         
-        {/* Contenu principal */}
+        {/* Sur mobile : padding-top s'adapte aux encoches. 
+            Sur PC : Le CSS injecté ci-dessus force tout à 0px. */}
         <main 
-          className="flex-1 w-full flex flex-col relative hajj-main-content tauri-safe-area bg-slate-50"
+          className="flex-1 w-full flex flex-col relative hajj-main-content tauri-safe-area"
           style={{ paddingTop: 'env(safe-area-inset-top)' }}
         >
+          
+          {/* La barre supérieure mobile (masquée sur PC) */}
+          <div 
+            className="shadow-none fixed top-0 left-0 w-full z-[9999] pointer-events-none transition-colors duration-200 lg:hidden"
+            style={{ 
+              height: 'env(safe-area-inset-top)',
+              backgroundColor: isDashboard ? '#2563eb' : '#ffffff'
+            }}
+          />
+
           {children}
         </main>
         
