@@ -6,7 +6,7 @@ import {
   TrendingUp, Wallet, Plane, Plus, Clock, Briefcase,
   ShieldCheck, Globe, X, Search, UserPlus, AlertTriangle, 
   ChevronRight, FileSpreadsheet, Building2, Eye, EyeOff,
-  Sun, Moon
+  Sun, Moon, Calendar
 } from 'lucide-react'
 import Link from 'next/link'
 import { get, set } from 'idb-keyval'
@@ -182,7 +182,26 @@ export default function DashboardAgence() {
   const [showAmount, setShowAmount] = useState<boolean>(true)
   const [mounted, setMounted] = useState(false)
 
-  // 🌓 GESTION DU THÈME SOMBRE (Synchronisé avec tout le module agence)
+  // 📅 GESTION DU FILTRE TEMPOREL (MOIS PAR DÉFAUT)
+  const now = new Date()
+  const currentMonthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
+  const [periodMode, setPeriodMode] = useState<'month' | 'year'>('month')
+  const [selectedMonth, setSelectedMonth] = useState<string>(currentMonthKey)
+
+  // Options des 18 derniers mois
+  const monthOptions = useMemo(() => {
+    const list: { key: string; label: string }[] = []
+    const d = new Date()
+    for (let i = 0; i < 18; i++) {
+      const dateTarget = new Date(d.getFullYear(), d.getMonth() - i, 1)
+      const key = `${dateTarget.getFullYear()}-${String(dateTarget.getMonth() + 1).padStart(2, '0')}`
+      const label = dateTarget.toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' })
+      list.push({ key, label: label.charAt(0).toUpperCase() + label.slice(1) })
+    }
+    return list
+  }, [])
+
+  // 🌓 GESTION DU THÈME SOMBRE
   const [isDark, setIsDark] = useState<boolean>(() => {
     if (typeof window !== 'undefined') {
       return localStorage.getItem('compta_theme_dark') === 'true'
@@ -234,23 +253,29 @@ export default function DashboardAgence() {
     })
   }, [])
 
-  const filterByYear = (data: Operation[]) => {
-    if (selectedYear === 'all') return data
-    return data.filter((op) => {
-      const year = op.created_at ? new Date(op.created_at).getFullYear() : null
-      return year === selectedYear
-    })
-  }
-
   useEffect(() => {
     setAllData(operations ?? [])
     setLoading(operationsLoading)
-  }, [operations, operationsLoading, selectedYear])
+  }, [operations, operationsLoading])
 
+  // 🎯 FILTRAGE TEMPOREL DYNAMIQUE (Par Mois ou Par Année)
   const visibleData = useMemo(() => {
     if (!allData) return []
-    return filterByYear(allData)
-  }, [allData, selectedYear])
+    
+    return allData.filter((op) => {
+      if (!op.created_at) return false
+      const opDate = new Date(op.created_at)
+      if (isNaN(opDate.getTime())) return false
+
+      if (periodMode === 'month') {
+        const opMonthKey = `${opDate.getFullYear()}-${String(opDate.getMonth() + 1).padStart(2, '0')}`
+        return opMonthKey === selectedMonth
+      } else {
+        if (selectedYear === 'all') return true
+        return opDate.getFullYear() === selectedYear
+      }
+    })
+  }, [allData, periodMode, selectedMonth, selectedYear])
 
   const stats = useMemo(() => {
     const count = visibleData.length
@@ -453,7 +478,6 @@ export default function DashboardAgence() {
             </div>
             
             <div className="flex items-center gap-2">
-              {/* Bouton Thème Mobile */}
               <button 
                 type="button"
                 onClick={toggleDarkMode}
@@ -474,7 +498,9 @@ export default function DashboardAgence() {
 
           <div className="flex justify-between items-end mt-7 relative z-10">
             <div>
-              <p className="text-xs font-bold text-white/60 uppercase tracking-widest">Chiffre d'Affaires Global</p>
+              <p className="text-xs font-bold text-white/60 uppercase tracking-widest">
+                {periodMode === 'month' ? 'Chiffre d\'Affaires du Mois' : 'Chiffre d\'Affaires Annuel'}
+              </p>
               <div className="flex items-baseline gap-2 mt-0.5">
                 <h2 className="text-3xl font-black tracking-tighter tabular-nums">
                   {canViewAmounts && showAmount ? stats.caTotal.toLocaleString('fr-FR') : '••••••'}
@@ -493,9 +519,56 @@ export default function DashboardAgence() {
         </div>
 
         <div className="px-4 mt-6 space-y-6">
-          <div className="px-1">
-            <YearSelector />
+          {/* Sélecteur de période mobile */}
+          <div className="flex flex-col gap-2 px-1">
+            <div className={`flex items-center p-1 rounded-xl border ${
+              isDark ? 'bg-[#1C1C1E] border-[#2C2C2E]' : 'bg-slate-100 border-slate-200'
+            }`}>
+              <button
+                type="button"
+                onClick={() => setPeriodMode('month')}
+                className={`flex-1 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                  periodMode === 'month'
+                    ? isDark ? 'bg-[#2C2C2E] text-white shadow-xs' : 'bg-white text-slate-900 shadow-xs'
+                    : isDark ? 'text-[#8E8E93]' : 'text-slate-500'
+                }`}
+              >
+                Par Mois
+              </button>
+              <button
+                type="button"
+                onClick={() => setPeriodMode('year')}
+                className={`flex-1 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                  periodMode === 'year'
+                    ? isDark ? 'bg-[#2C2C2E] text-white shadow-xs' : 'bg-white text-slate-900 shadow-xs'
+                    : isDark ? 'text-[#8E8E93]' : 'text-slate-500'
+                }`}
+              >
+                Par Année
+              </button>
+            </div>
+
+            {periodMode === 'month' ? (
+              <div className="relative">
+                <select
+                  value={selectedMonth}
+                  onChange={(e) => setSelectedMonth(e.target.value)}
+                  className={`w-full py-2.5 px-3 rounded-xl border text-xs font-bold outline-none ${
+                    isDark ? 'bg-[#1C1C1E] border-[#2C2C2E] text-white' : 'bg-white border-slate-200 text-slate-800'
+                  }`}
+                >
+                  {monthOptions.map((m) => (
+                    <option key={m.key} value={m.key}>
+                      {m.label} {m.key === currentMonthKey ? '(En cours)' : ''}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            ) : (
+              <YearSelector />
+            )}
           </div>
+
           <div className={`grid grid-cols-2 gap-3 rounded-[1.5rem] p-2 transition-colors ${
             isDark ? 'bg-[#121214] border border-[#2C2C2E]' : 'bg-slate-50/80 shadow-[0_8px_24px_rgba(15,23,42,0.04)]'
           }`}>
@@ -615,7 +688,6 @@ export default function DashboardAgence() {
           </div>
           
           <div className="flex items-center flex-wrap gap-3">
-            {/* 🌓 Bouton Mode Sombre Desktop */}
             <button
               type="button"
               onClick={toggleDarkMode}
@@ -666,9 +738,60 @@ export default function DashboardAgence() {
 
         <div className="flex flex-col lg:flex-row gap-8 items-start w-full">
           <div className="flex-1 min-w-0 w-full flex flex-col gap-6">
-            <div className="flex justify-end">
-              <YearSelector />
+            
+            {/* 🗓️ BARRE DE CONTRÔLE TEMPORELLE DESKTOP */}
+            <div className="flex items-center justify-between gap-4 p-2 rounded-2xl border bg-white dark:bg-[#1C1C1E] border-slate-100 dark:border-[#2C2C2E] shadow-xs">
+              <div className="flex items-center gap-1.5 p-1 rounded-xl bg-slate-100 dark:bg-[#2C2C2E]">
+                <button
+                  type="button"
+                  onClick={() => setPeriodMode('month')}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                    periodMode === 'month'
+                      ? isDark ? 'bg-[#1C1C1E] text-white shadow-xs' : 'bg-white text-slate-900 shadow-xs'
+                      : isDark ? 'text-[#8E8E93] hover:text-white' : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  Vue Mensuelle
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPeriodMode('year')}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                    periodMode === 'year'
+                      ? isDark ? 'bg-[#1C1C1E] text-white shadow-xs' : 'bg-white text-slate-900 shadow-xs'
+                      : isDark ? 'text-[#8E8E93] hover:text-white' : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  Vue Annuelle
+                </button>
+              </div>
+
+              <div className="flex items-center gap-2">
+                {periodMode === 'month' ? (
+                  <div className="flex items-center gap-2">
+                    <Calendar size={15} className="text-slate-400" />
+                    <select
+                      value={selectedMonth}
+                      onChange={(e) => setSelectedMonth(e.target.value)}
+                      className={`py-1.5 px-3 rounded-xl border text-xs font-bold outline-none cursor-pointer ${
+                        isDark 
+                          ? 'bg-[#2C2C2E] border-[#38383A] text-white' 
+                          : 'bg-slate-50 border-slate-200 text-slate-800'
+                      }`}
+                    >
+                      {monthOptions.map((m) => (
+                        <option key={m.key} value={m.key}>
+                          {m.label} {m.key === currentMonthKey ? '(En cours)' : ''}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                ) : (
+                  <YearSelector />
+                )}
+              </div>
             </div>
+
             <div className="grid grid-cols-2 xl:grid-cols-3 gap-6">
               {mainCards.map((card, i) => (
                 <Tile key={i} card={card} loading={loading} isDark={isDark} onClick={() => openModal(card.label)} />
@@ -781,12 +904,18 @@ export default function DashboardAgence() {
         </div>
       </div>
 
-      {/* ─── MODALE DÉTAILS (Mode Clair & Sombre) ─── */}
+      {/* ─── 🛡️ MODALE DÉTAILS AVEC z-[999999] (Empêche toute fuite visuelle du YearSelector) ─── */}
       {modal && (
-        <div className="fixed inset-0 z-[999] flex items-end sm:items-center justify-center bg-black/70 backdrop-blur-xs p-0 sm:p-4" onClick={() => setModal(null)}>
-          <div className={`w-full sm:max-w-3xl rounded-t-2xl sm:rounded-2xl border shadow-2xl h-[85vh] sm:h-auto max-h-[85vh] sm:max-h-[calc(100vh-80px)] flex flex-col ${
-            isDark ? 'bg-[#1C1C1E] border-[#2C2C2E]' : 'bg-white border-slate-100'
-          }`} onClick={e => e.stopPropagation()}>
+        <div 
+          className="fixed inset-0 z-[999999] flex items-end sm:items-center justify-center bg-black/80 backdrop-blur-sm p-0 sm:p-4 select-none animate-in fade-in duration-150" 
+          onClick={() => setModal(null)}
+        >
+          <div 
+            className={`w-full sm:max-w-3xl rounded-t-2xl sm:rounded-2xl border shadow-2xl h-[85vh] sm:h-auto max-h-[85vh] sm:max-h-[calc(100vh-80px)] flex flex-col ${
+              isDark ? 'bg-[#1C1C1E] border-[#2C2C2E]' : 'bg-white border-slate-100'
+            }`} 
+            onClick={e => e.stopPropagation()}
+          >
             <div className={`w-12 h-1 rounded-full mx-auto my-3 sm:hidden shrink-0 ${isDark ? 'bg-[#38383A]' : 'bg-slate-200'}`} />
             
             <div className={`flex items-center justify-between px-5 pb-4 pt-1 sm:py-4 border-b shrink-0 ${
@@ -796,9 +925,14 @@ export default function DashboardAgence() {
                 <h2 className={`text-base sm:text-lg font-black ${isDark ? 'text-[#F5F5F7]' : 'text-slate-900'}`}>{modal.title}</h2>
                 <p className="text-xs text-[#8E8E93] mt-0.5">{filteredItems.length} opération(s)</p>
               </div>
-              <button onClick={() => setModal(null)} className={`p-2 rounded-xl border transition-colors cursor-pointer ${
-                isDark ? 'bg-[#2C2C2E] text-[#8E8E93] border-[#38383A] hover:text-[#F5F5F7]' : 'bg-slate-50 text-slate-400 border-slate-100'
-              }`}><X size={16} /></button>
+              <button 
+                onClick={() => setModal(null)} 
+                className={`p-2 rounded-xl border transition-colors cursor-pointer ${
+                  isDark ? 'bg-[#2C2C2E] text-[#8E8E93] border-[#38383A] hover:text-[#F5F5F7]' : 'bg-slate-50 text-slate-400 border-slate-100 hover:text-slate-700'
+                }`}
+              >
+                <X size={16} />
+              </button>
             </div>
 
             <div className={`px-5 py-4 border-b space-y-3 shrink-0 ${

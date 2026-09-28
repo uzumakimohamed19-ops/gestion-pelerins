@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from 'react'
 import SidebarAgence from '@/components/SidebarAgence'
-import { YearSelector } from '@/components/YearSelector'
 import { usePathname } from 'next/navigation'
 import { YearProvider } from '@/lib/YearContext'
 
@@ -23,12 +22,16 @@ export default function AgenceLayout({ children }: { children: React.ReactNode }
       const darkActive = localStorage.getItem('compta_theme_dark') === 'true'
       setIsDark(darkActive)
 
-      // 🛡️ CORRECTION NATIVE FOND BLANC MOBILE :
-      // On force la couleur de <html> et <body> pour éliminer le blanc lors de l'overscroll
       if (typeof document !== 'undefined') {
-        const bg = darkActive ? '#000000' : '#FBFBFB'
+        const bg = darkActive ? '#000000' : (isDashboard ? '#1e293b' : '#FAFBFD')
         document.documentElement.style.backgroundColor = bg
         document.body.style.backgroundColor = bg
+
+        // Mise à jour de la balise theme-color pour iOS Safari
+        const metaTheme = document.querySelector('meta[name="theme-color"]')
+        if (metaTheme) {
+          metaTheme.setAttribute('content', bg)
+        }
       }
     }
 
@@ -41,25 +44,28 @@ export default function AgenceLayout({ children }: { children: React.ReactNode }
       window.removeEventListener('storage', syncTheme)
       window.removeEventListener('theme-change', syncTheme)
     }
-  }, [])
+  }, [isDashboard])
+
+  // Détermination de la couleur exacte de l'encoche iPhone
+  const statusBarColor = isDark 
+    ? (isDashboard ? '#161618' : '#000000') 
+    : (isDashboard ? '#1e293b' : '#FAFBFD')
 
   return (
     <YearProvider scope="agence">
       <div 
         className={`w-full min-h-[100dvh] flex flex-col transition-colors duration-150 ${
-          isDark ? 'bg-[#000000] text-[#F5F5F7]' : 'bg-[#FBFBFB] text-slate-900'
+          isDark ? 'bg-[#000000] text-[#F5F5F7]' : 'bg-[#FAFBFD] text-slate-900'
         }`}
         style={{
-          backgroundColor: isDark ? '#000000' : '#FBFBFB'
+          backgroundColor: isDark ? '#000000' : (isDashboard ? '#1e293b' : '#FAFBFD')
         }}
       >
-      
-        {/* INJECTION CSS : Déverrouillage de largeur sur desktop + neutralisation overscroll blanc */}
         <style dangerouslySetInnerHTML={{
           __html: `
             html, body {
-              background-color: ${isDark ? '#000000' : '#FBFBFB'} !important;
-              overscroll-behavior-y: none;
+              background-color: ${statusBarColor} !important;
+              overscroll-behavior-y: contain !important;
             }
             @media (min-width: 1024px) {
               .max-w-4xl, .max-w-5xl, .max-w-6xl, .max-w-7xl {
@@ -69,31 +75,27 @@ export default function AgenceLayout({ children }: { children: React.ReactNode }
           `
         }} />
 
-        {/* Barre safe-area en haut (adaptée pour Dashboard & Dark Mode) */}
+        {/* 📱 Encoche iPhone : peinte directement avec la couleur du dashboard */}
         <div 
-          className="fixed top-0 left-0 w-full z-[9999] pointer-events-none transition-colors duration-150"
+          className="fixed top-0 left-0 right-0 z-[9999] pointer-events-none transition-colors duration-150"
           style={{ 
             height: 'env(safe-area-inset-top)',
-            backgroundColor: isDark 
-              ? (isDashboard ? '#161618' : '#000000') 
-              : (isDashboard ? '#1e293b' : '#ffffff')
+            backgroundColor: statusBarColor
           }}
+          aria-hidden="true"
         />
 
-        {/* Navbar / Sidebar supérieure */}
         <SidebarAgence />
         
-        {/* Conteneur principal avec padding adapté mobile */}
         <main 
           className="w-full flex-1 pb-28 md:pb-8 tauri-safe-area"
           style={{ 
-            paddingTop: 'env(safe-area-inset-top)' 
+            paddingTop: isDashboard ? '0px' : 'env(safe-area-inset-top)' 
           }}
         >
           {children}
         </main>
 
-        {/* 📱 Zone tampon safe-area en bas pour sceller l'arrière-plan mobile */}
         <div 
           className="fixed bottom-0 left-0 w-full pointer-events-none z-[80] md:hidden transition-colors duration-150"
           style={{

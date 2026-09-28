@@ -20,15 +20,22 @@ export const metadata = {
   },
   appleWebApp: {
     capable: true,
-    statusBarStyle: 'black-translucent', 
+    statusBarStyle: 'black-translucent',
+    title: 'Agence Pro',
   },
 }
 
+// 🔒 VERROUILLAGE TOTAL DU VIEWPORT (Échelle fixe 1.0)
 export const viewport = {
   width: 'device-width',
   initialScale: 1,
-  viewportFit: 'cover', 
-  themeColor: '#2563eb', 
+  maximumScale: 1,
+  userScalable: false,
+  viewportFit: 'cover',
+  themeColor: [
+    { media: '(prefers-color-scheme: light)', color: '#FAFBFD' },
+    { media: '(prefers-color-scheme: dark)', color: '#000000' },
+  ],
 }
 
 export default function RootLayout({
@@ -39,28 +46,86 @@ export default function RootLayout({
   return (
     <html lang="fr" suppressHydrationWarning className="overscroll-y-contain">
       <head>
-        {/* Verrouillage overscroll et étirement élastique */}
+        <meta name="apple-mobile-web-app-capable" content="yes" />
+        <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+        <meta name="apple-mobile-web-app-title" content="Agence Pro" />
+
         <style dangerouslySetInnerHTML={{
           __html: `
+            /* 1. Verrouillage du scroll élastique et désactivation du double-tap zoom */
             html, body {
               overscroll-behavior-y: contain !important;
               -webkit-overflow-scrolling: touch;
+              min-height: 100vh;
+              min-height: -webkit-fill-available;
+              touch-action: pan-x pan-y !important;
+              -webkit-text-size-adjust: 100% !important;
+            }
+
+            /* 2. Empêcher la sélection de texte accidentelle comme une vraie app native */
+            body {
+              -webkit-touch-callout: none;
+              -webkit-user-select: none;
+              user-select: none;
+            }
+
+            /* Permettre la sélection uniquement dans les champs de saisie */
+            input, textarea {
+              -webkit-user-select: text !important;
+              user-select: text !important;
+            }
+
+            /* 3. VERROU ANTI-ZOOM FOCUS : Sur iOS, toute police < 16px sur un input provoque un zoom */
+            @media screen and (-webkit-min-device-pixel-ratio: 0) {
+              select:focus,
+              textarea:focus,
+              input:focus {
+                font-size: 16px !important;
+              }
             }
           `
         }} />
 
-        {/* Initialisation instantanée de la couleur de l'encoche iOS dès le premier render */}
+        {/* 4. SCRIPT ULTRA-RAPIDE : Interception des gestes pinch-to-zoom Safari iOS */}
         <script dangerouslySetInnerHTML={{
           __html: `try {
-            const isDark = localStorage.getItem('compta_theme_dark') === 'true' || localStorage.getItem('app-theme') === 'dark';
-            const color = isDark ? '#000000' : '#ffffff';
-            document.documentElement.style.backgroundColor = color;
+            // A. Verrouillage de la couleur de fond instantanée
+            var isDark = localStorage.getItem('compta_theme_dark') === 'true' || localStorage.getItem('app-theme') === 'dark';
+            document.documentElement.style.backgroundColor = isDark ? '#000000' : '#FAFBFD';
             if (isDark) document.documentElement.classList.add('dark');
+
+            // B. Bloquer le geste de pincement iOS (Pinch-to-zoom)
+            document.addEventListener('gesturestart', function(e) {
+              e.preventDefault();
+            }, { passive: false });
+            document.addEventListener('gesturechange', function(e) {
+              e.preventDefault();
+            }, { passive: false });
+            document.addEventListener('gestureend', function(e) {
+              e.preventDefault();
+            }, { passive: false });
+
+            // C. Bloquer le zoom multi-touch à 2 doigts
+            document.addEventListener('touchstart', function(e) {
+              if (e.touches.length > 1) {
+                e.preventDefault();
+              }
+            }, { passive: false });
+
+            // D. Bloquer le double tap rapide pour zoomer
+            var lastTouchEnd = 0;
+            document.addEventListener('touchend', function(e) {
+              var now = (new Date()).getTime();
+              if (now - lastTouchEnd <= 300) {
+                e.preventDefault();
+              }
+              lastTouchEnd = now;
+            }, false);
           } catch (_) {}`
         }} />
       </head>
-      {/* ⚠️ Retrait de "bg-transparent" : sur iOS, le body doit être opaque pour peindre l'encoche */}
-      <body className="min-h-screen m-0 p-0 antialiased text-slate-900 flex flex-col overscroll-y-contain bg-white dark:bg-black transition-colors duration-150">
+      
+      <body className="min-h-screen m-0 p-0 antialiased text-slate-900 flex flex-col overscroll-y-contain bg-[#FAFBFD] dark:bg-[#000000]">
         <AppUpdateBanner />
         <AppCacheGuard />
         <ClientPowerSyncWrapper>
@@ -71,12 +136,11 @@ export default function RootLayout({
                   <NativeBackButton />
                   <ThemeColorSync />
 
-                  {/* Bande physique qui remplit l'encoche sur iPhone */}
                   <div className="lg:hidden">
                     <TopBarContainer />
                   </div>
 
-                  <main className="flex-1 flex flex-col min-h-screen lg:pl-64 transition-all duration-300">
+                  <main className="flex-1 flex flex-col min-h-screen lg:pl-64">
                     {children}
                   </main>
 
