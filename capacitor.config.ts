@@ -14,8 +14,12 @@ const config: CapacitorConfig = {
   },
   plugins: {
     StatusBar: {
-      // Permet à l'arrière-plan du header de monter jusqu'en haut de l'écran sans bande blanche
+      // Épouse le haut de l'écran sans créer d'espace blanc artificiel
       overlaysWebView: true,
+    },
+    NavigationBar: {
+      // Empêche le bas de l'application de passer sous les boutons virtuels Android
+      overlay: false,
     }
   }
 };

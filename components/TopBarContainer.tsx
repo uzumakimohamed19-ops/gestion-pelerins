@@ -8,43 +8,44 @@ import { StatusBar, Style } from '@capacitor/status-bar'
 export default function TopBarContainer() {
   const pathname = usePathname()
 
-  // Détection de la couleur du header selon la route
+  // Configuration stricte selon la page active
   const { topBarBg, isDarkBg } = useMemo(() => {
     if (!pathname) {
       return { topBarBg: '#FFFFFF', isDarkBg: false }
     }
 
-    // 1. Dashboard Hajj -> Fond bleu (#2563eb) : icônes blanches
+    // 1. Dashboard Hajj -> Bleu royal #2563eb, icônes blanches
     if (pathname === '/hajj' || pathname === '/hajj/dashboard') {
       return { topBarBg: '#2563eb', isDarkBg: true }
     }
 
-    // 2. Dashboard Agence -> Fond graphite (#2C2C2E) : icônes blanches
+    // 2. Dashboard Agence -> Graphite #1e293b, icônes blanches
     if (pathname === '/agence' || pathname === '/agence/dashboard') {
       return { topBarBg: '#1e293b', isDarkBg: true }
     }
 
-    // 3. Formulaires et écrans clairs -> Fond blanc/ivoire : icônes sombres/noires
-    if (pathname.includes('/nouvelle-operation') || pathname.includes('/configuration')) {
-      return { topBarBg: '#F4F6F8', isDarkBg: false }
-    }
-
-    // 4. Par défaut : Blanc pur, icônes sombres nettes
+    // 3. Toutes les autres pages (comptabilité, listes, configs, etc.)
+    // -> Fond blanc naturel avec icônes sombres bien visibles
     return { topBarBg: '#FFFFFF', isDarkBg: false }
   }, [pathname])
 
   useEffect(() => {
     if (typeof window === 'undefined') return
 
-    // --- Web & PWA (Android Chrome / Safari) ---
-    const existingMetas = document.querySelectorAll('meta[name="theme-color"]')
-    if (existingMetas.length > 0) {
-      existingMetas.forEach((meta) => meta.setAttribute('content', topBarBg))
+    // A. TEINTE DU DOCUMENT (PWA iOS Safari & Android Chrome)
+    // Permet à l'encoche et au rebond de scroll d'adopter la vraie couleur de la page
+    document.documentElement.style.backgroundColor = topBarBg
+    document.body.style.backgroundColor = topBarBg
+
+    // B. BALISES META WEB & PWA
+    const metaTheme = document.querySelector('meta[name="theme-color"]')
+    if (metaTheme) {
+      metaTheme.setAttribute('content', topBarBg)
     } else {
-      const meta = document.createElement('meta')
-      meta.name = 'theme-color'
-      meta.content = topBarBg
-      document.head.appendChild(meta)
+      const newMeta = document.createElement('meta')
+      newMeta.name = 'theme-color'
+      newMeta.content = topBarBg
+      document.head.appendChild(newMeta)
     }
 
     let appleMeta = document.querySelector('meta[name="apple-mobile-web-app-status-bar-style"]')
@@ -53,31 +54,32 @@ export default function TopBarContainer() {
       appleMeta.setAttribute('name', 'apple-mobile-web-app-status-bar-style')
       document.head.appendChild(appleMeta)
     }
-    // "black-translucent" sur fond coloré (icônes blanches), "default" sur fond blanc (icônes noires)
+    // "black-translucent" quand fond coloré/sombre, "default" quand fond blanc
     appleMeta.setAttribute('content', isDarkBg ? 'black-translucent' : 'default')
 
-    // --- Application Native Capacitor (iOS & Android) ---
+    // C. CONTRÔLE CAPACITOR NATIF (Android & iOS)
     if (Capacitor.isNativePlatform()) {
-      StatusBar.setBackgroundColor({ color: topBarBg }).catch(() => {})
+      const applyNativeStatusBar = async () => {
+        try {
+          // 1. Assurer que la barre système n'écrase pas le contenu
+          await StatusBar.setOverlaysWebView({ overlay: false })
+          // 2. Définir la couleur matérielle exacte
+          await StatusBar.setBackgroundColor({ color: topBarBg })
+          // 3. Style des icônes :
+          // Style.Dark  => Icônes blanches (pour fond #2563eb et #1e293b)
+          // Style.Light => Icônes noires / sombres (pour fond #FFFFFF)
+          await StatusBar.setStyle({
+            style: isDarkBg ? Style.Dark : Style.Light,
+          })
+        } catch (e) {
+          console.warn('StatusBar native error:', e)
+        }
+      }
 
-      // Règle Capacitor :
-      // - isDarkBg = true (fond sombre/bleu)  => Style.Dark  (icônes blanches)
-      // - isDarkBg = false (fond clair/blanc) => Style.Light (icônes noires bien visibles)
-      StatusBar.setStyle({
-        style: isDarkBg ? Style.Dark : Style.Light,
-      }).catch(() => {})
+      applyNativeStatusBar()
     }
   }, [topBarBg, isDarkBg])
 
-  // Rend le fond de l'encoche transparent pour épouser directement le header de la page
-  return (
-    <div
-      className="fixed top-0 left-0 right-0 z-[99999] pointer-events-none transition-colors duration-150"
-      style={{
-        height: 'env(safe-area-inset-top, 0px)',
-        backgroundColor: topBarBg,
-      }}
-      aria-hidden="true"
-    />
-  )
+  // Aucun élément visuel HTML : aucun décalage de layout, aucune barre blanche artificielle
+  return null
 }

@@ -7,9 +7,6 @@ import { supabase, getUser } from '@/lib/supabase'
 import {
   ArrowLeft,
   Building2,
-  Phone,
-  MapPin,
-  FileText,
   Upload,
   Image as ImageIcon,
   Save,
@@ -25,12 +22,10 @@ type AgenceRow = {
   nom_agence: string
   telephone_agence: string
   adresse_agence: string
-  slogan?: string | null
-  message_recu?: string | null
   logo_base64?: string | null
 }
 
-// Compression optimale du logo (max 350px, PNG) pour peser < 50 Ko
+// Compression optimale : JPEG léger (< 30 Ko) pour une synchronisation PowerSync ultra-rapide
 async function compressImageToBase64(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader()
@@ -38,18 +33,20 @@ async function compressImageToBase64(file: File): Promise<string> {
       const img = new window.Image()
       img.onload = () => {
         const canvas = document.createElement('canvas')
-        const MAX_WIDTH = 350
+        const MAX_WIDTH = 300
         const scaleSize = img.width > MAX_WIDTH ? MAX_WIDTH / img.width : 1
-        canvas.width = img.width * scaleSize
-        canvas.height = img.height * scaleSize
+        canvas.width = Math.round(img.width * scaleSize)
+        canvas.height = Math.round(img.height * scaleSize)
 
         const ctx = canvas.getContext('2d')
         if (!ctx) {
           resolve(e.target?.result as string)
           return
         }
+        ctx.fillStyle = '#FFFFFF'
+        ctx.fillRect(0, 0, canvas.width, canvas.height)
         ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
-        resolve(canvas.toDataURL('image/png', 0.85))
+        resolve(canvas.toDataURL('image/jpeg', 0.8))
       }
       img.onerror = () => reject(new Error('Erreur lecture image'))
       img.src = e.target?.result as string
@@ -69,7 +66,6 @@ export default function ConfigurationAgencePage() {
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
   const [isSaving, startTransition] = useTransition()
 
-  // 🌓 Thème sombre
   const [isDark, setIsDark] = useState<boolean>(() => {
     if (typeof window !== 'undefined') {
       return localStorage.getItem('compta_theme_dark') === 'true'
@@ -87,7 +83,6 @@ export default function ConfigurationAgencePage() {
     })
   }
 
-  // 1. Détection session
   useEffect(() => {
     async function init() {
       const { data } = await supabase.auth.getSession()
@@ -101,7 +96,6 @@ export default function ConfigurationAgencePage() {
     init()
   }, [])
 
-  // 2. Requête SQLite PowerSync intégrant logo_base64
   const { data: agencesLocales } = useQuery<AgenceRow>(
     `SELECT a.id, a.nom_agence, a.telephone_agence, a.adresse_agence, a.logo_base64
      FROM profiles p
@@ -120,7 +114,6 @@ export default function ConfigurationAgencePage() {
   const [messageRecu, setMessageRecu] = useState('Les billets et prestations émis sont soumis aux conditions générales de vente. Merci de votre confiance !')
   const [logoBase64, setLogoBase64] = useState<string | null>(null)
 
-  // 3. Hydratation automatique depuis SQLite (synchronisé par PowerSync sur tous les appareils)
   useEffect(() => {
     if (!agenceActive?.id) return
 
@@ -128,7 +121,6 @@ export default function ConfigurationAgencePage() {
     setTelephoneAgence(agenceActive.telephone_agence || '')
     setAdresseAgence(agenceActive.adresse_agence || '')
 
-    // Le logo vient directement de SQLite (présent sur tous les appareils)
     if (agenceActive.logo_base64) {
       setLogoBase64(agenceActive.logo_base64)
       try {
@@ -149,7 +141,7 @@ export default function ConfigurationAgencePage() {
     }
   }, [agenceActive])
 
-  // 4. Téléversement
+  // Téléversement avec diagnostic d'erreur précis
   const handleLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (!file || !agenceActive?.id) return
@@ -161,24 +153,36 @@ export default function ConfigurationAgencePage() {
       const base64 = await compressImageToBase64(file)
       setLogoBase64(base64)
 
-      // Sauvegarde SQLite locale immédiate
-      await db.execute(
-        `UPDATE agences SET logo_base64 = ? WHERE id = ?`,
-        [base64, agenceActive.id]
-      )
-
-      // Sauvegarde Supabase distante (qui va distribuer à tous les autres téléphones/PC)
-      await supabase
+      // 1. Mise à jour Supabase Cloud en priorité
+      const { error: sbError } = await supabase
         .from('agences')
         .update({ logo_base64: base64 })
         .eq('id', agenceActive.id)
 
-      localStorage.setItem(`agency_receipt_logo_${agenceActive.id}`, base64)
+      if (sbError) {
+        throw new Error(`Erreur Supabase: ${sbError.message} (Vérifiez les droits RLS)`)
+      }
 
-      setSuccessMsg('Logo synchronisé sur tous vos appareils.')
+      // 2. Mise à jour locale SQLite PowerSync
+      try {
+        await db.execute(
+          `UPDATE agences SET logo_base64 = ? WHERE id = ?`,
+          [base64, agenceActive.id]
+        )
+      } catch (dbErr) {
+        console.warn('Erreur écriture SQLite locale (sera synchronisée via Cloud) :', dbErr)
+      }
+
+      // 3. Cache de secours local
+      try {
+        localStorage.setItem(`agency_receipt_logo_${agenceActive.id}`, base64)
+      } catch {}
+
+      setSuccessMsg('Logo enregistré et synchronisé avec succès.')
       setTimeout(() => setSuccessMsg(null), 3000)
     } catch (err: unknown) {
-      setErrorMsg(err instanceof Error ? err.message : 'Erreur de traitement de l’image.')
+      console.error(err)
+      setErrorMsg(err instanceof Error ? err.message : 'Erreur lors du traitement du logo.')
     } finally {
       setLogoUploading(false)
     }
@@ -187,19 +191,27 @@ export default function ConfigurationAgencePage() {
   const handleRemoveLogo = async () => {
     if (!agenceActive?.id) return
     setLogoBase64(null)
+    setErrorMsg(null)
 
     try {
-      await db.execute(`UPDATE agences SET logo_base64 = NULL WHERE id = ?`, [agenceActive.id])
-      await supabase.from('agences').update({ logo_base64: null }).eq('id', agenceActive.id)
-      localStorage.removeItem(`agency_receipt_logo_${agenceActive.id}`)
-    } catch {}
+      const { error: sbError } = await supabase
+        .from('agences')
+        .update({ logo_base64: null })
+        .eq('id', agenceActive.id)
 
-    if (fileInputRef.current) fileInputRef.current.value = ''
-    setSuccessMsg('Logo supprimé partout.')
-    setTimeout(() => setSuccessMsg(null), 2500)
+      if (sbError) throw new Error(sbError.message)
+
+      await db.execute(`UPDATE agences SET logo_base64 = NULL WHERE id = ?`, [agenceActive.id]).catch(() => {})
+      localStorage.removeItem(`agency_receipt_logo_${agenceActive.id}`)
+      
+      if (fileInputRef.current) fileInputRef.current.value = ''
+      setSuccessMsg('Logo supprimé.')
+      setTimeout(() => setSuccessMsg(null), 2500)
+    } catch (err: unknown) {
+      setErrorMsg(err instanceof Error ? err.message : 'Erreur lors de la suppression.')
+    }
   }
 
-  // 5. Sauvegarde générale
   const handleSave = (e: React.FormEvent) => {
     e.preventDefault()
     if (!agenceActive?.id) return
@@ -209,28 +221,34 @@ export default function ConfigurationAgencePage() {
 
     startTransition(async () => {
       try {
+        const payload = {
+          nom_agence: nomAgence.trim(),
+          telephone_agence: telephoneAgence.trim(),
+          adresse_agence: adresseAgence.trim(),
+          logo_base64: logoBase64 || null,
+        }
+
+        const { error: sbError } = await supabase
+          .from('agences')
+          .update(payload)
+          .eq('id', agenceActive.id)
+
+        if (sbError) {
+          throw new Error(`Erreur Supabase: ${sbError.message}`)
+        }
+
         await db.execute(
           `UPDATE agences 
            SET nom_agence = ?, telephone_agence = ?, adresse_agence = ?, logo_base64 = ?
            WHERE id = ?`,
           [
-            nomAgence.trim(),
-            telephoneAgence.trim(),
-            adresseAgence.trim(),
-            logoBase64 || null,
+            payload.nom_agence,
+            payload.telephone_agence,
+            payload.adresse_agence,
+            payload.logo_base64,
             agenceActive.id,
           ]
-        )
-
-        await supabase
-          .from('agences')
-          .update({
-            nom_agence: nomAgence.trim(),
-            telephone_agence: telephoneAgence.trim(),
-            adresse_agence: adresseAgence.trim(),
-            logo_base64: logoBase64 || null,
-          })
-          .eq('id', agenceActive.id)
+        ).catch(() => {})
 
         const configData = {
           slogan: slogan.trim() || null,
@@ -361,6 +379,7 @@ export default function ConfigurationAgencePage() {
                   <input
                     ref={fileInputRef}
                     type="file"
+                    aria-label="Sélectionner le logo de l'agence"
                     accept="image/*"
                     onChange={handleLogoUpload}
                     className="hidden"
@@ -392,7 +411,7 @@ export default function ConfigurationAgencePage() {
                     )}
                   </div>
                   <p className="text-[10px] text-slate-400">
-                    Ce logo est automatiquement dupliqué sur tous vos appareils via PowerSync et reste disponible même sans connexion Internet.
+                    Ce logo est compressé et automatiquement synchronisé sur tous vos appareils via PowerSync.
                   </p>
                 </div>
               </div>
