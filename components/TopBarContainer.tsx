@@ -25,22 +25,30 @@ export default function TopBarContainer() {
     }
 
     // 3. Toutes les autres pages (comptabilité, listes, configs, etc.)
-    // -> Fond blanc naturel avec icônes sombres bien visibles
+    // -> Fond blanc naturel avec icônes impérativement sombres/noires
     return { topBarBg: '#FFFFFF', isDarkBg: false }
   }, [pathname])
 
   useEffect(() => {
     if (typeof window === 'undefined') return
 
-    // 0. Neutralisation absolue du mode sombre système sur la WebView / document
-    document.documentElement.style.colorScheme = 'light'
-    document.body.style.colorScheme = 'light'
+    // 0. Neutralisation stricte du color-scheme système (empêche les icônes blanches fantômes)
+    document.documentElement.style.setProperty('color-scheme', 'light', 'important')
+    document.body.style.setProperty('color-scheme', 'light', 'important')
+
+    let metaColorScheme = document.querySelector('meta[name="color-scheme"]')
+    if (!metaColorScheme) {
+      metaColorScheme = document.createElement('meta')
+      metaColorScheme.setAttribute('name', 'color-scheme')
+      document.head.appendChild(metaColorScheme)
+    }
+    metaColorScheme.setAttribute('content', 'light')
 
     // A. TEINTE DU DOCUMENT (PWA iOS Safari & Android Chrome)
     document.documentElement.style.backgroundColor = topBarBg
     document.body.style.backgroundColor = topBarBg
 
-    // B. BALISES META WEB & PWA (Suppression des déclinaisons media dark)
+    // B. BALISES META WEB & PWA
     const existingThemedMetas = document.querySelectorAll('meta[name="theme-color"]')
     existingThemedMetas.forEach((meta) => meta.remove())
 
@@ -55,19 +63,19 @@ export default function TopBarContainer() {
       appleMeta.setAttribute('name', 'apple-mobile-web-app-status-bar-style')
       document.head.appendChild(appleMeta)
     }
+    // "black-translucent" quand fond coloré, "default" force les icônes sombres sur iOS
     appleMeta.setAttribute('content', isDarkBg ? 'black-translucent' : 'default')
 
     // C. CONTRÔLE CAPACITOR NATIF (Android & iOS)
     if (Capacitor.isNativePlatform()) {
       const applyNativeStatusBar = async () => {
         try {
-          // 1. Assurer que la barre système n'écrase pas le contenu
           await StatusBar.setOverlaysWebView({ overlay: false })
-          // 2. Définir la couleur matérielle exacte (indifférente au dark mode du téléphone)
           await StatusBar.setBackgroundColor({ color: topBarBg })
-          // 3. Style des icônes :
-          // Style.Dark  => Icônes blanches (pour fond #2563eb et #1e293b)
-          // Style.Light => Icônes noires / sombres (pour fond #FFFFFF)
+
+          // CORRECTION DES ICÔNES :
+          // - Fond sombre/bleu (Hajj & Agence) -> Style.Dark (force les icônes en BLANC)
+          // - Fond blanc (Toutes les autres pages) -> Style.Light (force les icônes en NOIR / SOMBRE, même si le téléphone de l'utilisateur est en mode sombre)
           await StatusBar.setStyle({
             style: isDarkBg ? Style.Dark : Style.Light,
           })
