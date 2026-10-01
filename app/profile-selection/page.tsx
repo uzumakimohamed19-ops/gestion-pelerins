@@ -7,18 +7,19 @@ import {
   Delete,
   Fingerprint,
   KeyRound,
-  ShieldCheck,
-  UserRound,
   Keyboard,
   ArrowRight,
   Lock,
   X,
   Trash2,
   ShieldAlert,
+  Users,
 } from 'lucide-react'
 import { useWorkProfile, type WorkProfileType } from '@/lib/ProfileContext'
 import { usePowerSync } from '@powersync/react'
 import { supabase, getUser } from '@/lib/supabase'
+
+export type ExtendedProfileType = WorkProfileType | 'intermediaire'
 
 export default function ProfileSelectionPage() {
   const router = useRouter()
@@ -37,19 +38,30 @@ export default function ProfileSelectionPage() {
   // 1. Initialisation verrouillée sur l'animation orbitale
   const [isInitializing, setIsInitializing] = useState(true)
   const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null)
+  const [isSwitchingProfile, setIsSwitchingProfile] = useState(false)
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null)
 
   // Modales d'action
   const [modalCreateOpen, setModalCreateOpen] = useState(false)
   const [modalPinOpen, setModalPinOpen] = useState(false)
 
-  // 🛡️ Modale d'autorisation Direction (PIN Directeur requis)
+  // 🛡️ Modale d'autorisation Direction (PIN Directeur Principal requis)
   const [modalAdminPinOpen, setModalAdminPinOpen] = useState(false)
   const [adminPin, setAdminPin] = useState('')
   const [pendingAction, setPendingAction] = useState<
-    | { type: 'CREATE'; profileType: WorkProfileType }
+    | { type: 'CREATE'; profileType: ExtendedProfileType }
     | { type: 'DELETE'; profileId: string; profileName: string }
+    | { type: 'SET_MAIN_DIRECTION'; profileId: string }
     | null
   >(null)
+
+  // Direction Principale ID (persistance locale)
+  const [mainDirectionId, setMainDirectionId] = useState<string | null>(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('main_direction_profile_id')
+    }
+    return null
+  })
 
   // Saisie du PIN (déverrouillage principal)
   const [pin, setPin] = useState('')
@@ -75,7 +87,7 @@ export default function ProfileSelectionPage() {
 
   // Champs création
   const [name, setName] = useState('')
-  const [type, setType] = useState<WorkProfileType>('agent')
+  const [type, setType] = useState<ExtendedProfileType>('agent')
   const [createPin, setCreatePin] = useState('')
 
   // Champs modification PIN
@@ -109,15 +121,23 @@ export default function ProfileSelectionPage() {
           return
         }
 
+        if (isMounted) setCurrentUserId(uid)
+
+        const savedLastProfileId = localStorage.getItem(`last_selected_profile_id_${uid}`)
+
         // Étape A : Vérification dans SQLite local
-        const localRows = await db.getAll<{ id: string }>(
-          'SELECT id FROM account_profiles WHERE user_id = ?',
+        const localRows = await db.getAll<{ id: string; profile_type: string }>(
+          'SELECT id, profile_type FROM account_profiles WHERE user_id = ?',
           [uid]
         ).catch(() => [])
 
         if (localRows && localRows.length > 0) {
           if (isMounted) {
-            setSelectedProfileId((prev) => prev || localRows[0].id)
+            const validSavedId = savedLastProfileId && localRows.some((p) => p.id === savedLastProfileId) 
+              ? savedLastProfileId 
+              : localRows[0].id
+
+            setSelectedProfileId(validSavedId)
             setModalCreateOpen(false)
             setIsInitializing(false)
             try {
@@ -127,7 +147,7 @@ export default function ProfileSelectionPage() {
           return
         }
 
-        // Étape B : Secours Supabase distant (première synchronisation)
+        // Étape B : Secours Supabase distant (première synchro)
         const { data: remoteProfiles } = await supabase
           .from('account_profiles')
           .select('id, name, profile_type, pin_hash, created_at, updated_at')
@@ -154,7 +174,11 @@ export default function ProfileSelectionPage() {
           }
 
           if (isMounted) {
-            setSelectedProfileId(remoteProfiles[0].id)
+            const validSavedId = savedLastProfileId && remoteProfiles.some((p) => p.id === savedLastProfileId) 
+              ? savedLastProfileId 
+              : remoteProfiles[0].id
+
+            setSelectedProfileId(validSavedId)
             setModalCreateOpen(false)
             setIsInitializing(false)
           }
@@ -179,18 +203,48 @@ export default function ProfileSelectionPage() {
     }
   }, [db, profilesLoading, router])
 
-  // Synchronisation avec les mises à jour réactives de PowerSync
+  // Synchronisation avec PowerSync & sélection automatique du profil mémorisé
   useEffect(() => {
     if (profiles.length > 0) {
-      if (!selectedProfileId || !profiles.some((p) => p.id === selectedProfileId)) {
+      if (currentUserId) {
+        const savedId = localStorage.getItem(`last_selected_profile_id_${currentUserId}`)
+        if (savedId && profiles.some((p) => p.id === savedId) && !selectedProfileId) {
+          setSelectedProfileId(savedId)
+        } else if (!selectedProfileId || !profiles.some((p) => p.id === selectedProfileId)) {
+          setSelectedProfileId(profiles[0].id)
+        }
+      } else if (!selectedProfileId || !profiles.some((p) => p.id === selectedProfileId)) {
         setSelectedProfileId(profiles[0].id)
       }
       setModalCreateOpen(false)
       setIsInitializing(false)
     }
-  }, [profiles, selectedProfileId])
+  }, [profiles, selectedProfileId, currentUserId])
 
-  // Focus automatique du clavier sur PC
+  // Direction Principale
+  const directionProfiles = useMemo(() => {
+    return profiles.filter((p) => p.profile_type === 'direction')
+  }, [profiles])
+
+  useEffect(() => {
+    if (directionProfiles.length > 0) {
+      const exists = directionProfiles.some((p) => p.id === mainDirectionId)
+      if (!mainDirectionId || !exists) {
+        const defaultMainId = directionProfiles[0].id
+        setMainDirectionId(defaultMainId)
+        try {
+          localStorage.setItem('main_direction_profile_id', defaultMainId)
+        } catch {}
+      }
+    } else {
+      setMainDirectionId(null)
+      try {
+        localStorage.removeItem('main_direction_profile_id')
+      } catch {}
+    }
+  }, [directionProfiles, mainDirectionId])
+
+  // Focus clavier PC
   useEffect(() => {
     if (!isInitializing && !modalCreateOpen && !modalPinOpen && !modalAdminPinOpen) {
       desktopInputRef.current?.focus()
@@ -198,11 +252,20 @@ export default function ProfileSelectionPage() {
   }, [isInitializing, modalCreateOpen, modalPinOpen, modalAdminPinOpen, selectedProfileId])
 
   const selectedCandidate = profiles.find((p) => p.id === selectedProfileId) || profiles[0]
-  const directionProfile = profiles.find((p) => p.profile_type === 'direction')
-  const agentCount = profiles.filter((p) => p.profile_type === 'agent').length
-  const hasDirection = Boolean(directionProfile)
 
-  // Règle biométrique : PIN obligatoire 1x par jour
+  const principalDirectorProfile = useMemo(() => {
+    return (
+      directionProfiles.find((p) => p.id === mainDirectionId) ||
+      directionProfiles[0] ||
+      null
+    )
+  }, [directionProfiles, mainDirectionId])
+
+  const directionCount = directionProfiles.length
+  const agentCount = profiles.filter((p) => p.profile_type === 'agent').length
+  const hasDirection = directionCount > 0
+
+  // Biométrie
   const canUseBiometricsNow = useMemo(() => {
     if (!isBiometricAvailable || !selectedCandidate) return false
     try {
@@ -215,7 +278,7 @@ export default function ProfileSelectionPage() {
     }
   }, [isBiometricAvailable, selectedCandidate])
 
-  // Déverrouillage par code PIN (compatible 4 à 6 chiffres pour les anciens PINs)
+  // Connexion au profil sélectionné
   const handleOpenProfile = (codeToTest?: string) => {
     const activePin = codeToTest || pin
     if (!selectedCandidate || activePin.length < 4) return
@@ -230,6 +293,26 @@ export default function ProfileSelectionPage() {
         localStorage.setItem(`last_pin_date_${selectedCandidate.id}`, today)
         localStorage.setItem('has_created_profile_marker', 'true')
 
+        // 💾 Mémorisation de l'utilisateur pour le prochain verrouillage
+        if (currentUserId) {
+          localStorage.setItem(`last_selected_profile_id_${currentUserId}`, selectedCandidate.id)
+        }
+
+        // Gestion du niveau d'accès Compta
+        if (selectedCandidate.profile_type === 'direction') {
+          localStorage.setItem('compta_access_level', 'full')
+          localStorage.setItem(
+            'is_selected_main_direction',
+            selectedCandidate.id === mainDirectionId ? 'true' : 'false'
+          )
+        } else if (selectedCandidate.profile_type === 'intermediaire') {
+          localStorage.setItem('compta_access_level', 'restricted')
+          localStorage.removeItem('is_selected_main_direction')
+        } else {
+          localStorage.setItem('compta_access_level', 'none')
+          localStorage.removeItem('is_selected_main_direction')
+        }
+
         router.push('/')
       } catch (err: unknown) {
         setPin('')
@@ -239,7 +322,6 @@ export default function ProfileSelectionPage() {
     })
   }
 
-  // Saisie tactile : supporte jusqu'à 6 chiffres, tentative automatique à 4 et 6 chiffres
   const handleDigitPress = (digit: string) => {
     if (pin.length < 6) {
       const nextPin = pin + digit
@@ -256,7 +338,7 @@ export default function ProfileSelectionPage() {
     setError(null)
   }
 
-  // Écoute des touches physiques clavier (PC)
+  // Écoute clavier PC
   useEffect(() => {
     if (isInitializing || modalCreateOpen || modalPinOpen || modalAdminPinOpen) return
 
@@ -281,7 +363,6 @@ export default function ProfileSelectionPage() {
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [isInitializing, modalCreateOpen, modalPinOpen, modalAdminPinOpen, pin, selectedCandidate])
 
-  // Déverrouillage biométrique
   const handleBiometricUnlock = async () => {
     if (!selectedCandidate) return
     setError(null)
@@ -289,6 +370,19 @@ export default function ProfileSelectionPage() {
     startTransition(async () => {
       try {
         await unlockWithBiometrics(selectedCandidate)
+
+        if (currentUserId) {
+          localStorage.setItem(`last_selected_profile_id_${currentUserId}`, selectedCandidate.id)
+        }
+
+        if (selectedCandidate.profile_type === 'direction') {
+          localStorage.setItem('compta_access_level', 'full')
+        } else if (selectedCandidate.profile_type === 'intermediaire') {
+          localStorage.setItem('compta_access_level', 'restricted')
+        } else {
+          localStorage.setItem('compta_access_level', 'none')
+        }
+
         router.push('/')
       } catch (err: unknown) {
         setError(err instanceof Error ? err.message : 'Authentification annulée.')
@@ -296,13 +390,10 @@ export default function ProfileSelectionPage() {
     })
   }
 
-  // ─── 🛡️ GESTION DU CONTRÔLE PAR LE CODE PIN DU DIRECTEUR ───
-
-  // Demander le PIN directeur avant de créer
-  const requestCreateProfile = (profileType: WorkProfileType) => {
+  // Contrôles PIN Directeur
+  const requestCreateProfile = (profileType: ExtendedProfileType) => {
     setError(null)
     setSuccess(null)
-    // S'il n'y a pas encore de direction, on autorise directement la création de la direction
     if (!hasDirection && profileType === 'direction') {
       setType('direction')
       setCreatePin('')
@@ -315,7 +406,6 @@ export default function ProfileSelectionPage() {
     setModalAdminPinOpen(true)
   }
 
-  // Demander le PIN directeur avant de supprimer
   const requestDeleteProfile = (profileId: string, profileName: string) => {
     setError(null)
     setSuccess(null)
@@ -324,11 +414,18 @@ export default function ProfileSelectionPage() {
     setModalAdminPinOpen(true)
   }
 
-  // Validation du PIN Directeur pour débloquer l'opération
+  const requestSetMainDirection = (profileId: string) => {
+    setError(null)
+    setSuccess(null)
+    setPendingAction({ type: 'SET_MAIN_DIRECTION', profileId })
+    setAdminPin('')
+    setModalAdminPinOpen(true)
+  }
+
   const handleVerifyDirectorPin = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!directionProfile) {
-      setError('Profil Direction introuvable.')
+    if (!principalDirectorProfile) {
+      setError('Direction Principale introuvable.')
       return
     }
     if (adminPin.length < 4 || adminPin.length > 6) {
@@ -338,27 +435,30 @@ export default function ProfileSelectionPage() {
 
     startTransition(async () => {
       try {
-        // Validation cryptographique du PIN directeur via selectProfile temporaire
-        await selectProfile(directionProfile, adminPin)
+        await selectProfile(principalDirectorProfile, adminPin)
         setModalAdminPinOpen(false)
         setAdminPin('')
 
-        // Exécution de l'action débloquée
         if (pendingAction?.type === 'CREATE') {
           setType(pendingAction.profileType)
           setCreatePin('')
           setModalCreateOpen(true)
         } else if (pendingAction?.type === 'DELETE') {
           await executeDeleteProfile(pendingAction.profileId, pendingAction.profileName)
+        } else if (pendingAction?.type === 'SET_MAIN_DIRECTION') {
+          setMainDirectionId(pendingAction.profileId)
+          try {
+            localStorage.setItem('main_direction_profile_id', pendingAction.profileId)
+          } catch {}
+          setSuccess('Direction principale définie avec succès.')
         }
         setPendingAction(null)
       } catch {
-        setError('Code PIN du Directeur incorrect. Accès refusé.')
+        setError('Code PIN du Directeur Principal incorrect. Accès refusé.')
       }
     })
   }
 
-  // Exécution effective de la suppression après validation du PIN Directeur
   const executeDeleteProfile = async (profileId: string, profileName: string) => {
     if (!window.confirm(`Confirmez-vous la suppression définitive du profil "${profileName}" ?`)) {
       return
@@ -371,6 +471,24 @@ export default function ProfileSelectionPage() {
       localStorage.removeItem(`bio_enrolled_${profileId}`)
       localStorage.removeItem(`last_pin_date_${profileId}`)
 
+      if (currentUserId) {
+        const lastSaved = localStorage.getItem(`last_selected_profile_id_${currentUserId}`)
+        if (lastSaved === profileId) {
+          localStorage.removeItem(`last_selected_profile_id_${currentUserId}`)
+        }
+      }
+
+      if (mainDirectionId === profileId) {
+        const remainingDirs = directionProfiles.filter((d) => d.id !== profileId)
+        const nextMain = remainingDirs[0]?.id || null
+        setMainDirectionId(nextMain)
+        if (nextMain) {
+          localStorage.setItem('main_direction_profile_id', nextMain)
+        } else {
+          localStorage.removeItem('main_direction_profile_id')
+        }
+      }
+
       if (selectedProfileId === profileId) {
         const remaining = profiles.filter((p) => p.id !== profileId)
         setSelectedProfileId(remaining[0]?.id || null)
@@ -382,7 +500,6 @@ export default function ProfileSelectionPage() {
     }
   }
 
-  // Création profil : strictement 4 chiffres
   const handleCreateProfile = async (e: React.FormEvent) => {
     e.preventDefault()
     setError(null)
@@ -399,10 +516,11 @@ export default function ProfileSelectionPage() {
 
     startTransition(async () => {
       try {
-        await createProfile(name.trim(), type, createPin)
+        await createProfile(name.trim(), type as WorkProfileType, createPin)
         try {
           localStorage.setItem('has_created_profile_marker', 'true')
         } catch {}
+
         setCreatePin('')
         setName('')
         setModalCreateOpen(false)
@@ -414,7 +532,6 @@ export default function ProfileSelectionPage() {
     })
   }
 
-  // Modification PIN : Ancien PIN de 4 à 6 chiffres, Nouveau PIN strictement 4 chiffres
   const handleChangePin = async (e: React.FormEvent) => {
     e.preventDefault()
     setError(null)
@@ -441,45 +558,43 @@ export default function ProfileSelectionPage() {
         setNewPin('')
         setConfirmPin('')
         setModalPinOpen(false)
-        setSuccess('Code PIN modifié avec succès (passé à 4 chiffres).')
+        setSuccess('Code PIN modifié avec succès.')
       } catch (err: unknown) {
         setError(err instanceof Error ? err.message : 'Erreur lors de la mise à jour.')
       }
     })
   }
 
-  // 3. Animation orbitale Blanc & Bleu tant que la recherche est active
+  const getProfileBadgeLabel = (p: { id: string; profile_type: string }) => {
+    if (p.profile_type === 'direction') {
+      return p.id === mainDirectionId ? 'Direction Principale' : 'Direction'
+    }
+    if (p.profile_type === 'intermediaire') {
+      return 'Intermédiaire'
+    }
+    return 'Agent'
+  }
+
   if (isInitializing) {
     return (
       <main className="fixed inset-0 z-50 bg-[#F4F6F8] flex flex-col items-center justify-center p-6 select-none">
         <div className="relative flex items-center justify-center">
           <div className="absolute w-44 h-44 sm:w-56 sm:h-56 rounded-full bg-blue-500/15 blur-2xl animate-pulse" />
-
           <div className="relative w-36 h-36 sm:w-44 sm:h-44 rounded-full border-2 border-dashed border-blue-200 animate-[spin_8s_linear_infinite] flex items-center justify-center">
             <div className="absolute -top-2 left-1/2 -translate-x-1/2 w-3.5 h-3.5 rounded-full bg-blue-600 shadow-lg shadow-blue-600/50" />
             <div className="absolute top-1/2 -right-1.5 -translate-y-1/2 w-2.5 h-2.5 rounded-full bg-blue-400" />
             <div className="absolute -bottom-1.5 left-1/3 w-3 h-3 rounded-full bg-blue-500" />
             <div className="absolute top-1/3 -left-1.5 w-2 h-2 rounded-full bg-blue-300" />
           </div>
-
           <div className="absolute w-28 h-28 sm:w-32 sm:h-32 rounded-full border-2 border-t-blue-600 border-r-blue-400 border-b-transparent border-l-transparent animate-[spin_1.5s_linear_infinite]" />
           <div className="absolute w-20 h-20 sm:w-24 sm:h-24 rounded-full border border-blue-400/40 animate-ping opacity-60" />
-
           <div className="relative w-16 h-16 sm:w-20 sm:h-20 rounded-full bg-white shadow-xl shadow-blue-900/10 border border-blue-50 flex items-center justify-center">
             <Lock className="text-blue-600 animate-pulse" size={24} />
-            <div className="absolute top-1.5 right-2 w-1.5 h-1.5 rounded-full bg-blue-400 animate-ping" />
           </div>
         </div>
-
         <p className="mt-8 text-xs font-black uppercase tracking-widest text-slate-500">
           Vérification de session...
         </p>
-
-        <div className="mt-3 flex items-center gap-2">
-          <span className="w-2 h-2 rounded-full bg-blue-600 animate-bounce [animation-delay:-0.3s]" />
-          <span className="w-2 h-2 rounded-full bg-blue-500 animate-bounce [animation-delay:-0.15s]" />
-          <span className="w-2 h-2 rounded-full bg-blue-400 animate-bounce" />
-        </div>
       </main>
     )
   }
@@ -490,50 +605,118 @@ export default function ProfileSelectionPage() {
       {/* --- A. VERSION MOBILE --- */}
       <div className="sm:hidden w-full h-full flex flex-col justify-between py-4 px-2">
         <div>
-          <div className="flex items-center justify-center gap-2 overflow-x-auto py-2 no-scrollbar">
-            {profiles.map((p) => {
-              const isSelected = (selectedCandidate?.id || selectedProfileId) === p.id
-              return (
+          {/* Si l'utilisateur clique sur changer de profil, on affiche la liste, sinon on reste focus sur son profil */}
+          {isSwitchingProfile ? (
+            <div className="animate-in fade-in duration-200">
+              <div className="flex items-center justify-between mb-3 px-1">
+                <span className="text-xs font-black uppercase tracking-wider text-slate-500">
+                  Choisir un profil
+                </span>
                 <button
-                  key={p.id}
                   type="button"
-                  onClick={() => {
-                    setSelectedProfileId(p.id)
-                    setPin('')
-                    setError(null)
-                  }}
-                  className={`px-4 py-2 rounded-full text-xs font-bold tracking-tight transition-all shrink-0 ${
-                    isSelected
-                      ? 'bg-blue-600 text-white shadow-md shadow-blue-600/25'
-                      : 'bg-white text-slate-600 border border-slate-200'
-                  }`}
+                  onClick={() => setIsSwitchingProfile(false)}
+                  className="text-xs font-bold text-blue-600 underline"
                 >
-                  {p.name}
+                  Fermer
                 </button>
-              )
-            })}
+              </div>
 
-            {agentCount < 2 && (
+              <div className="flex items-center gap-2 overflow-x-auto pb-2 pt-1 no-scrollbar -mx-2 px-2">
+                {profiles.map((p) => {
+                  const isSelected = (selectedCandidate?.id || selectedProfileId) === p.id
+                  const isMain = p.profile_type === 'direction' && p.id === mainDirectionId
+
+                  return (
+                    <button
+                      key={p.id}
+                      type="button"
+                      onClick={() => {
+                        setSelectedProfileId(p.id)
+                        setPin('')
+                        setError(null)
+                        setIsSwitchingProfile(false)
+                        if (currentUserId) {
+                          localStorage.setItem(`last_selected_profile_id_${currentUserId}`, p.id)
+                        }
+                      }}
+                      className={`px-3.5 py-2 rounded-2xl text-xs font-bold tracking-tight transition-all shrink-0 flex items-center gap-2 ${
+                        isSelected
+                          ? 'bg-slate-900 text-white shadow-sm ring-2 ring-slate-900/10'
+                          : 'bg-white text-slate-700 border border-slate-200'
+                      }`}
+                    >
+                      <span className="truncate max-w-[110px]">{p.name}</span>
+                      <span
+                        className={`text-[9px] font-black uppercase px-1.5 py-0.5 rounded-md ${
+                          isSelected
+                            ? 'bg-white/20 text-white'
+                            : isMain
+                            ? 'bg-amber-100 text-amber-800'
+                            : p.profile_type === 'direction'
+                            ? 'bg-amber-50 text-amber-700'
+                            : p.profile_type === 'intermediaire'
+                            ? 'bg-sky-50 text-sky-700'
+                            : 'bg-slate-100 text-slate-600'
+                        }`}
+                      >
+                        {isMain ? 'DIR. P' : p.profile_type === 'direction' ? 'DIR' : p.profile_type === 'intermediaire' ? 'INT' : 'AGT'}
+                      </span>
+                    </button>
+                  )
+                })}
+
+                <div className="flex items-center gap-1.5 pl-1 shrink-0">
+                  {directionCount < 2 && (
+                    <button
+                      type="button"
+                      onClick={() => requestCreateProfile('direction')}
+                      className="px-2.5 py-2 rounded-2xl bg-white border border-slate-200 text-slate-700 text-xs font-bold active:scale-95 transition"
+                    >
+                      + Dir
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => requestCreateProfile('intermediaire')}
+                    className="px-2.5 py-2 rounded-2xl bg-white border border-slate-200 text-slate-700 text-xs font-bold active:scale-95 transition"
+                  >
+                    + Inter
+                  </button>
+                  {agentCount < 2 && (
+                    <button
+                      type="button"
+                      onClick={() => requestCreateProfile('agent')}
+                      className="w-8 h-8 rounded-2xl bg-white border border-slate-200 text-slate-700 flex items-center justify-center active:scale-95 transition"
+                    >
+                      <Plus size={14} />
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="flex justify-end px-1">
               <button
                 type="button"
-                onClick={() => requestCreateProfile('agent')}
-                className="w-8 h-8 rounded-full bg-white border border-dashed border-blue-300 text-blue-600 flex items-center justify-center active:scale-95 transition shrink-0"
+                onClick={() => setIsSwitchingProfile(true)}
+                className="inline-flex items-center gap-1.5 text-xs font-bold text-slate-600 bg-white border border-slate-200 px-3 py-1.5 rounded-full active:scale-95 transition shadow-xs"
               >
-                <Plus size={14} />
+                <Users size={13} />
+                <span>Changer d'utilisateur</span>
               </button>
-            )}
-          </div>
+            </div>
+          )}
 
           <div className="text-center mt-6">
-            <h1 className="text-xl font-black tracking-tight text-slate-900">
+            <h1 className="text-2xl font-black tracking-tight text-slate-900">
               {selectedCandidate?.name ?? 'Sélectionnez un profil'}
             </h1>
-            <p className="text-[11px] text-blue-600 mt-1 uppercase tracking-wider font-bold">
-              {selectedCandidate?.profile_type === 'direction' ? 'Direction' : 'Agent'}
+            <p className="text-[11px] text-slate-500 mt-1 uppercase tracking-wider font-bold">
+              {selectedCandidate ? getProfileBadgeLabel(selectedCandidate) : ''}
             </p>
 
-            {/* Indicateurs dynamiques de saisie */}
-            <div className="flex justify-center items-center gap-3.5 my-7">
+            {/* Indicateurs de saisie */}
+            <div className="flex justify-center items-center gap-3.5 my-6">
               {[0, 1, 2, 3].map((index) => (
                 <div
                   key={index}
@@ -562,6 +745,7 @@ export default function ProfileSelectionPage() {
           </div>
         </div>
 
+        {/* 🔘 CLAVIER TACTILE MOBILE : BOUTONS RONDS EN CERCLE PARFAIT */}
         <div className="w-full max-w-[280px] mx-auto my-auto">
           <div className="grid grid-cols-3 gap-y-3.5 gap-x-6 justify-items-center">
             {[
@@ -617,68 +801,90 @@ export default function ProfileSelectionPage() {
           </div>
         </div>
 
-        <div className="pt-4 pb-2 flex items-center justify-between text-xs text-slate-400 border-t border-slate-200/60">
+        <div className="pt-3 pb-2 flex flex-col gap-2 text-xs text-slate-400 border-t border-slate-200">
           {selectedCandidate && (
-            <div className="flex items-center gap-3">
-              <button
-                type="button"
-                onClick={() => {
-                  setTargetProfileId(selectedCandidate.id)
-                  setOldPin('')
-                  setNewPin('')
-                  setConfirmPin('')
-                  setError(null)
-                  setModalPinOpen(true)
-                }}
-                className="font-bold text-slate-500 hover:text-blue-600 transition"
-              >
-                Changer PIN
-              </button>
-              <button
-                type="button"
-                onClick={() => requestDeleteProfile(selectedCandidate.id, selectedCandidate.name)}
-                className="font-bold text-rose-500 hover:text-rose-700 transition"
-              >
-                Supprimer
-              </button>
-            </div>
-          )}
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setTargetProfileId(selectedCandidate.id)
+                    setOldPin('')
+                    setNewPin('')
+                    setConfirmPin('')
+                    setError(null)
+                    setModalPinOpen(true)
+                  }}
+                  className="font-bold text-slate-600 hover:text-slate-900 transition"
+                >
+                  Changer PIN
+                </button>
+                <button
+                  type="button"
+                  onClick={() => requestDeleteProfile(selectedCandidate.id, selectedCandidate.name)}
+                  className="font-bold text-rose-500 hover:text-rose-700 transition"
+                >
+                  Supprimer
+                </button>
+              </div>
 
-          {!hasDirection && (
-            <button
-              type="button"
-              onClick={() => requestCreateProfile('direction')}
-              className="ml-auto font-bold text-blue-600 transition"
-            >
-              Créer Direction
-            </button>
+              {selectedCandidate.profile_type === 'direction' && selectedCandidate.id !== mainDirectionId && (
+                <button
+                  type="button"
+                  onClick={() => requestSetMainDirection(selectedCandidate.id)}
+                  className="font-bold text-slate-700 hover:text-slate-900"
+                >
+                  Définir principal
+                </button>
+              )}
+            </div>
           )}
         </div>
       </div>
 
       {/* --- B. VERSION PC / DESKTOP --- */}
-      <div className="hidden sm:flex w-full max-w-lg bg-white border border-blue-100/80 rounded-3xl p-8 sm:p-10 shadow-xl shadow-blue-900/5 flex-col">
-        <div className="mb-8">
+      <div className="hidden sm:flex w-full max-w-xl bg-white border border-slate-200 rounded-3xl p-8 sm:p-10 shadow-lg flex-col">
+        <div className="mb-6">
           <div className="flex items-center justify-between mb-4">
             <h1 className="text-lg font-black text-slate-900 tracking-tight">
               Espace de Travail
             </h1>
-            {agentCount < 2 && (
+
+            <div className="flex items-center gap-2">
+              {directionCount < 2 && (
+                <button
+                  type="button"
+                  onClick={() => requestCreateProfile('direction')}
+                  className="text-xs font-bold text-slate-700 bg-slate-50 hover:bg-slate-100 border border-slate-200 px-3 py-1.5 rounded-xl transition"
+                >
+                  + Direction
+                </button>
+              )}
+
               <button
                 type="button"
-                onClick={() => requestCreateProfile('agent')}
-                className="text-xs font-bold text-blue-600 hover:text-blue-700 flex items-center gap-1 transition"
+                onClick={() => requestCreateProfile('intermediaire')}
+                className="text-xs font-bold text-slate-700 bg-slate-50 hover:bg-slate-100 border border-slate-200 px-3 py-1.5 rounded-xl transition"
               >
-                <Plus size={14} />
-                <span>Ajouter Agent</span>
+                + Intermédiaire
               </button>
-            )}
+
+              {agentCount < 2 && (
+                <button
+                  type="button"
+                  onClick={() => requestCreateProfile('agent')}
+                  className="text-xs font-bold text-slate-700 bg-slate-50 hover:bg-slate-100 border border-slate-200 px-3 py-1.5 rounded-xl transition"
+                >
+                  + Agent
+                </button>
+              )}
+            </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-2 gap-3 max-h-64 overflow-y-auto pr-1">
             {profiles.map((p) => {
               const isSelected = (selectedCandidate?.id || selectedProfileId) === p.id
-              const isDir = p.profile_type === 'direction'
+              const isMainDir = p.profile_type === 'direction' && p.id === mainDirectionId
 
               return (
                 <div
@@ -688,38 +894,46 @@ export default function ProfileSelectionPage() {
                     setPin('')
                     setError(null)
                     desktopInputRef.current?.focus()
+                    if (currentUserId) {
+                      localStorage.setItem(`last_selected_profile_id_${currentUserId}`, p.id)
+                    }
                   }}
                   className={`p-3.5 rounded-2xl border transition-all cursor-pointer flex items-center justify-between gap-2 ${
                     isSelected
-                      ? 'border-blue-600 bg-blue-600 text-white shadow-lg shadow-blue-600/25 ring-2 ring-blue-100'
-                      : 'border-slate-200 bg-slate-50/70 text-slate-700 hover:border-blue-300 hover:bg-blue-50/40'
+                      ? 'border-slate-900 bg-slate-900 text-white shadow-sm'
+                      : 'border-slate-200 bg-slate-50/50 text-slate-700 hover:border-slate-300 hover:bg-slate-100/50'
                   }`}
                 >
-                  <div className="flex items-center gap-2.5 truncate">
-                    <div
-                      className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${
-                        isSelected
-                          ? 'bg-white/20 text-white'
-                          : isDir
-                          ? 'bg-blue-600 text-white shadow-sm'
-                          : 'bg-blue-100 text-blue-700'
+                  <div className="truncate">
+                    <p className="text-sm font-bold truncate leading-tight">{p.name}</p>
+                    <p
+                      className={`text-[10px] font-bold tracking-wider uppercase mt-0.5 ${
+                        isSelected ? 'text-slate-300' : 'text-slate-400'
                       }`}
                     >
-                      {isDir ? <ShieldCheck size={18} /> : <UserRound size={18} />}
-                    </div>
-                    <div className="truncate">
-                      <p className="text-sm font-bold truncate leading-tight">{p.name}</p>
-                      <p
-                        className={`text-[10px] font-bold tracking-wider uppercase ${
-                          isSelected ? 'text-blue-100' : 'text-slate-400'
-                        }`}
-                      >
-                        {isDir ? 'Direction' : 'Agent'}
-                      </p>
-                    </div>
+                      {getProfileBadgeLabel(p)}
+                    </p>
                   </div>
 
                   <div className="flex items-center gap-1 shrink-0">
+                    {p.profile_type === 'direction' && !isMainDir && (
+                      <button
+                        type="button"
+                        title="Définir comme Direction Principale"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          requestSetMainDirection(p.id)
+                        }}
+                        className={`text-[10px] font-bold px-2 py-1 rounded-lg transition ${
+                          isSelected
+                            ? 'text-white hover:bg-white/20'
+                            : 'text-slate-600 hover:bg-slate-200'
+                        }`}
+                      >
+                        Principal
+                      </button>
+                    )}
+
                     <button
                       type="button"
                       title="Modifier le code PIN"
@@ -734,12 +948,13 @@ export default function ProfileSelectionPage() {
                       }}
                       className={`p-1.5 rounded-lg transition ${
                         isSelected
-                          ? 'text-blue-100 hover:text-white hover:bg-white/20'
-                          : 'text-slate-400 hover:text-blue-600 hover:bg-blue-50'
+                          ? 'text-slate-300 hover:text-white hover:bg-white/20'
+                          : 'text-slate-400 hover:text-slate-700 hover:bg-slate-200'
                       }`}
                     >
                       <KeyRound size={15} />
                     </button>
+
                     <button
                       type="button"
                       title="Supprimer ce profil"
@@ -749,7 +964,7 @@ export default function ProfileSelectionPage() {
                       }}
                       className={`p-1.5 rounded-lg transition ${
                         isSelected
-                          ? 'text-blue-100 hover:text-rose-200 hover:bg-rose-500/20'
+                          ? 'text-slate-300 hover:text-rose-200 hover:bg-rose-500/20'
                           : 'text-slate-400 hover:text-rose-600 hover:bg-rose-50'
                       }`}
                     >
@@ -765,7 +980,10 @@ export default function ProfileSelectionPage() {
         {selectedCandidate && (
           <div className="pt-6 border-t border-slate-100 flex flex-col items-center">
             <p className="text-xs font-bold text-slate-500 mb-4 text-center">
-              Code PIN pour <span className="font-black text-blue-600">{selectedCandidate.name}</span>
+              Code PIN pour <span className="font-black text-slate-900">{selectedCandidate.name}</span>
+              <span className="block text-[11px] text-slate-400 font-semibold mt-0.5">
+                ({getProfileBadgeLabel(selectedCandidate)})
+              </span>
             </p>
 
             <input
@@ -817,14 +1035,14 @@ export default function ProfileSelectionPage() {
             )}
 
             <div className="flex items-center gap-2 text-xs font-semibold text-slate-400 mt-5">
-              <Keyboard size={15} className="text-blue-600" />
+              <Keyboard size={15} className="text-slate-600" />
               <span>Utilisez les touches numériques de votre clavier</span>
             </div>
 
             <button
               type="button"
               onClick={() => setShowKeypadOnDesktop(!showKeypadOnDesktop)}
-              className="text-[11px] font-bold text-blue-600 hover:underline mt-2 transition"
+              className="text-[11px] font-bold text-slate-600 hover:text-slate-900 underline mt-2 transition"
             >
               {showKeypadOnDesktop ? 'Masquer le pavé virtuel' : 'Afficher le pavé virtuel'}
             </button>
@@ -836,7 +1054,7 @@ export default function ProfileSelectionPage() {
                     key={n}
                     type="button"
                     onClick={() => handleDigitPress(n)}
-                    className="w-14 h-14 rounded-2xl bg-blue-50/60 hover:bg-blue-100 active:bg-blue-200 font-black text-blue-900 text-lg flex items-center justify-center transition active:scale-95 shadow-sm border border-blue-100/50"
+                    className="w-14 h-14 rounded-2xl bg-slate-50 hover:bg-slate-100 active:bg-slate-200 font-black text-slate-900 text-lg flex items-center justify-center transition active:scale-95 border border-slate-200"
                   >
                     {n}
                   </button>
@@ -845,7 +1063,7 @@ export default function ProfileSelectionPage() {
                 <button
                   type="button"
                   onClick={() => handleDigitPress('0')}
-                  className="w-14 h-14 rounded-2xl bg-blue-50/60 hover:bg-blue-100 active:bg-blue-200 font-black text-blue-900 text-lg flex items-center justify-center transition active:scale-95 shadow-sm border border-blue-100/50"
+                  className="w-14 h-14 rounded-2xl bg-slate-50 hover:bg-slate-100 active:bg-slate-200 font-black text-slate-900 text-lg flex items-center justify-center transition active:scale-95 border border-slate-200"
                 >
                   0
                 </button>
@@ -864,7 +1082,7 @@ export default function ProfileSelectionPage() {
                 type="button"
                 disabled={pin.length < 4 || isPending}
                 onClick={() => handleOpenProfile()}
-                className="w-full py-4 rounded-2xl bg-blue-600 hover:bg-blue-700 active:scale-98 text-white text-xs font-black uppercase tracking-wider flex items-center justify-center gap-2 transition shadow-lg shadow-blue-600/25 disabled:opacity-40 disabled:cursor-not-allowed"
+                className="w-full py-4 rounded-2xl bg-blue-600 hover:bg-blue-700 active:scale-98 text-white text-xs font-black uppercase tracking-wider flex items-center justify-center gap-2 transition shadow-md disabled:opacity-40 disabled:cursor-not-allowed"
               >
                 <span>{isPending ? 'Vérification...' : 'Ouvrir la session'}</span>
                 <ArrowRight size={15} />
@@ -874,7 +1092,7 @@ export default function ProfileSelectionPage() {
         )}
       </div>
 
-      {/* --- 🛡️ MODALE CONTRÔLE : PIN DIRECTION REQUIS --- */}
+      {/* --- MODALE PIN DIRECTION REQUIS --- */}
       {modalAdminPinOpen && (
         <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-4">
           <div className="w-full max-w-md bg-white border border-slate-200 rounded-3xl p-6 sm:p-8 shadow-2xl relative animate-in fade-in zoom-in-95 duration-150">
@@ -890,13 +1108,18 @@ export default function ProfileSelectionPage() {
               <X size={18} />
             </button>
 
-            <div className="w-12 h-12 rounded-2xl bg-blue-50 text-blue-600 flex items-center justify-center mb-4">
+            <div className="w-12 h-12 rounded-2xl bg-slate-100 text-slate-900 flex items-center justify-center mb-4">
               <ShieldAlert size={24} />
             </div>
 
-            <h2 className="text-base font-black text-slate-900">Autorisation Direction requise</h2>
+            <h2 className="text-base font-black text-slate-900">Autorisation Direction Principale</h2>
             <p className="text-xs text-slate-500 mt-1 font-semibold leading-relaxed">
-              Pour {pendingAction?.type === 'CREATE' ? 'créer un nouveau profil' : `supprimer le profil "${pendingAction && 'profileName' in pendingAction ? pendingAction.profileName : ''}"`}, veuillez entrer le code PIN du Directeur ({directionProfile?.name || 'Direction'}).
+              Pour {pendingAction?.type === 'CREATE' 
+                ? 'créer ce profil' 
+                : pendingAction?.type === 'SET_MAIN_DIRECTION' 
+                ? 'changer la Direction Principale' 
+                : `supprimer le profil "${pendingAction && 'profileName' in pendingAction ? pendingAction.profileName : ''}"`}, 
+              veuillez entrer le code PIN du Directeur Principal ({principalDirectorProfile?.name || 'Direction'}).
             </p>
 
             {error && <p className="text-xs text-rose-600 font-bold mt-3">{error}</p>}
@@ -904,7 +1127,7 @@ export default function ProfileSelectionPage() {
             <form onSubmit={handleVerifyDirectorPin} className="space-y-4 mt-6">
               <div>
                 <label className="text-[11px] font-black uppercase text-slate-400 block mb-1">
-                  Code PIN du Directeur (4 à 6 chiffres)
+                  Code PIN du Directeur Principal (4 à 6 chiffres)
                 </label>
                 <input
                   type="text"
@@ -937,7 +1160,7 @@ export default function ProfileSelectionPage() {
                 <button
                   type="submit"
                   disabled={isPending || adminPin.length < 4}
-                  className="flex-1 py-3 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-black uppercase tracking-wider disabled:opacity-40 shadow-lg shadow-blue-600/25 transition"
+                  className="flex-1 py-3 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-black uppercase tracking-wider disabled:opacity-40 transition"
                 >
                   {isPending ? 'Vérification...' : 'Confirmer'}
                 </button>
@@ -947,10 +1170,10 @@ export default function ProfileSelectionPage() {
         </div>
       )}
 
-      {/* --- MODALE CRÉATION DE PROFIL (Débloquée après PIN Directeur) --- */}
+      {/* --- MODALE CRÉATION DE PROFIL --- */}
       {modalCreateOpen && (
         <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="w-full max-w-md bg-white border border-blue-100/80 rounded-3xl p-6 sm:p-8 shadow-2xl relative animate-in fade-in zoom-in-95 duration-150">
+          <div className="w-full max-w-md bg-white border border-slate-200 rounded-3xl p-6 sm:p-8 shadow-2xl relative animate-in fade-in zoom-in-95 duration-150">
             {profiles.length > 0 && (
               <button
                 type="button"
@@ -962,31 +1185,40 @@ export default function ProfileSelectionPage() {
             )}
 
             <h2 className="text-base font-black text-slate-900">Nouveau profil</h2>
-            <p className="text-xs text-slate-400 mt-0.5 font-bold">Sécurisez l'accès avec un code PIN personnel.</p>
+            <p className="text-xs text-slate-500 mt-0.5 font-bold">Sécurisez l'accès avec un code PIN personnel.</p>
 
             {error && <p className="text-xs text-rose-600 font-bold mt-3">{error}</p>}
 
             <form onSubmit={handleCreateProfile} className="space-y-4 mt-6">
-              <div className="flex gap-2 p-1 bg-slate-100 rounded-xl">
+              <div className="grid grid-cols-3 gap-1.5 p-1 bg-slate-100 rounded-xl">
                 <button
                   type="button"
-                  disabled={hasDirection}
+                  disabled={directionCount >= 2}
                   onClick={() => setType('direction')}
-                  className={`flex-1 py-2 text-xs font-bold rounded-lg transition ${
-                    type === 'direction' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500'
-                  } ${hasDirection ? 'opacity-40' : ''}`}
+                  className={`py-2 text-xs font-bold rounded-lg transition ${
+                    type === 'direction' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'
+                  } ${directionCount >= 2 ? 'opacity-40' : ''}`}
                 >
-                  Direction
+                  Direction ({directionCount}/2)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setType('intermediaire')}
+                  className={`py-2 text-xs font-bold rounded-lg transition ${
+                    type === 'intermediaire' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'
+                  }`}
+                >
+                  Intermédiaire
                 </button>
                 <button
                   type="button"
                   disabled={agentCount >= 2}
                   onClick={() => setType('agent')}
-                  className={`flex-1 py-2 text-xs font-bold rounded-lg transition ${
-                    type === 'agent' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500'
+                  className={`py-2 text-xs font-bold rounded-lg transition ${
+                    type === 'agent' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'
                   } ${agentCount >= 2 ? 'opacity-40' : ''}`}
                 >
-                  Agent
+                  Agent ({agentCount}/2)
                 </button>
               </div>
 
@@ -1023,7 +1255,7 @@ export default function ProfileSelectionPage() {
                 <button
                   type="submit"
                   disabled={isPending || !name.trim() || createPin.length !== 4}
-                  className="w-full py-3.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-black uppercase tracking-wider disabled:opacity-40 shadow-lg shadow-blue-600/25 transition"
+                  className="w-full py-3.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-black uppercase tracking-wider disabled:opacity-40 transition shadow-md"
                 >
                   {isPending ? 'Enregistrement...' : 'Créer le profil'}
                 </button>
@@ -1046,7 +1278,7 @@ export default function ProfileSelectionPage() {
       {/* --- MODALE MODIFICATION DU PIN --- */}
       {modalPinOpen && (
         <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="w-full max-w-md bg-white border border-blue-100/80 rounded-3xl p-6 sm:p-8 shadow-2xl relative animate-in fade-in zoom-in-95 duration-150">
+          <div className="w-full max-w-md bg-white border border-slate-200 rounded-3xl p-6 sm:p-8 shadow-2xl relative animate-in fade-in zoom-in-95 duration-150">
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-base font-black text-slate-900">Modifier le code PIN</h2>
               <button
@@ -1073,7 +1305,7 @@ export default function ProfileSelectionPage() {
                   maxLength={6}
                   value={oldPin}
                   onChange={(e) => setOldPin(e.target.value.replace(/\D/g, '').slice(0, 6))}
-                  placeholder="Votre ancien code (4 ou 6 chiffres)"
+                  placeholder="Votre ancien code"
                   required
                   className="w-full px-3.5 py-3 rounded-xl border border-slate-200 bg-slate-50 text-sm font-bold tracking-widest text-slate-900 focus:bg-white focus:border-blue-600 outline-none transition"
                   {...pinInputProps}
@@ -1135,7 +1367,7 @@ export default function ProfileSelectionPage() {
                     newPin.length !== 4 ||
                     confirmPin.length !== 4
                   }
-                  className="flex-1 py-3.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-black uppercase tracking-wider disabled:opacity-40 shadow-lg shadow-blue-600/25 transition"
+                  className="flex-1 py-3.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-black uppercase tracking-wider disabled:opacity-40 transition shadow-md"
                 >
                   {isPending ? 'Mise à jour...' : 'Valider'}
                 </button>

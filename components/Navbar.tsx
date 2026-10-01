@@ -41,13 +41,14 @@ export default function Navbar() {
     }
   })()
 
-  const { isDirection, clearProfile } = useWorkProfile()
+  // 🔑 Récupération des permissions du profil connecté
+  const { isDirection, isIntermediaire, canViewAmounts, clearProfile } = useWorkProfile()
   const isDark = theme === 'dark'
   if (hideNavbar) return null
   const pathname = usePathname()
   const router = useRouter()
 
-  // 🔑 ID utilisateur connecté
+  // ID utilisateur connecté
   const [currentUserId, setCurrentUserId] = useState<string | null>(null)
 
   const [nomAgence, setNomAgence] = useState<string>('Mon Agence')
@@ -67,7 +68,6 @@ export default function Navbar() {
         const uid = data.session?.user?.id
         if (uid) {
           setCurrentUserId(uid)
-          // Chargement du cache spécifique à cet utilisateur
           const cachedAgence = localStorage.getItem(`cached_nom_agence_${uid}`)
           const cachedName = localStorage.getItem(`cached_user_name_${uid}`)
           const cachedRole = localStorage.getItem(`cached_user_role_${uid}`)
@@ -75,7 +75,6 @@ export default function Navbar() {
           if (cachedName) setUserName(cachedName)
           if (cachedRole) setRole(cachedRole)
         } else {
-          // Fallback getUser
           const { data: userData } = await getUser()
           if (userData?.user?.id) {
             setCurrentUserId(userData.user.id)
@@ -88,7 +87,7 @@ export default function Navbar() {
     loadCurrentUser()
   }, [])
 
-  // 2. ⚡ Requête PowerSync SQLite STRICTEMENT filtrée par l'ID de l'utilisateur connecté
+  // 2. ⚡ Requête PowerSync SQLite
   const { data: profileData } = useQuery<{
     role: string | null
     full_name: string | null
@@ -102,7 +101,7 @@ export default function Navbar() {
     [currentUserId ?? '']
   )
 
-  // 3. Mise à jour automatique dès que les données du compte connecté sont prêtes
+  // 3. Mise à jour automatique des données profil
   useEffect(() => {
     if (!currentUserId || !profileData || profileData.length === 0) return
 
@@ -123,7 +122,7 @@ export default function Navbar() {
     }
   }, [profileData, currentUserId])
 
-  // Effet pour masquer le menu mobile au défilement vers le bas
+  // Défilement mobile
   useEffect(() => {
     const handleScroll = () => {
       const currentScrollY = window.scrollY
@@ -162,17 +161,23 @@ export default function Navbar() {
     router.replace('/profile-selection')
   }
 
+  // ⚖️ Gestion des permissions Hajj :
+  // - État Général : Direction STRICTEMENT (masqué pour l'intermédiaire)
+  // - Comptabilité : Direction OU Intermédiaire (affiché avec canViewAmounts)
+  const canAccessCompta = isDirection || isIntermediaire || canViewAmounts
+
   const navItems = [
     { name: 'Tableau de bord', href: '/hajj/dashboard', icon: LayoutDashboard },
     { name: 'Pèlerins', href: '/hajj/liste-pelerins', icon: Users },
     { name: 'Ajouter', href: '/hajj/ajouter-pelerin', icon: UserPlus },
     { name: 'Documents', href: '/hajj/documents', icon: FileText },
     { name: 'Plateforme MDH et nusuk', href: '/hajj/nusuk', icon: Globe }, 
-    ...(isDirection ? [{ name: 'État général', href: '/hajj/etat-general', icon: BarChart3 }, { name: 'Comptabilité', href: '/hajj/comptabilite', icon: PieChart }] : []),
+    ...(isDirection ? [{ name: 'État général', href: '/hajj/etat-general', icon: BarChart3 }] : []),
+    ...(canAccessCompta ? [{ name: 'Comptabilité', href: '/hajj/comptabilite', icon: PieChart }] : []),
     { name: 'Quitter', href: '/', icon: SquareArrowRight },
   ]
 
-  // Les deux premiers blocs restent fixes à gauche quoi qu'il arrive (pour le mobile)
+  // Éléments fixes à gauche sur mobile
   const leftItems = useMemo(() => {
     return [
       { name: 'Tableau de bord', href: '/hajj/dashboard', icon: LayoutDashboard },
@@ -180,7 +185,7 @@ export default function Navbar() {
     ]
   }, [])
 
-  // Les blocs de droite filtrent dynamiquement les pages restantes sans dupliquer la page active ni les blocs fixes de gauche
+  // Éléments de droite sur mobile
   const rightItems = useMemo(() => {
     return navItems.filter(item => 
       item.href !== '/hajj/dashboard' && 
@@ -204,10 +209,10 @@ export default function Navbar() {
         }
       `}</style>
 
-      {/* 💻 DESKTOP SIDEBAR — plate, soudée au fond de page (pas d'ombre "carte flottante") */}
+      {/* 💻 DESKTOP SIDEBAR */}
       <nav className={`hidden lg:flex flex-col justify-between w-64 fixed top-0 bottom-0 left-0 z-50 p-6 print:hidden overflow-visible ${isDark ? 'bg-[#202124] border-r border-[#3c4043]' : 'bg-gradient-to-b from-[#4A7DF0] via-[#6E97F2] to-[#DCE7FC]'}`}>
         
-        {/* Section Haut : Logo + Menu de liens empilés verticalement */}
+        {/* Section Haut */}
         <div className="flex flex-col gap-8">
           
           {/* LOGO & NOM AGENCE */}
@@ -216,7 +221,7 @@ export default function Navbar() {
               <Building2 className="text-blue-600 w-5 h-5" />
             </div>
             <div className="flex flex-col global-logo-text min-w-0">
-              {/* Drapeau du Mali imprimé au-dessus du nom de l'agence */}
+              {/* Drapeau du Mali */}
               <div 
                 className="w-full h-[6px] rounded-[1px] flex overflow-hidden mb-1 shadow-[inset_0_1px_1px_rgba(255,255,255,0.6),_0_1px_2px_rgba(0,0,0,0.2)] border border-black/10"
                 title="Drapeau du Mali"
@@ -235,7 +240,7 @@ export default function Navbar() {
             </div>
           </Link>
 
-          {/* LINKS MENU VERTICAL */}
+          {/* LIENS DU MENU */}
           <div className="flex flex-col gap-2">
             {role === 'admin' && (
               <Link 
@@ -271,7 +276,7 @@ export default function Navbar() {
                       : undefined
                   }
                 >
-                  {/* 🩹 Patch concave HAUT — mord dans le bleu au-dessus de la pilule */}
+                  {/* Patch concave HAUT */}
                   {isActive && (
                     <span
                       aria-hidden
@@ -293,7 +298,7 @@ export default function Navbar() {
                   </div>
                   <span className="truncate">{item.name}</span>
 
-                  {/* 🩹 Patch concave BAS — mord dans le bleu en-dessous de la pilule */}
+                  {/* Patch concave BAS */}
                   {isActive && (
                     <span
                       aria-hidden
@@ -303,7 +308,7 @@ export default function Navbar() {
                         bottom: -CONCAVE_R,
                         width: CONCAVE_R,
                         height: CONCAVE_R,
-                        background: `radial-gradient(circle at top right, #f8fafc ${CONCAVE_R}px, transparent ${CONCAVE_R + 1}px)`,
+                        background: `radial-gradient(circle at top right, ${isDark ? '#303134' : '#f8fafc'} ${CONCAVE_R}px, transparent ${CONCAVE_R + 1}px)`,
                         pointerEvents: 'none',
                       }}
                     />
@@ -314,7 +319,7 @@ export default function Navbar() {
           </div>
         </div>
 
-        {/* Section Bas : Profil & Déconnexion fixés au pied */}
+        {/* Section Bas : Profil & Déconnexion */}
         <div className="pt-4 border-t border-white/25 space-y-2">
           <button
             onClick={handleLock}
@@ -354,11 +359,11 @@ export default function Navbar() {
       {/* 📱 MOBILE NAV */}
       <div className="lg:hidden">
         
-        {/* BARRE DE NAVIGATION FIXE EN BAS AVEC EFFET DE FLOU */}
+        {/* BARRE FIXE BAS */}
         <div 
           className="fixed bottom-0 left-0 right-0 h-20 bg-white/80 backdrop-blur-md border-t border-slate-100 rounded-t-[2.2rem] shadow-[0_-10px_30px_rgba(0,0,0,0.04)] z-[90] flex items-center justify-between px-4 pb-2"
         >
-          {/* Éléments de gauche (Boutons 1 & 2 - FIXES) */}
+          {/* Gauche (Fixes) */}
           <div className="flex flex-1 justify-around items-center">
             {leftItems.map((item) => {
               const isActive = pathname === item.href
@@ -375,7 +380,7 @@ export default function Navbar() {
             })}
           </div>
 
-          {/* 3ÈME BOUTON CENTRAL : LE GRAND BOUTON ROND SURÉLEVÉ (+ / X) */}
+          {/* Bouton central surélevé */}
           <div className="relative w-16 h-16 flex items-center justify-center shrink-0 -translate-y-4">
             <button
               onClick={() => setIsMenuOpen(!isMenuOpen)}
@@ -388,7 +393,7 @@ export default function Navbar() {
             </button>
           </div>
 
-          {/* Éléments de droite (Boutons 3 & 4 - ROUTANTS) */}
+          {/* Droite (Dynamiques) */}
           <div className="flex flex-1 justify-around items-center">
             {rightItems.map((item) => (
               <Link
@@ -403,14 +408,14 @@ export default function Navbar() {
           </div>
         </div>
 
-        {/* MODALE DE FOND FLOUE */}
+        {/* FOND FLOU */}
         <div 
           className={`fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-[85] transition-opacity duration-300 
             ${isMenuOpen ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'}`}
           onClick={() => setIsMenuOpen(false)}
         />
 
-        {/* COMPARTIMENT DROIT / TIROIR REBONDISSANT POUR LES AUTRES OPTIONS */}
+        {/* TIROIR MOBILE */}
         <div 
           className={`fixed bottom-0 left-0 right-0 z-[88] bg-white rounded-t-[2.5rem] border-t border-slate-100 shadow-2xl p-6 pb-28 max-h-[75vh] overflow-y-auto transition-transform duration-500 cubic-bezier(0.32, 0.94, 0.6, 1)
             ${isMenuOpen ? 'translate-y-0' : 'translate-y-full'}`}
@@ -427,7 +432,6 @@ export default function Navbar() {
             </div>
           </div>
 
-          {/* Grille de navigation du Drawer principal */}
           <div className="grid grid-cols-2 gap-2.5">
             {role === 'admin' && (
               <Link
@@ -469,6 +473,7 @@ export default function Navbar() {
               <LockKeyhole size={19} />
               <span className="text-[11px] font-black uppercase tracking-wider">Verrouiller</span>
             </button>
+            
             {/* Bouton de déconnexion */}
             <button
               onClick={() => {
@@ -484,7 +489,6 @@ export default function Navbar() {
         </div>
       </div>
 
-      {/* Remplissage de l'espace haut réservé au PC */}
       <div className="hidden lg:block h-20" />
     </>
   )

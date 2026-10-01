@@ -4,13 +4,23 @@ import { useEffect, useMemo, useState, useRef } from 'react'
 import { usePathname, useRouter } from 'next/navigation'
 import { supabase, getSession, isOfflineMode } from '@/lib/supabase'
 import { Lock } from 'lucide-react'
+import { useWorkProfile } from '@/lib/ProfileContext'
 
-// Timeout de sécurité pour éviter de bloquer l'écran sur "Vérification..." si Supabase ne répond pas
-function withTimeout<T>(promise: Promise<T>, ms = 6000): Promise<T> {
+// Timeout court pour ne jamais bloquer l'écran si Supabase ne répond pas hors-ligne
+function withTimeout<T>(promise: Promise<T>, ms = 3000): Promise<T> {
   return Promise.race([
     promise,
-    new Promise<never>((_, reject) => setTimeout(() => reject(new Error('Timeout session')), ms)),
+    new Promise<never>((_, reject) => setTimeout(() => reject(new Error('Timeout réseau session')), ms)),
   ])
+}
+
+// Hook sécurisé évitant les crashs si le provider s'initialise
+function useSafeWorkProfile() {
+  try {
+    return useWorkProfile()
+  } catch {
+    return { currentProfile: null, loading: false }
+  }
 }
 
 export default function AuthGuard({ children }: { children: React.ReactNode }) {
@@ -20,7 +30,10 @@ export default function AuthGuard({ children }: { children: React.ReactNode }) {
   const [authenticated, setAuthenticated] = useState(false)
   const isRedirectingRef = useRef(false)
 
-  // 🌓 Détection du thème sombre pour l'écran de chargement
+  // 🛡️ Récupération du profil de travail actif
+  const { currentProfile, loading: profileLoading } = useSafeWorkProfile()
+
+  // 🌓 Détection du thème sombre pour l'écran d'attente
   const [isDark, setIsDark] = useState<boolean>(() => {
     if (typeof window !== 'undefined') {
       return localStorage.getItem('compta_theme_dark') === 'true'
@@ -46,29 +59,55 @@ export default function AuthGuard({ children }: { children: React.ReactNode }) {
     return pathname === '/login' || pathname.startsWith('/auth')
   }, [pathname])
 
-  // 1. Souscription et vérification de la session
+  // 1. Souscription et vérification de la session avec résilience 100% hors-ligne
   useEffect(() => {
     let mounted = true
 
+    const hasLocalAuthMarker = () => {
+      try {
+        return (
+          localStorage.getItem('auth_verified_offline_marker') === 'true' ||
+          localStorage.getItem('has_created_profile_marker') === 'true' ||
+          Boolean(localStorage.getItem('supabase.auth.token')) ||
+          isOfflineMode()
+        )
+      } catch {
+        return false
+      }
+    }
+
     const applySession = (hasSession: boolean) => {
       if (!mounted) return
-      setAuthenticated(hasSession)
+      // Si une session est trouvée OU si l'appareil a déjà été connecté une première fois (Offline Mode)
+      const isAuthenticated = hasSession || hasLocalAuthMarker()
+      
+      if (hasSession && typeof window !== 'undefined') {
+        localStorage.setItem('auth_verified_offline_marker', 'true')
+      }
+
+      setAuthenticated(isAuthenticated)
       setReady(true)
     }
 
+    // Tentative de récupération session Supabase
     withTimeout(getSession())
       .then(({ data: { session } }) => {
-        applySession(Boolean(session?.user) || (isOfflineMode() && Boolean(session)))
+        applySession(Boolean(session?.user))
       })
       .catch(() => {
-        applySession(false)
+        // En cas d'erreur de réseau, timeout ou absence totale d'Internet :
+        // ON NE DÉCONNECTE PAS, on valide via le cache local
+        applySession(hasLocalAuthMarker())
       })
 
     const { data: authListener } = supabase.auth.onAuthStateChange((event, session) => {
       if (!mounted) return
-      const hasSession = Boolean(session?.user)
 
+      // Déconnexion manuelle explicite uniquement
       if (event === 'SIGNED_OUT') {
+        try {
+          localStorage.removeItem('auth_verified_offline_marker')
+        } catch {}
         setAuthenticated(false)
         setReady(true)
         if (!isPublicRoute && !isRedirectingRef.current) {
@@ -78,7 +117,12 @@ export default function AuthGuard({ children }: { children: React.ReactNode }) {
         return
       }
 
-      setAuthenticated(hasSession)
+      const hasSession = Boolean(session?.user)
+      if (hasSession && typeof window !== 'undefined') {
+        localStorage.setItem('auth_verified_offline_marker', 'true')
+      }
+
+      setAuthenticated(hasSession || hasLocalAuthMarker())
       setReady(true)
     })
 
@@ -100,6 +144,40 @@ export default function AuthGuard({ children }: { children: React.ReactNode }) {
       router.replace('/login')
     }
   }, [authenticated, isPublicRoute, ready, router])
+
+  // 3. 🛡️ CONTRÔLE DES ACCÈS DU PROFIL INTERMÉDIAIRE
+  useEffect(() => {
+    if (!ready || !authenticated || !pathname || profileLoading) return
+
+    const profileType = currentProfile?.profile_type as string | undefined
+
+    if (profileType === 'intermediaire') {
+      const isComptaAgence = pathname.startsWith('/agence/compta')
+      const isComptaHajj = pathname.startsWith('/hajj/comptabilite')
+
+      // A. Autorisé mais avec restriction des fonctionnalités
+      if (isComptaAgence || isComptaHajj) {
+        if (localStorage.getItem('compta_access_level') !== 'restricted') {
+          localStorage.setItem('compta_access_level', 'restricted')
+        }
+      }
+
+      // B. Pages strictement bloquées pour l'intermédiaire
+      const isBlockedJournal = pathname.startsWith('/agence/journal')
+      const isBlockedHajjEtatGeneral = 
+        pathname.includes('/etat-general') || 
+        pathname.startsWith('/hajj/etat-general') ||
+        pathname.startsWith('/agence/hajj/etat-general')
+
+      if (isBlockedJournal || isBlockedHajjEtatGeneral) {
+        router.replace('/agence/dashboard')
+      }
+    } else if (profileType === 'direction') {
+      if (localStorage.getItem('compta_access_level') !== 'full') {
+        localStorage.setItem('compta_access_level', 'full')
+      }
+    }
+  }, [currentProfile, pathname, ready, authenticated, profileLoading, router])
 
   // Route publique : rendu immédiat
   if (isPublicRoute) return <>{children}</>

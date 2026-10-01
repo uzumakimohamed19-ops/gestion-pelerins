@@ -14,6 +14,19 @@ import {
 } from 'lucide-react'
 import Link from 'next/link'
 
+// ─── Helpers Logo Hors-Ligne ──────────────────────────────────────────────────
+
+async function fetchLogoAsBase64(url: string): Promise<string> {
+  const response = await fetch(url)
+  const blob = await response.blob()
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onloadend = () => resolve(reader.result as string)
+    reader.onerror = reject
+    reader.readAsDataURL(blob)
+  })
+}
+
 // ─── Types ───────────────────────────────────────────────────────────────────
 
 type TypeService = {
@@ -96,6 +109,9 @@ type AgenceInfo = {
   nom_agence: string
   telephone_agence: string
   adresse_agence: string
+  slogan?: string | null
+  message_recu?: string | null
+  logo_url?: string | null
 }
 
 const SERVICES_PRECONFIGS: TypeService[] = [
@@ -152,7 +168,7 @@ function useMontantInput(initial = 0) {
   return { display, raw: parseMontant(raw), onChange, setValue, addAmount, clear }
 }
 
-// ─── Composant Montant Saisi Sans Bug Fantôme ────────────────────────────────
+// ─── Composant Montant Saisi ─────────────────────────────────────────────────
 
 function MontantInput({
   label,
@@ -205,7 +221,7 @@ function MontantInput({
   )
 }
 
-// ─── Template Reçu Multiplateforme ────────────────────────────────────────────
+// ─── Template Reçu Multiplateforme ───────────────────────────────────────────
 
 function buildRecuHTML(formData: FormData, agence: AgenceInfo, refOp: string, dateNow: string): string {
   const statutInfo = {
@@ -263,11 +279,28 @@ function buildRecuHTML(formData: FormData, agence: AgenceInfo, refOp: string, da
 <body>
 <div class="receipt-box">
   <div style="text-align:center;padding-bottom:16px;border-bottom:1px solid #0f172a;margin-bottom:14px">
-    <div style="font-size:18px;font-weight:800;text-transform:uppercase;letter-spacing:0.5px;color:#0f172a">${agence.nom_agence || 'AGENCE DE VOYAGE'}</div>
-    <div style="font-size:11px;color:#64748b;margin-top:4px">
-      ${agence.adresse_agence ? agence.adresse_agence + ' &bull; ' : ''}${agence.telephone_agence || ''}
+    ${agence.logo_url ? `
+      <div style="margin-bottom:10px">
+        <img src="${agence.logo_url}" alt="Logo" style="max-height:54px;max-width:160px;object-fit:contain;display:inline-block" />
+      </div>
+    ` : ''}
+
+    <div style="font-size:18px;font-weight:900;text-transform:uppercase;letter-spacing:0.5px;color:#0f172a">
+      ${agence.nom_agence || 'AGENCE DE VOYAGE'}
     </div>
-    <div style="display:inline-block;margin-top:8px;background:#0f172a;color:#fff;font-size:9px;font-weight:700;letter-spacing:1px;text-transform:uppercase;padding:2px 10px;border-radius:6px">
+
+    ${agence.slogan ? `
+      <div style="font-size:11px;font-weight:600;color:#475569;margin-top:2px">
+        ${agence.slogan}
+      </div>
+    ` : ''}
+
+    <div style="font-size:11px;color:#64748b;margin-top:4px;line-height:1.4">
+      ${agence.adresse_agence ? agence.adresse_agence + '<br/>' : ''}
+      ${agence.telephone_agence ? '<strong>Tél :</strong> ' + agence.telephone_agence : ''}
+    </div>
+
+    <div style="display:inline-block;margin-top:10px;background:#0f172a;color:#fff;font-size:9px;font-weight:700;letter-spacing:1px;text-transform:uppercase;padding:3px 12px;border-radius:6px">
       TICKET DE CAISSE
     </div>
   </div>
@@ -378,15 +411,15 @@ function buildRecuHTML(formData: FormData, agence: AgenceInfo, refOp: string, da
     </div>
   </div>
 
-  <div style="text-align:center;margin-top:16px;font-size:9px;color:#94a3b8">
-    Merci de votre fidélité &bull; ${agence.telephone_agence || 'Agence'}
+  <div style="text-align:center;margin-top:16px;font-size:10px;color:#64748b;line-height:1.4">
+    ${agence.message_recu || 'Les billets et prestations émis sont soumis aux conditions générales de vente. Merci de votre confiance !'}
   </div>
 </div>
 </body>
 </html>`
 }
 
-// ─── Modal Reçu Responsive & Flat ────────────────────────────────────────────
+// ─── Modal Reçu Responsive & Flat (Au-dessus du Navbar Mobile) ────────────────
 
 function ModalRecu({
   formData,
@@ -404,6 +437,25 @@ function ModalRecu({
   const refOp = useRef(`OP-${Date.now().toString().slice(-8)}`).current
 
   const recuHTML = buildRecuHTML(formData, agence, refOp, dateNow)
+
+  // Masque tout composant bottom navbar mobile sous-jacent pendant l'ouverture du reçu
+  useEffect(() => {
+    const styleEl = document.createElement('style')
+    styleEl.id = 'hide-mobile-nav-during-receipt'
+    styleEl.innerHTML = `
+      .md\\:hidden .fixed.bottom-0,
+      .lg\\:hidden .fixed.bottom-0 {
+        display: none !important;
+        visibility: hidden !important;
+      }
+    `
+    document.head.appendChild(styleEl)
+
+    return () => {
+      const el = document.getElementById('hide-mobile-nav-during-receipt')
+      if (el) el.remove()
+    }
+  }, [])
 
   const handlePrint = () => {
     const isTauri = typeof window !== 'undefined' && (window as any).__TAURI__
@@ -435,8 +487,14 @@ function ModalRecu({
     }
   }
 
+  // Envoi WhatsApp avec capture d'image directe vers le numéro du client
   const handleWhatsApp = async () => {
-    const tel = formData.client_telephone.replace(/\D/g, '')
+    let rawDigits = formData.client_telephone.replace(/\D/g, '')
+    // Si c'est un numéro malien standard à 8 chiffres, ajouter l'indicatif 223
+    if (rawDigits.length === 8) {
+      rawDigits = `223${rawDigits}`
+    }
+
     setGenerating(true)
     try {
       const html2canvas = (await import('html2canvas')).default
@@ -463,37 +521,53 @@ function ModalRecu({
       canvas.toBlob(async (blob) => {
         if (!blob) { setGenerating(false); return }
 
-        if (navigator.share && navigator.canShare && navigator.canShare({ files: [new File([blob], 'recu.png', { type: 'image/png' })] })) {
-          const file = new File([blob], `recu-${refOp}.png`, { type: 'image/png' })
-          await navigator.share({ files: [file], title: `Reçu ${refOp}`, text: `Reçu — ${agence.nom_agence}` })
-        } else {
-          const url = URL.createObjectURL(blob)
-          const a = document.createElement('a')
-          a.href = url
-          a.download = `recu-${refOp}.png`
-          a.click()
-          URL.revokeObjectURL(url)
+        const file = new File([blob], `recu-${refOp}.png`, { type: 'image/png' })
+        const messageText = `🧾 *TICKET DE CAISSE — ${agence.nom_agence}*\n📋 Réf: ${refOp} | 📅 ${dateNow}\n` +
+          `👤 Client: ${formData.client_nom || 'Client Comptoir'}\n💼 Service: ${formData.type_activite}\n` +
+          `💰 Total Facturé: ${formData.prix_vente.toLocaleString('fr-FR')} CFA\n` +
+          `✅ Merci pour votre confiance !`
 
-          setTimeout(() => {
-            const msg = encodeURIComponent(
-              `🧾 *TICKET — ${agence.nom_agence}*\n📋 Réf: ${refOp} | 📅 ${dateNow}\n` +
-              `👤 Client: ${formData.client_nom || 'Client Comptoir'}\n💼 Service: ${formData.type_activite}\n` +
-              `💰 Total: ${formData.prix_vente.toLocaleString('fr-FR')} CFA\n` +
-              `✅ Merci de votre confiance.`
-            )
-            window.open(`https://wa.me/${tel}?text=${msg}`, '_blank')
-          }, 400)
+        // 1. Partage natif PWA / Mobile (joint directement l'image au contact)
+        if (navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
+          try {
+            await navigator.share({
+              files: [file],
+              title: `Reçu ${refOp}`,
+              text: messageText
+            })
+            setGenerating(false)
+            return
+          } catch (shareErr) {
+            // L'utilisateur a annulé ou le navigateur a rejeté le partage de fichier
+          }
         }
-        setGenerating(false)
+
+        // 2. Secours immédiat : téléchargement du fichier image + ouverture conversation WhatsApp du client
+        const url = URL.createObjectURL(blob)
+        const a = document.createElement('a')
+        a.href = url
+        a.download = `recu-${refOp}.png`
+        a.click()
+        URL.revokeObjectURL(url)
+
+        setTimeout(() => {
+          const encodedMsg = encodeURIComponent(messageText)
+          const targetUrl = rawDigits 
+            ? `https://wa.me/${rawDigits}?text=${encodedMsg}` 
+            : `https://wa.me/?text=${encodedMsg}`
+          window.open(targetUrl, '_blank')
+          setGenerating(false)
+        }, 500)
+
       }, 'image/png', 0.95)
-    } catch (err) {
+    } catch {
       setGenerating(false)
     }
   }
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
-      <div className={`w-full max-w-lg rounded-2xl border overflow-hidden flex flex-col my-auto max-h-[92vh] ${
+    <div className="fixed inset-0 z-[9999] bg-black/75 backdrop-blur-xs flex items-center justify-center p-2 sm:p-4 overflow-y-auto">
+      <div className={`w-full max-w-lg rounded-2xl border overflow-hidden flex flex-col my-auto max-h-[95vh] shadow-2xl ${
         isDark ? 'bg-[#1C1C1E] border-[#2C2C2E]' : 'bg-white border-slate-200'
       }`}>
         <div className={`flex items-center justify-between px-5 py-3.5 border-b ${isDark ? 'border-[#2C2C2E]' : 'border-slate-100'}`}>
@@ -506,13 +580,13 @@ function ModalRecu({
           </button>
         </div>
 
-        <div className={`flex-1 overflow-y-auto p-3 sm:p-4 ${isDark ? 'bg-[#121214]' : 'bg-slate-50/60'}`}>
+        <div className={`flex-1 overflow-y-auto p-2 sm:p-4 ${isDark ? 'bg-[#121214]' : 'bg-slate-50/60'}`}>
           <div className="bg-white rounded-xl border border-slate-200/80 overflow-hidden mx-auto">
             <iframe
               srcDoc={recuHTML}
               title="Aperçu du reçu"
               className="w-full border-none"
-              style={{ minHeight: '500px', height: '600px', display: 'block' }}
+              style={{ minHeight: '480px', height: '580px', display: 'block' }}
             />
           </div>
         </div>
@@ -522,13 +596,14 @@ function ModalRecu({
             <button
               onClick={handleWhatsApp}
               disabled={generating}
-              className="flex items-center justify-center gap-1.5 bg-[#34C759] hover:bg-[#30B750] text-black py-3 rounded-xl font-bold text-xs transition-colors disabled:opacity-60 cursor-pointer"
+              className="flex items-center justify-center gap-1.5 bg-[#34C759] hover:bg-[#30B750] text-black py-3 rounded-xl font-bold text-xs transition-colors disabled:opacity-60 cursor-pointer shadow-sm"
             >
-              <MessageCircle size={16} /> WhatsApp
+              <MessageCircle size={16} /> 
+              <span>{generating ? 'Préparation...' : 'Envoyer WhatsApp'}</span>
             </button>
             <button
               onClick={handlePrint}
-              className={`flex items-center justify-center gap-1.5 py-3 rounded-xl font-bold text-xs transition-colors cursor-pointer ${
+              className={`flex items-center justify-center gap-1.5 py-3 rounded-xl font-bold text-xs transition-colors cursor-pointer shadow-sm ${
                 isDark ? 'bg-[#2C2C2E] hover:bg-[#3A3A3C] text-[#F5F5F7]' : 'bg-slate-900 hover:bg-slate-800 text-white'
               }`}
             >
@@ -592,12 +667,15 @@ export default function NouvelleOperation() {
   const [nouveauTauxRetrait, setNouveauTauxRetrait] = useState('1.0')
   const [nouveauAjoutClientRetrait, setNouveauAjoutClientRetrait] = useState(false)
 
-  // Données Agence
+  // Données Agence complètes avec support Logo
   const [agence, setAgence] = useState<AgenceInfo>({
     id: undefined,
     nom_agence: '',
     telephone_agence: '',
     adresse_agence: '',
+    slogan: null,
+    message_recu: null,
+    logo_url: null,
   })
 
   useEffect(() => {
@@ -613,13 +691,9 @@ export default function NouvelleOperation() {
     init()
   }, [])
 
-  const { data: agencesLocales } = useQuery<{
-    id: string
-    nom_agence: string
-    telephone_agence: string
-    adresse_agence: string
-  }>(
-    `SELECT a.id, a.nom_agence, a.telephone_agence, a.adresse_agence
+  // 🎯 Requête SQL sur la table agences intégrant logo_base64
+  const { data: agencesLocales } = useQuery<AgenceInfo & { logo_base64?: string | null }>(
+    `SELECT a.id, a.nom_agence, a.telephone_agence, a.adresse_agence, a.logo_base64
      FROM profiles p
      JOIN agences a ON p.agence_id = a.id
      WHERE p.id = ?
@@ -630,12 +704,57 @@ export default function NouvelleOperation() {
   useEffect(() => {
     if (agencesLocales?.[0]) {
       const ag = agencesLocales[0]
+
+      // 1. Priorité au logo stocké dans la base SQLite locale ou cache
+      let resolvedLogo: string | null = ag.logo_base64 || null
+      if (!resolvedLogo) {
+        try {
+          const cachedLogo = localStorage.getItem(`agency_receipt_logo_${ag.id}`)
+          if (cachedLogo && cachedLogo.startsWith('data:image')) {
+            resolvedLogo = cachedLogo
+          }
+        } catch {}
+      }
+
+      // 2. Mentions additionnelles
+      let localSlogan: string | null = null
+      let localMessageRecu: string | null = null
+      try {
+        const cachedConfigStr = localStorage.getItem(`agency_receipt_config_${ag.id}`)
+        if (cachedConfigStr) {
+          const parsed = JSON.parse(cachedConfigStr)
+          localSlogan = parsed.slogan || null
+          localMessageRecu = parsed.message_recu || null
+        }
+      } catch {}
+
       setAgence({
         id: ag.id,
         nom_agence: ag.nom_agence || 'Mon Agence',
         telephone_agence: ag.telephone_agence || '',
         adresse_agence: ag.adresse_agence || '',
+        slogan: ag.slogan || localSlogan,
+        message_recu: ag.message_recu || localMessageRecu,
+        logo_url: resolvedLogo,
       })
+
+      // 3. Fallback réseau si non présent localement
+      if (!resolvedLogo && ag.id) {
+        try {
+          const { data: storageData } = supabase.storage
+            .from('agency-assets')
+            .getPublicUrl(`logos/${ag.id}.png`)
+
+          if (storageData?.publicUrl) {
+            fetchLogoAsBase64(storageData.publicUrl)
+              .then((base64) => {
+                localStorage.setItem(`agency_receipt_logo_${ag.id}`, base64)
+                setAgence(prev => ({ ...prev, logo_url: base64 }))
+              })
+              .catch(() => {})
+          }
+        } catch {}
+      }
 
       const cleStorage = `taux_transfert_v3_depot_retrait_${ag.id || 'default'}`
       const savedTaux = localStorage.getItem(cleStorage)
@@ -733,13 +852,12 @@ export default function NouvelleOperation() {
     }
   }, [formData.type_activite, formData.compagnie_fournisseur])
 
-  // 🎯 CALCUL AUTOMATIQUE & SYNCHRONISATION INSTANTANÉE (Même lors de la suppression du montant)
+  // 🎯 CALCUL AUTOMATIQUE & SYNCHRONISATION INSTANTANÉE
   useEffect(() => {
     if (formData.type_activite !== 'TRANSFERT') return
 
     const montantPrincipal = montantTransfertInput.raw
 
-    // Si l'utilisateur efface le montant ou le remet à 0, TOUT doit être remis à 0
     if (!montantPrincipal || montantPrincipal <= 0) {
       prixAchat.setValue(0)
       prixVente.setValue(0)
@@ -884,25 +1002,20 @@ export default function NouvelleOperation() {
   }`
   const labelClass = `block text-[10px] font-bold uppercase tracking-wider mb-1 ${isDark ? 'text-[#8E8E93]' : 'text-slate-500'}`
 
-  // ─── Services disponibles ───────────────────────────────────────────────────
   const allServices = [
     ...SERVICES_PRECONFIGS,
     ...servicesPerso.map(s => ({ id: s, label: s, icon: FileText, color: 'bg-slate-800 text-white' }))
   ]
 
-  // ─── Module Transfert Spécial Caisse POS ─────────────────────────────────────
-
   const renderModuleTransfertSpecial = () => {
     const isEnvoi = formData.type_operation_transfert === 'ENVOI'
     const opCourant = operateurs.find(o => o.nom === formData.compagnie_fournisseur || o.id === formData.compagnie_fournisseur)
     const tauxActif = opCourant ? (isEnvoi ? opCourant.tauxDepot : opCourant.tauxRetrait) : 1.0
-    const ajoutClientActif = opCourant ? (isEnvoi ? opCourant.ajouterAuClientDepot : opCourant.ajouterAuClientRetrait) : false
 
     return (
       <div className={`p-4 sm:p-5 rounded-2xl border space-y-4 transition-colors ${
         isDark ? 'bg-[#1C1C1E] border-[#2C2C2E]' : 'bg-white border-slate-200/90 shadow-xs'
       }`}>
-        
         <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5">
           <div className="flex items-center gap-2">
             <div className={`w-8 h-8 rounded-xl flex items-center justify-center ${isDark ? 'bg-emerald-500/20 text-[#34C759]' : 'bg-emerald-50 text-emerald-600'}`}>
@@ -1617,7 +1730,7 @@ export default function NouvelleOperation() {
         </div>
       </div>
 
-      {/* Détail Prix d'achat & Frais Sans Bug Fantôme */}
+      {/* Détail Prix d'achat & Frais */}
       <div className="space-y-2">
         <MontantInput label="Coût d'achat / Débit *" colorClass={isDark ? 'text-[#FF453A]' : 'text-red-600'} icon={Wallet} value={prixAchat.display} onChange={prixAchat.onChange} required isDark={isDark} />
         <MontantInput label="Frais annexes" colorClass={isDark ? 'text-[#0A84FF]' : 'text-blue-600'} icon={FileText} value={fraisAnnexes.display} onChange={fraisAnnexes.onChange} isDark={isDark} />
@@ -1821,7 +1934,7 @@ export default function NouvelleOperation() {
         </div>
       </form>
 
-      {/* Modal Reçu de Caisse */}
+      {/* Modal Reçu de Caisse (avec logo et coordonnées de l'agence) */}
       {showRecu && savedData && (
         <ModalRecu
           formData={{

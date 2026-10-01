@@ -21,7 +21,7 @@ const Table: any = function createLegacyTable({ columns, indexes }: LegacyTableO
   return new PowerSyncTable(mappedColumns as any, { indexes });
 };
 
-// 1. Agences
+// 1. Agences (avec logo synchronisé)
 export const agences = new Table({
   name: 'agences',
   columns: [
@@ -30,6 +30,7 @@ export const agences = new Table({
     column.text('telephone_agence'),
     column.text('adresse_agence'),
     column.text('groupement'),
+    column.text('logo_base64'),
     column.text('created_at')
   ]
 });

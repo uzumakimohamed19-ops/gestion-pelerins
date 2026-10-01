@@ -8,7 +8,8 @@ import { Capacitor } from '@capacitor/core'
 import { App as CapacitorApp } from '@capacitor/app'
 import { NativeBiometric } from '@capgo/capacitor-native-biometric'
 
-export type WorkProfileType = 'direction' | 'agent'
+export type WorkProfileType = 'direction' | 'agent' | 'intermediaire'
+export type ComptaAccessLevel = 'full' | 'restricted' | 'none'
 
 export type WorkProfile = {
   id: string
@@ -22,10 +23,15 @@ export type WorkProfile = {
 
 type ProfileContextValue = {
   profile: WorkProfile | null
+  currentProfile: WorkProfile | null
   profiles: WorkProfile[]
   loading: boolean
   isDirection: boolean
+  isIntermediaire: boolean
   canViewAmounts: boolean
+  canAccessJournal: boolean
+  canAccessHajjEtatGeneral: boolean
+  comptaAccessLevel: ComptaAccessLevel
   isBiometricAvailable: boolean
   selectProfile: (profile: WorkProfile, pin: string) => Promise<void>
   unlockWithBiometrics: (profile: WorkProfile) => Promise<void>
@@ -57,7 +63,7 @@ export function useWorkProfile() {
 }
 
 export function ProfileRouteGuard({ children }: { children: React.ReactNode }) {
-  const { profile, loading, canViewAmounts } = useWorkProfile()
+  const { profile, loading, canViewAmounts, canAccessJournal, canAccessHajjEtatGeneral } = useWorkProfile()
   const pathname = usePathname()
   const router = useRouter()
 
@@ -72,24 +78,56 @@ export function ProfileRouteGuard({ children }: { children: React.ReactNode }) {
     )
   }, [pathname])
 
+  const isRestrictedForIntermediate = useMemo(() => {
+    if (!pathname) return false
+    const norm = pathname.toLowerCase()
+    return (
+      (!canAccessJournal && norm.startsWith('/agence/journal')) ||
+      (!canAccessHajjEtatGeneral && norm.startsWith('/hajj/etat-general'))
+    )
+  }, [pathname, canAccessJournal, canAccessHajjEtatGeneral])
+
   useEffect(() => {
     if (loading || !profile) return
-    if (!canViewAmounts && isFinancialRoute) {
-      router.replace('/hajj/dashboard')
-    }
-  }, [canViewAmounts, isFinancialRoute, loading, profile, router])
 
-  if (!loading && profile && !canViewAmounts && isFinancialRoute) {
-    return (
-      <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#F4F6F8]">
-        <div className="p-6 bg-white rounded-3xl border border-slate-200 shadow-sm text-center max-w-sm">
-          <p className="text-sm font-black text-slate-900 uppercase">Accès Réservé</p>
-          <p className="text-xs text-slate-500 mt-1">
-            Section réservée au profil Direction.
-          </p>
+    // 1. Redirection pour les agents simples (aucune finance autorisée)
+    if (!canViewAmounts && isFinancialRoute) {
+      router.replace('/agence/dashboard')
+      return
+    }
+
+    // 2. Redirection spécifique pour le profil intermédiaire (bloqué sur journal et état général hajj)
+    if (isRestrictedForIntermediate) {
+      router.replace('/agence/dashboard')
+    }
+  }, [canViewAmounts, isFinancialRoute, isRestrictedForIntermediate, loading, profile, router])
+
+  if (!loading && profile) {
+    if (!canViewAmounts && isFinancialRoute) {
+      return (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#F4F6F8]">
+          <div className="p-6 bg-white rounded-3xl border border-slate-200 shadow-sm text-center max-w-sm">
+            <p className="text-sm font-black text-slate-900 uppercase">Accès Réservé</p>
+            <p className="text-xs text-slate-500 mt-1">
+              Section réservée à la Direction et aux Superviseurs.
+            </p>
+          </div>
         </div>
-      </div>
-    )
+      )
+    }
+
+    if (isRestrictedForIntermediate) {
+      return (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#F4F6F8]">
+          <div className="p-6 bg-white rounded-3xl border border-slate-200 shadow-sm text-center max-w-sm">
+            <p className="text-sm font-black text-slate-900 uppercase">Accès Direction Requis</p>
+            <p className="text-xs text-slate-500 mt-1">
+              Cette section est strictement réservée à la Direction Principale et Adjointe.
+            </p>
+          </div>
+        </div>
+      )
+    }
   }
 
   return <>{children}</>
@@ -108,30 +146,56 @@ export default function ProfileProvider({ children }: { children: React.ReactNod
   const lastActivityRef = useRef<number>(Date.now())
   const activeUserIdRef = useRef<string | null>(null)
 
-  // 1. Écoute dynamique de la session Supabase (se met à jour dès le clic sur Connexion)
+  // 1. Récupération résiliente hors-ligne de la session
   useEffect(() => {
     let isMounted = true
 
-    // Check immédiat
-    getSession().then(({ data: { session } }) => {
-      if (isMounted) {
-        setUserId(session?.user?.id ?? null)
-        setAuthInitialized(true)
-      }
-    }).catch(() => {
-      if (isMounted) setAuthInitialized(true)
-    })
+    const getStoredUserIdOffline = () => {
+      try {
+        for (let i = 0; i < localStorage.length; i++) {
+          const key = localStorage.key(i)
+          if (key && key.startsWith('active_profile_id_')) {
+            return key.replace('active_profile_id_', '')
+          }
+        }
+      } catch {}
+      return null
+    }
 
-    // Écouteur temps réel des connexions / déconnexions
+    getSession()
+      .then(({ data: { session } }) => {
+        if (isMounted) {
+          const currentId = session?.user?.id ?? getStoredUserIdOffline()
+          setUserId(currentId)
+          setAuthInitialized(true)
+        }
+      })
+      .catch(() => {
+        // Mode déconnecté : on préserve l'utilisateur local sans déconnecter
+        if (isMounted) {
+          const currentId = getStoredUserIdOffline()
+          setUserId(currentId)
+          setAuthInitialized(true)
+        }
+      })
+
     const { data: authListener } = supabase.auth.onAuthStateChange((event, session) => {
       if (!isMounted) return
       const currentId = session?.user?.id ?? null
-      const userChanged = activeUserIdRef.current !== currentId
-      activeUserIdRef.current = currentId
-      setUserId(currentId)
+      const userChanged = activeUserIdRef.current !== currentId && Boolean(currentId)
+      
+      if (currentId) {
+        activeUserIdRef.current = currentId
+        setUserId(currentId)
+      }
+
       setAuthInitialized(true)
 
-      if (userChanged || event === 'SIGNED_OUT' || (!currentId && event !== 'INITIAL_SESSION')) {
+      // Seule une déconnexion explicite vide le profil actif
+      if (event === 'SIGNED_OUT') {
+        setProfile(null)
+        setUserId(null)
+      } else if (userChanged) {
         setProfile(null)
       }
     })
@@ -153,28 +217,34 @@ export default function ProfileProvider({ children }: { children: React.ReactNod
     if (!userId || localProfiles.length > 0) return
 
     let isMounted = true
-    supabase
-      .from('account_profiles')
-      .select('id, user_id, name, profile_type, pin_hash, created_at, updated_at')
-      .eq('user_id', userId)
-      .then(async ({ data, error }) => {
+
+    void (async () => {
+      try {
+        const { data, error } = await supabase
+          .from('account_profiles')
+          .select('id, user_id, name, profile_type, pin_hash, created_at, updated_at')
+          .eq('user_id', userId)
+
         if (!isMounted || error || !data || data.length === 0) return
 
         for (const item of data) {
-          await db.execute(
-            `INSERT OR REPLACE INTO account_profiles (id, user_id, name, profile_type, pin_hash, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-            [
-              item.id,
-              item.user_id,
-              item.name,
-              item.profile_type,
-              item.pin_hash,
-              item.created_at || new Date().toISOString(),
-              item.updated_at || new Date().toISOString(),
-            ]
-          ).catch(() => {})
+          try {
+            await db.execute(
+              `INSERT OR REPLACE INTO account_profiles (id, user_id, name, profile_type, pin_hash, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+              [
+                item.id,
+                item.user_id,
+                item.name,
+                item.profile_type,
+                item.pin_hash,
+                item.created_at || new Date().toISOString(),
+                item.updated_at || new Date().toISOString(),
+              ]
+            )
+          } catch {}
         }
-      })
+      } catch {}
+    })()
 
     return () => {
       isMounted = false
@@ -207,12 +277,11 @@ export default function ProfileProvider({ children }: { children: React.ReactNod
         localStorage.removeItem(SESSION_PROFILE_ID_KEY(userId))
         localStorage.removeItem(SESSION_PROFILE_DATA_KEY(userId))
         localStorage.removeItem(LAST_ACTIVITY_KEY(userId))
+        localStorage.removeItem('compta_access_level')
       } catch {}
     }
   }, [userId])
 
-  // Ne jamais conserver le profil d'un autre compte pendant une transition
-  // de session (déconnexion/reconnexion rapide).
   useEffect(() => {
     if (!userId) {
       setProfile(null)
@@ -244,7 +313,7 @@ export default function ProfileProvider({ children }: { children: React.ReactNod
     return false
   }, [clearProfile, pathname, router, updateActivity, userId])
 
-  // 5. Restauration de session sans fausse déconnexion
+  // 5. Restauration de session
   useEffect(() => {
     if (!userId) return
 
@@ -265,7 +334,6 @@ export default function ProfileProvider({ children }: { children: React.ReactNod
         }
       }
 
-      // Le cache ne sert qu'en secours hors ligne et doit être lié au compte.
       let current = localProfiles.find((p) => p.id === storedId && p.user_id === userId)
       if (!current && isOfflineMode()) {
         const cached = localStorage.getItem(SESSION_PROFILE_DATA_KEY(userId))
@@ -276,7 +344,7 @@ export default function ProfileProvider({ children }: { children: React.ReactNod
               parsed.id === storedId &&
               parsed.user_id === userId &&
               typeof parsed.name === 'string' &&
-              (parsed.profile_type === 'direction' || parsed.profile_type === 'agent') &&
+              (parsed.profile_type === 'direction' || parsed.profile_type === 'agent' || parsed.profile_type === 'intermediaire') &&
               typeof parsed.pin_hash === 'string'
             ) {
               current = parsed as WorkProfile
@@ -288,11 +356,15 @@ export default function ProfileProvider({ children }: { children: React.ReactNod
       if (current) {
         setProfile(current)
         updateActivity()
+
+        // Restauration du niveau d'accès compta
+        const level = current.profile_type === 'direction' ? 'full' : current.profile_type === 'intermediaire' ? 'restricted' : 'none'
+        localStorage.setItem('compta_access_level', level)
       }
     } catch {}
   }, [userId, localProfiles, clearProfile, updateActivity, pathname, router])
 
-  // Inactivité 15 min - appliquée quel que soit le statut réseau
+  // Inactivité 15 min
   useEffect(() => {
     if (!profile || !userId) return
 
@@ -359,6 +431,15 @@ export default function ProfileProvider({ children }: { children: React.ReactNod
         try {
           localStorage.setItem(SESSION_PROFILE_ID_KEY(userId), candidate.id)
           localStorage.setItem(SESSION_PROFILE_DATA_KEY(userId), JSON.stringify(candidate))
+          localStorage.setItem(`last_selected_profile_id_${userId}`, candidate.id)
+
+          const accessLevel: ComptaAccessLevel =
+            candidate.profile_type === 'direction'
+              ? 'full'
+              : candidate.profile_type === 'intermediaire'
+              ? 'restricted'
+              : 'none'
+          localStorage.setItem('compta_access_level', accessLevel)
         } catch {}
       }
     },
@@ -386,6 +467,15 @@ export default function ProfileProvider({ children }: { children: React.ReactNod
         try {
           localStorage.setItem(SESSION_PROFILE_ID_KEY(userId), candidate.id)
           localStorage.setItem(SESSION_PROFILE_DATA_KEY(userId), JSON.stringify(candidate))
+          localStorage.setItem(`last_selected_profile_id_${userId}`, candidate.id)
+
+          const accessLevel: ComptaAccessLevel =
+            candidate.profile_type === 'direction'
+              ? 'full'
+              : candidate.profile_type === 'intermediaire'
+              ? 'restricted'
+              : 'none'
+          localStorage.setItem('compta_access_level', accessLevel)
         } catch {}
       }
     },
@@ -398,10 +488,13 @@ export default function ProfileProvider({ children }: { children: React.ReactNod
       if (!name.trim()) throw new Error('Nom requis.')
       if (!/^[0-9]{4,6}$/.test(pin)) throw new Error('Le PIN doit comporter 4 à 6 chiffres.')
 
-      if (type === 'direction' && localProfiles.some((p) => p.profile_type === 'direction')) {
-        throw new Error('Un profil Direction existe déjà.')
+      // Jusqu'à 2 comptes Direction
+      const directions = localProfiles.filter((p) => p.profile_type === 'direction')
+      if (type === 'direction' && directions.length >= 2) {
+        throw new Error('Limite de 2 profils Direction atteinte.')
       }
 
+      // Jusqu'à 2 comptes Agents
       const agents = localProfiles.filter((p) => p.profile_type === 'agent')
       if (type === 'agent' && agents.length >= 2) {
         throw new Error('Limite de 2 profils Agents atteinte.')
@@ -443,13 +536,25 @@ export default function ProfileProvider({ children }: { children: React.ReactNod
     [db, localProfiles]
   )
 
+  const isDirection = profile?.profile_type === 'direction'
+  const isIntermediaire = profile?.profile_type === 'intermediaire'
+  const canViewAmounts = isDirection || isIntermediaire
+  const canAccessJournal = isDirection
+  const canAccessHajjEtatGeneral = isDirection
+  const comptaAccessLevel: ComptaAccessLevel = isDirection ? 'full' : isIntermediaire ? 'restricted' : 'none'
+
   const value = useMemo<ProfileContextValue>(
     () => ({
       profile,
+      currentProfile: profile,
       profiles: localProfiles,
       loading: !authInitialized || (Boolean(userId) && isQueryLoading),
-      isDirection: profile?.profile_type === 'direction',
-      canViewAmounts: profile?.profile_type === 'direction',
+      isDirection,
+      isIntermediaire,
+      canViewAmounts,
+      canAccessJournal,
+      canAccessHajjEtatGeneral,
+      comptaAccessLevel,
       isBiometricAvailable,
       selectProfile,
       unlockWithBiometrics,
@@ -463,6 +568,12 @@ export default function ProfileProvider({ children }: { children: React.ReactNod
       authInitialized,
       userId,
       isQueryLoading,
+      isDirection,
+      isIntermediaire,
+      canViewAmounts,
+      canAccessJournal,
+      canAccessHajjEtatGeneral,
+      comptaAccessLevel,
       isBiometricAvailable,
       selectProfile,
       unlockWithBiometrics,

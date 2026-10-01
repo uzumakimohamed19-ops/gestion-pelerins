@@ -18,7 +18,8 @@ import {
   X,
   Plus,
   Contact,
-  LockKeyhole
+  LockKeyhole,
+  Settings
 } from 'lucide-react'
 import { useWorkProfile } from '@/lib/ProfileContext'
 import { useQuery } from '@powersync/react'
@@ -29,9 +30,11 @@ const CONCAVE_R = 20
 export default function NavbarAgence() {
   const pathname = usePathname()
   const router = useRouter()
-  const { isDirection, clearProfile } = useWorkProfile()
+  
+  // 🔑 Récupération des permissions : isDirection, isIntermediaire et canViewAmounts
+  const { isDirection, isIntermediaire, canViewAmounts, clearProfile } = useWorkProfile()
 
-  // 🔑 ID utilisateur connecté
+  // ID utilisateur connecté
   const [currentUserId, setCurrentUserId] = useState<string | null>(null)
 
   const [nomAgence, setNomAgence] = useState<string>('Mon Agence')
@@ -50,7 +53,6 @@ export default function NavbarAgence() {
   useEffect(() => {
     if (typeof window === 'undefined') return
 
-    // ⚡ On diffère l'exécution dans le prochain tick pour éviter d'interrompre le rendu d'une autre page
     const syncTheme = () => {
       setTimeout(() => {
         const currentDark = localStorage.getItem('compta_theme_dark') === 'true'
@@ -58,11 +60,9 @@ export default function NavbarAgence() {
       }, 0)
     }
 
-    // 1. Écoute des événements
     window.addEventListener('storage', syncTheme)
     window.addEventListener('theme-change', syncTheme)
 
-    // 2. Interception asynchrone sécurisée de setItem
     const originalSetItem = localStorage.setItem
     localStorage.setItem = function (key: string, value: string) {
       originalSetItem.apply(this, [key, value])
@@ -82,7 +82,6 @@ export default function NavbarAgence() {
     }
   }, [])
 
-  // Re-synchronisation propre lors des changements de page
   useEffect(() => {
     if (typeof window !== 'undefined') {
       const currentDark = localStorage.getItem('compta_theme_dark') === 'true'
@@ -169,12 +168,19 @@ export default function NavbarAgence() {
     router.replace('/profile-selection')
   }
 
+  // ⚖️ Logique des droits du menu :
+  // - Journal : Direction STRICTE (masqué pour l'intermédiaire)
+  // - Comptabilité : Direction OU Intermédiaire (affiché avec canViewAmounts)
+  // - Configuration : Direction OU Intermédiaire
+  const canAccessCompta = isDirection || isIntermediaire || canViewAmounts
+
   const menuItems = [
     { name: 'Dashboard', href: '/agence/dashboard', icon: LayoutDashboard },
     { name: 'Vendre', href: '/agence/nouvelle-operation', icon: PlusCircle },
     ...(isDirection ? [{ name: 'Journal', href: '/agence/journal', icon: ClipboardList }] : []),
-    ...(isDirection ? [{ name: 'Comptabilité', href: '/agence/compta', icon: PieChart }] : []),
-    { name: 'Contact', href: '/agence/contact', icon: Contact }, 
+    ...(canAccessCompta ? [{ name: 'Comptabilité', href: '/agence/compta', icon: PieChart }] : []),
+    { name: 'Contact', href: '/agence/contact', icon: Contact },
+    ...(isDirection ? [{ name: 'Configuration', href: '/agence/configuration', icon: Settings }] : []),
     { name: 'Quitter', href: '/', icon: SquareArrowRight },
   ]
 
@@ -199,7 +205,7 @@ export default function NavbarAgence() {
       `}</style>
 
       {/* --- 💻 DESKTOP SIDEBAR --- */}
-      <nav className={`hidden md:flex flex-col justify-between w-64 fixed top-0 bottom-0 left-0 z-50 p-6 print:hidden overflow-visible transition-colors duration-150 ${
+      <nav className={`hidden md:flex flex-col justify-between w-64 fixed top-0 bottom-0 left-0 z-50 p-6 print:hidden overflow-y-auto transition-colors duration-150 ${
         isDark 
           ? 'bg-gradient-to-b from-[#1C1C1E] via-[#161618] to-[#0E0E10] border-r border-[#2C2C2E]' 
           : 'bg-gradient-to-b from-emerald-600 via-emerald-500 to-emerald-100'
@@ -320,7 +326,7 @@ export default function NavbarAgence() {
         </div>
 
         {/* Section Bas : Profil & Déconnexion */}
-        <div className="pt-4 border-t border-white/20 space-y-2">
+        <div className="pt-4 border-t border-white/20 space-y-2 mt-4">
           <button
             onClick={handleLock}
             className={`w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-2xl border text-sm font-black transition-all cursor-pointer ${
