@@ -32,21 +32,22 @@ export default function TopBarContainer() {
   useEffect(() => {
     if (typeof window === 'undefined') return
 
+    // 0. Neutralisation absolue du mode sombre système sur la WebView / document
+    document.documentElement.style.colorScheme = 'light'
+    document.body.style.colorScheme = 'light'
+
     // A. TEINTE DU DOCUMENT (PWA iOS Safari & Android Chrome)
-    // Permet à l'encoche et au rebond de scroll d'adopter la vraie couleur de la page
     document.documentElement.style.backgroundColor = topBarBg
     document.body.style.backgroundColor = topBarBg
 
-    // B. BALISES META WEB & PWA
-    const metaTheme = document.querySelector('meta[name="theme-color"]')
-    if (metaTheme) {
-      metaTheme.setAttribute('content', topBarBg)
-    } else {
-      const newMeta = document.createElement('meta')
-      newMeta.name = 'theme-color'
-      newMeta.content = topBarBg
-      document.head.appendChild(newMeta)
-    }
+    // B. BALISES META WEB & PWA (Suppression des déclinaisons media dark)
+    const existingThemedMetas = document.querySelectorAll('meta[name="theme-color"]')
+    existingThemedMetas.forEach((meta) => meta.remove())
+
+    const newMeta = document.createElement('meta')
+    newMeta.name = 'theme-color'
+    newMeta.content = topBarBg
+    document.head.appendChild(newMeta)
 
     let appleMeta = document.querySelector('meta[name="apple-mobile-web-app-status-bar-style"]')
     if (!appleMeta) {
@@ -54,7 +55,6 @@ export default function TopBarContainer() {
       appleMeta.setAttribute('name', 'apple-mobile-web-app-status-bar-style')
       document.head.appendChild(appleMeta)
     }
-    // "black-translucent" quand fond coloré/sombre, "default" quand fond blanc
     appleMeta.setAttribute('content', isDarkBg ? 'black-translucent' : 'default')
 
     // C. CONTRÔLE CAPACITOR NATIF (Android & iOS)
@@ -63,7 +63,7 @@ export default function TopBarContainer() {
         try {
           // 1. Assurer que la barre système n'écrase pas le contenu
           await StatusBar.setOverlaysWebView({ overlay: false })
-          // 2. Définir la couleur matérielle exacte
+          // 2. Définir la couleur matérielle exacte (indifférente au dark mode du téléphone)
           await StatusBar.setBackgroundColor({ color: topBarBg })
           // 3. Style des icônes :
           // Style.Dark  => Icônes blanches (pour fond #2563eb et #1e293b)
@@ -80,6 +80,5 @@ export default function TopBarContainer() {
     }
   }, [topBarBg, isDarkBg])
 
-  // Aucun élément visuel HTML : aucun décalage de layout, aucune barre blanche artificielle
   return null
 }
