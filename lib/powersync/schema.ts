@@ -63,7 +63,7 @@ export const account_profiles = new Table({
   indexes: { user: ['user_id'], type: ['profile_type'] }
 });
 
-// 4. Pèlerins
+// 4. Pèlerins (avec rattachement des chambres d'hôtel)
 export const pelerins = new Table({
   name: 'pelerins',
   columns: [
@@ -89,6 +89,8 @@ export const pelerins = new Table({
     column.text('hotel_mecque'),
     column.text('hotel_medine'),
     column.integer('hotel_statut'),
+    column.text('chambre_mecque_id'), // 👈 ID de la chambre à La Mecque
+    column.text('chambre_medine_id'), // 👈 ID de la chambre à Médine
     column.text('groupe_encadrement'),
     column.text('date_depart'),
     column.text('date_retour'),
@@ -105,7 +107,9 @@ export const pelerins = new Table({
   indexes: {
     agence: ['agence_id'],
     session: ['hajj_session_id'],
-    passeport: ['num_passeport']
+    passeport: ['num_passeport'],
+    chambre_mecque: ['chambre_mecque_id'],
+    chambre_medine: ['chambre_medine_id']
   }
 });
 
@@ -316,7 +320,41 @@ export const vols = new Table({
   ]
 });
 
-// 15. Types de documents
+// 15. Hôtels (Mecque & Médine)
+export const hotels = new Table({
+  name: 'hotels',
+  columns: [
+    column.text('agence_id'),
+    column.text('nom'),
+    column.text('ville'), // 'Mecque' ou 'Médine'
+    column.text('adresse'),
+    column.text('created_at')
+  ],
+  indexes: {
+    agence: ['agence_id'],
+    ville: ['ville']
+  }
+});
+
+// 16. Chambres d'hôtel
+export const chambres = new Table({
+  name: 'chambres',
+  columns: [
+    column.text('hotel_id'),
+    column.text('agence_id'),
+    column.text('numero_chambre'),
+    column.text('etage'),
+    column.integer('capacite'),
+    column.text('genre_chambre'), // 'Hommes', 'Femmes', 'Mixte'
+    column.text('created_at')
+  ],
+  indexes: {
+    hotel: ['hotel_id'],
+    agence: ['agence_id']
+  }
+});
+
+// 17. Types de documents
 export const types_documents = new Table({
   name: 'types_documents',
   columns: [
@@ -326,7 +364,7 @@ export const types_documents = new Table({
   ]
 });
 
-// 16. Fichiers documents agence
+// 18. Fichiers documents agence
 export const documents_agence_files = new Table({
   name: 'documents_agence_files',
   columns: [
@@ -338,7 +376,7 @@ export const documents_agence_files = new Table({
   ]
 });
 
-// 17. Documents internes agence
+// 19. Documents internes agence
 export const documents_internes_agence = new Table({
   name: 'documents_internes_agence',
   columns: [
@@ -350,7 +388,7 @@ export const documents_internes_agence = new Table({
   ]
 });
 
-// 18. Log postulations gouvernementales
+// 20. Log postulations gouvernementales
 export const gouv_postulations_log = new Table({
   name: 'gouv_postulations_log',
   columns: [
@@ -375,6 +413,8 @@ export const AppSchema = new Schema({
   hajj_sessions,
   hajj_campaign_config,
   vols,
+  hotels,
+  chambres,
   types_documents,
   documents_agence_files,
   documents_internes_agence,

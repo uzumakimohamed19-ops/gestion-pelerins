@@ -21,7 +21,8 @@ import {
   MoreHorizontal,
   Plus,
   Globe,
-  LockKeyhole
+  LockKeyhole,
+  BedDouble
 } from 'lucide-react'
 import { useWorkProfile } from '@/lib/ProfileContext'
 import { useQuery } from '@powersync/react'
@@ -162,14 +163,13 @@ export default function Navbar() {
   }
 
   // ⚖️ Gestion des permissions Hajj :
-  // - État Général : Direction STRICTEMENT (masqué pour l'intermédiaire)
-  // - Comptabilité : Direction OU Intermédiaire (affiché avec canViewAmounts)
   const canAccessCompta = isDirection || isIntermediaire || canViewAmounts
 
   const navItems = [
     { name: 'Tableau de bord', href: '/hajj/dashboard', icon: LayoutDashboard },
     { name: 'Pèlerins', href: '/hajj/liste-pelerins', icon: Users },
     { name: 'Ajouter', href: '/hajj/ajouter-pelerin', icon: UserPlus },
+    { name: 'Hôtels & Chambres', href: '/hajj/repartition-hotels', icon: BedDouble },
     { name: 'Documents', href: '/hajj/documents', icon: FileText },
     { name: 'Plateforme MDH et nusuk', href: '/hajj/nusuk', icon: Globe }, 
     ...(isDirection ? [{ name: 'État général', href: '/hajj/etat-general', icon: BarChart3 }] : []),
@@ -210,10 +210,10 @@ export default function Navbar() {
       `}</style>
 
       {/* 💻 DESKTOP SIDEBAR */}
-      <nav className={`hidden lg:flex flex-col justify-between w-64 fixed top-0 bottom-0 left-0 z-50 p-6 print:hidden overflow-visible ${isDark ? 'bg-[#202124] border-r border-[#3c4043]' : 'bg-gradient-to-b from-[#4A7DF0] via-[#6E97F2] to-[#DCE7FC]'}`}>
+      <nav className={`hidden lg:flex flex-col justify-between w-64 fixed top-0 bottom-0 left-0 z-50 p-6 print:hidden overflow-y-auto ${isDark ? 'bg-[#202124] border-r border-[#3c4043]' : 'bg-gradient-to-b from-[#4A7DF0] via-[#6E97F2] to-[#DCE7FC]'}`}>
         
         {/* Section Haut */}
-        <div className="flex flex-col gap-8">
+        <div className="flex flex-col gap-6">
           
           {/* LOGO & NOM AGENCE */}
           <Link href="/" className="flex items-center gap-3 shrink-0">
@@ -241,10 +241,10 @@ export default function Navbar() {
           </Link>
 
           {/* LIENS DU MENU */}
-          <div className="flex flex-col gap-2">
+          <div className="flex flex-col gap-1.5">
             {role === 'admin' && (
               <Link 
-                href="/hajj/admin"
+                href="/hajj/admin" 
                 className="flex items-center gap-3 px-4 py-3 rounded-2xl text-sm font-bold bg-amber-400 text-amber-900 hover:bg-amber-300 transition-all mb-2 shadow-sm"
               >
                 <div className="w-8 h-8 rounded-xl bg-white/40 flex items-center justify-center shrink-0">
@@ -260,7 +260,7 @@ export default function Navbar() {
                 <Link
                   key={item.name}
                   href={item.href}
-                  className={`relative flex items-center gap-3 h-12 px-3 text-sm font-semibold transition-all duration-200
+                  className={`relative flex items-center gap-3 h-11 px-3 text-sm font-semibold transition-all duration-200
                     ${isActive
                       ? 'text-blue-600 font-bold'
                       : 'rounded-2xl text-white/90 hover:bg-white/15'
@@ -320,10 +320,10 @@ export default function Navbar() {
         </div>
 
         {/* Section Bas : Profil & Déconnexion */}
-        <div className="pt-4 border-t border-white/25 space-y-2">
+        <div className="pt-4 border-t border-white/25 space-y-2 shrink-0">
           <button
             onClick={handleLock}
-            className="w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-2xl bg-white/15 border border-white/25 text-sm font-black text-white hover:bg-white/25 transition-all"
+            className="w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-2xl bg-white/15 border border-white/25 text-sm font-black text-white hover:bg-white/25 transition-all cursor-pointer"
             title="Verrouiller"
           >
             <LockKeyhole size={18} />
@@ -347,7 +347,7 @@ export default function Navbar() {
             </div>
             <button
               onClick={handleLogout}
-              className="p-2 text-white/80 hover:text-white hover:bg-white/15 rounded-xl transition-all shrink-0"
+              className="p-2 text-white/80 hover:text-white hover:bg-white/15 rounded-xl transition-all shrink-0 cursor-pointer"
               title="Déconnexion"
             >
               <LogOut size={18} />
@@ -384,7 +384,7 @@ export default function Navbar() {
           <div className="relative w-16 h-16 flex items-center justify-center shrink-0 -translate-y-4">
             <button
               onClick={() => setIsMenuOpen(!isMenuOpen)}
-              className={`w-16 h-16 rounded-full flex items-center justify-center text-white shadow-lg transition-all duration-300 active:scale-95 border-4 border-white
+              className={`w-16 h-16 rounded-full flex items-center justify-center text-white shadow-lg transition-all duration-300 active:scale-95 border-4 border-white cursor-pointer
                 ${isMenuOpen 
                   ? 'bg-rose-500 rotate-45 shadow-rose-300' 
                   : 'bg-[#2B3A67] shadow-slate-400'}`}
@@ -468,7 +468,7 @@ export default function Navbar() {
             {/* Bouton de verrouillage */}
             <button
               onClick={handleLock}
-              className="flex flex-col items-center justify-center gap-2 p-3.5 rounded-2xl bg-blue-50 text-blue-700 border border-blue-100 col-span-2 active:scale-[0.98] transition-transform"
+              className="flex flex-col items-center justify-center gap-2 p-3.5 rounded-2xl bg-blue-50 text-blue-700 border border-blue-100 col-span-2 active:scale-[0.98] transition-transform cursor-pointer"
             >
               <LockKeyhole size={19} />
               <span className="text-[11px] font-black uppercase tracking-wider">Verrouiller</span>
@@ -480,7 +480,7 @@ export default function Navbar() {
                 setIsMenuOpen(false)
                 handleLogout()
               }}
-              className="flex flex-col items-center justify-center gap-2 p-3.5 rounded-2xl bg-rose-50 text-rose-600 border border-rose-100 col-span-2 mt-2 active:scale-[0.98] transition-transform"
+              className="flex flex-col items-center justify-center gap-2 p-3.5 rounded-2xl bg-rose-50 text-rose-600 border border-rose-100 col-span-2 mt-2 active:scale-[0.98] transition-transform cursor-pointer"
             >
               <LogOut size={19} />
               <span className="text-[11px] font-black uppercase tracking-wider">Déconnexion</span>
