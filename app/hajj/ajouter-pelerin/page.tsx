@@ -104,7 +104,6 @@ function base64ToFile(dataurl: string, filename: string): File {
   return new File([u8arr], filename, { type: mime })
 }
 
-// Compression & normalisation passeport Nusuk (< 400 Ko)
 function compressAndFormatPassportNusuk(
   imageSrc: string, 
   cropRegion?: { x: number; y: number; width: number; height: number }
@@ -143,7 +142,6 @@ function compressAndFormatPassportNusuk(
   })
 }
 
-// Formatage direct 200x200 Nusuk
 async function formatNusukSquare(imageSrc: string): Promise<{ file: File; dataUrl: string }> {
   return new Promise((resolve, reject) => {
     const img = new Image()
@@ -173,7 +171,6 @@ async function formatNusukSquare(imageSrc: string): Promise<{ file: File; dataUr
   })
 }
 
-// Détection et crop automatique visage Nusuk 200x200
 async function autoDetectAndCropNusuk(imageSrc: string): Promise<{ 
   file: File; 
   dataUrl: string; 
@@ -251,11 +248,12 @@ async function autoDetectAndCropNusuk(imageSrc: string): Promise<{
   })
 }
 
-// 🎯 NOUVEAU PARSEUR MRZ HYBRIDE ET ULTRA-ROBUSTE
+// 🎯 PARSEUR ULTRA-TOLÉRANT POUR DOUCHETTE ET OUTPUTWEDGE THALES
 function parseMrzRawLines(rawInput: string | string[]) {
   const fullText = Array.isArray(rawInput) ? rawInput.join('\n') : String(rawInput || '')
+  if (!fullText || fullText.trim().length < 8) return null
 
-  // 1. Détection du format étiqueté Thales (ex: LNM, FNM, PNM, DOB, SEX, EDT)
+  // 1. Détection du format balisé Thales OutputWedge (ex: LNMFOFANA,FNMKADIATOU,SEXFemale,DOB20-05-85,EDT21-07-31,PNMPP0143807...)
   if (fullText.includes('LNM') || fullText.includes('PNM') || fullText.includes('FNM')) {
     const getTag = (tag: string) => {
       const match = fullText.match(new RegExp(`(?:^|,)${tag}([^,\r\n]+)`, 'i'))
@@ -265,10 +263,27 @@ function parseMrzRawLines(rawInput: string | string[]) {
     const nom = getTag('LNM').replace(/</g, ' ').trim()
     const prenom = getTag('FNM').replace(/</g, ' ').trim()
     const numPasseport = getTag('PNM').replace(/</g, '').trim()
-    const rawSex = getTag('SEX').toUpperCase()
-    const sexe = rawSex.startsWith('F') ? 'FEMME' : rawSex.startsWith('M') ? 'HOMME' : ''
 
+    const rawSex = getTag('SEX').toUpperCase()
+    let sexe = ''
+    if (rawSex.startsWith('F')) sexe = 'FEMME'
+    else if (rawSex.startsWith('M')) sexe = 'HOMME'
+
+    // Nettoyeur et formateur de dates tolérant (ex: 20-05-85 ou 1985-05-20)
     const cleanDate = (dStr: string) => {
+      if (!dStr) return ''
+      const dmyMatch = dStr.match(/^(\d{1,2})-(\d{1,2})-(\d{2,4})$/)
+      if (dmyMatch) {
+        const dd = dmyMatch[1].padStart(2, '0')
+        const mm = dmyMatch[2].padStart(2, '0')
+        let yy = parseInt(dmyMatch[3], 10)
+        if (yy < 100) {
+          const currentYearShort = new Date().getFullYear() % 100
+          yy = yy > currentYearShort ? 1900 + yy : 2000 + yy
+        }
+        return `${yy}-${mm}-${dd}`
+      }
+      if (/^\d{4}-\d{2}-\d{2}$/.test(dStr)) return dStr
       const digits = dStr.replace(/\D/g, '')
       if (digits.length === 8) return `${digits.slice(0, 4)}-${digits.slice(4, 6)}-${digits.slice(6, 8)}`
       if (digits.length === 6) {
@@ -276,22 +291,22 @@ function parseMrzRawLines(rawInput: string | string[]) {
         const fullY = yy > (new Date().getFullYear() % 100) ? 1900 + yy : 2000 + yy
         return `${fullY}-${digits.slice(2, 4)}-${digits.slice(4, 6)}`
       }
-      return dStr.includes('-') ? dStr : ''
+      return ''
     }
 
     const dateNaissance = cleanDate(getTag('DOB'))
     const dateExpiration = cleanDate(getTag('EDT'))
 
-    if (nom || numPasseport) {
+    if (nom || numPasseport || prenom) {
       return { nom, prenom, numPasseport, sexe, dateNaissance, dateExpiration }
     }
   }
 
-  // 2. Détection standard MRZ TD3 (Passeports 2 lignes de 44 caractères)
+  // 2. Détection par lignes ou bloc continu MRZ classique (PPMLI... ou P<MLI...)
   const lines = fullText
     .split(/\r?\n/)
     .map(l => l.trim().toUpperCase().replace(/[^A-Z0-9<]/g, ''))
-    .filter(l => l.length >= 30)
+    .filter(l => l.length >= 25)
 
   let l1 = ''
   let l2 = ''
@@ -300,51 +315,92 @@ function parseMrzRawLines(rawInput: string | string[]) {
     l1 = lines[lines.length - 2]
     l2 = lines[lines.length - 1]
   } else {
-    // Si la douchette envoie les 88 caractères en un seul bloc sans retour chariot
-    const rawContinuous = fullText.toUpperCase().replace(/[^A-Z0-9<]/g, '')
-    const pIdx = rawContinuous.indexOf('P<')
-    if (pIdx !== -1 && rawContinuous.length >= pIdx + 88) {
-      l1 = rawContinuous.slice(pIdx, pIdx + 44)
-      l2 = rawContinuous.slice(pIdx + 44, pIdx + 88)
+    const cleanContinuous = fullText.toUpperCase().replace(/[^A-Z0-9<]/g, '')
+    const pIdx = cleanContinuous.search(/P[A-Z0-9<]/)
+    if (pIdx !== -1) {
+      const mrzPart = cleanContinuous.slice(pIdx)
+      if (mrzPart.length >= 70) {
+        l1 = mrzPart.slice(0, 44)
+        l2 = mrzPart.slice(44)
+      }
     }
   }
 
-  if (!l1 || !l2 || l1.length < 42 || l2.length < 42) return null
+  if (!l1 && fullText.includes('<<')) {
+    const rawClean = fullText.replace(/[^A-Z0-9<]/gi, '')
+    l1 = rawClean.slice(0, 44)
+    l2 = rawClean.slice(44)
+  }
 
-  // Ligne 1 : Nom et Prénoms
-  const nameSection = l1.slice(5)
-  const parts = nameSection.split('<<').filter(Boolean)
-  const nom = (parts[0] || '').replace(/</g, ' ').trim()
-  const prenom = (parts[1] || '').replace(/</g, ' ').trim()
+  if (!l1 && !l2) return null
 
-  // Ligne 2 : Numéro, Date Naissance, Sexe, Date Expiration
-  const numPasseport = l2.slice(0, 9).replace(/</g, '').trim()
+  let nom = ''
+  let prenom = ''
+  if (l1) {
+    const nameSection = l1.length >= 5 ? l1.slice(5) : l1
+    const parts = nameSection.split('<<').filter(Boolean)
+    nom = (parts[0] || '').replace(/</g, ' ').trim()
+    prenom = (parts[1] || '').replace(/</g, ' ').trim()
+  }
 
-  const rawDob = l2.slice(13, 19)
+  let numPasseport = ''
   let dateNaissance = ''
-  if (/^\d{6}$/.test(rawDob)) {
-    const yy = parseInt(rawDob.slice(0, 2), 10)
-    const mm = rawDob.slice(2, 4)
-    const dd = rawDob.slice(4, 6)
-    const currentYearShort = new Date().getFullYear() % 100
-    const fullYear = yy > currentYearShort ? 1900 + yy : 2000 + yy
-    dateNaissance = `${fullYear}-${mm}-${dd}`
-  }
-
-  const rawSexe = l2.charAt(20)
-  const sexe = rawSexe === 'F' ? 'FEMME' : rawSexe === 'M' ? 'HOMME' : ''
-
-  const rawExp = l2.slice(21, 27)
+  let sexe = ''
   let dateExpiration = ''
-  if (/^\d{6}$/.test(rawExp)) {
-    const yy = parseInt(rawExp.slice(0, 2), 10)
-    const mm = rawExp.slice(2, 4)
-    const dd = rawExp.slice(4, 6)
-    const fullYear = 2000 + yy
-    dateExpiration = `${fullYear}-${mm}-${dd}`
+
+  if (l2 && l2.length >= 9) {
+    numPasseport = l2.slice(0, 9).replace(/</g, '').trim()
+    const afterNum = l2.slice(9)
+    const dobMatch = afterNum.match(/([0-9]{6})([0-9<])([MF<])([0-9]{6})/i)
+
+    if (dobMatch) {
+      const rawDob = dobMatch[1]
+      const rawSexChar = dobMatch[3].toUpperCase()
+      const rawExp = dobMatch[4]
+
+      const yy = parseInt(rawDob.slice(0, 2), 10)
+      const mm = rawDob.slice(2, 4)
+      const dd = rawDob.slice(4, 6)
+      const currentYearShort = new Date().getFullYear() % 100
+      const fullYear = yy > currentYearShort ? 1900 + yy : 2000 + yy
+      dateNaissance = `${fullYear}-${mm}-${dd}`
+
+      sexe = rawSexChar === 'F' ? 'FEMME' : rawSexChar === 'M' ? 'HOMME' : ''
+
+      const expYy = parseInt(rawExp.slice(0, 2), 10)
+      const expMm = rawExp.slice(2, 4)
+      const expDd = rawExp.slice(4, 6)
+      dateExpiration = `${2000 + expYy}-${expMm}-${expDd}`
+    } else {
+      if (l2.length >= 19) {
+        const rawDob = l2.slice(13, 19)
+        if (/^\d{6}$/.test(rawDob)) {
+          const yy = parseInt(rawDob.slice(0, 2), 10)
+          const mm = rawDob.slice(2, 4)
+          const dd = rawDob.slice(4, 6)
+          const fullYear = yy > (new Date().getFullYear() % 100) ? 1900 + yy : 2000 + yy
+          dateNaissance = `${fullYear}-${mm}-${dd}`
+        }
+      }
+      if (l2.length >= 21) {
+        const charSex = l2.charAt(20).toUpperCase()
+        sexe = charSex === 'F' ? 'FEMME' : charSex === 'M' ? 'HOMME' : ''
+      }
+      if (l2.length >= 27) {
+        const rawExp = l2.slice(21, 27)
+        if (/^\d{6}$/.test(rawExp)) {
+          const yy = parseInt(rawExp.slice(0, 2), 10)
+          dateExpiration = `${2000 + yy}-${rawExp.slice(2, 4)}-${rawExp.slice(4, 6)}`
+        }
+      }
+    }
   }
 
-  return { nom, prenom, numPasseport, sexe, dateNaissance, dateExpiration }
+  if (nom || numPasseport || prenom) {
+    return { nom, prenom, numPasseport, sexe, dateNaissance, dateExpiration }
+  }
+
+  return null
 }
 
 export default function AjouterPelerin() {
@@ -503,7 +559,7 @@ export default function AjouterPelerin() {
           }
         }
       } catch (tauriErr) {
-        console.warn("Échec invoke Tauri, bascule sur la passerelle locale :", tauriErr)
+        console.warn("Bascule vers la passerelle locale :", tauriErr)
       }
     }
 
@@ -517,7 +573,7 @@ export default function AjouterPelerin() {
       })
 
       if (!res || !res.ok) {
-        throw new Error("Impossible de communiquer avec le service de numérisation local (Port 18622/9090).")
+        throw new Error("Impossible de communiquer avec le service de numérisation local.")
       }
 
       const data = await res.json()
@@ -536,7 +592,7 @@ export default function AjouterPelerin() {
     } catch (err: unknown) {
       console.error(err)
       const errMsg = err instanceof Error ? err.message : String(err)
-      setMessage({ text: `⚠️ ${errMsg} Vérifiez que le scanner ou l'utilitaire est actif.`, type: 'error' })
+      setMessage({ text: `⚠️ ${errMsg}`, type: 'error' })
     } finally {
       setIsTwainScanning(false)
     }
@@ -673,10 +729,10 @@ export default function AjouterPelerin() {
     return digits === '' ? '' : Number(digits).toLocaleString('fr-FR')
   }
 
-  // 🎯 FONCTION DE TRAITEMENT AVEC TEMPORISATION ANTI-COUPURE DOUCHETTE
+  // 🎯 ÉVALUATION PERMISSIVE DE LA DOUCHETTE : REMPLIT TOUT CE QUI EST LISIBLE
   const evaluateMrzBuffer = (buffer: string) => {
     const parsed = parseMrzRawLines(buffer)
-    if (parsed) {
+    if (parsed && (parsed.nom || parsed.numPasseport || parsed.prenom)) {
       if (parsed.nom) setNom(parsed.nom)
       if (parsed.prenom) setPrenom(parsed.prenom)
       if (parsed.numPasseport) setPasseport(parsed.numPasseport)
@@ -684,11 +740,19 @@ export default function AjouterPelerin() {
       if (parsed.dateNaissance) setDateNaissance(parsed.dateNaissance)
       if (parsed.dateExpiration) setDateExpiration(parsed.dateExpiration)
 
-      setMessage({ text: "✅ PASSEPORT LU PAR LE SCANNER PHYSIQUE !", type: 'success' })
+      // Avertit gentiment pour permettre une correction manuelle si une valeur est incomplète
+      const isIncomplete = !parsed.nom || !parsed.numPasseport || !parsed.dateNaissance
+      if (isIncomplete) {
+        setMessage({ 
+          text: "⚠️ Données injectées ! Vérifiez et corrigez les éventuels champs manquants si nécessaire.", 
+          type: 'info' 
+        })
+      } else {
+        setMessage({ text: "✅ Passeport lu avec succès ! Vérifiez les informations.", type: 'success' })
+      }
+
       setShowPhysicalScannerInput(false)
       setMrzBuffer('')
-    } else {
-      setMessage({ text: "⚠️ Données MRZ incomplètes. Veuillez glisser à nouveau le passeport.", type: 'error' })
     }
   }
 
@@ -696,24 +760,21 @@ export default function AjouterPelerin() {
     const newVal = e.target.value
     setMrzBuffer(newVal)
 
-    // Si la douchette tape très vite sans déclencher correctement la touche Entrée,
-    // on déclenche automatiquement le parsing 150ms après le dernier caractère reçu
     if (mrzTimeoutRef.current) clearTimeout(mrzTimeoutRef.current)
-    if (newVal.length >= 40) {
+    if (newVal.length >= 15) {
       mrzTimeoutRef.current = setTimeout(() => {
         evaluateMrzBuffer(newVal)
-      }, 150)
+      }, 100)
     }
   }
 
   const handlePhysicalScanKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter') {
       e.preventDefault()
-      // Évite l'interruption prématurée si la douchette envoie un Entrée entre la ligne 1 et 2
       if (mrzTimeoutRef.current) clearTimeout(mrzTimeoutRef.current)
       mrzTimeoutRef.current = setTimeout(() => {
         evaluateMrzBuffer(mrzBuffer)
-      }, 120)
+      }, 50)
     }
   }
 
@@ -821,7 +882,6 @@ export default function AjouterPelerin() {
     img.src = cropImageSrc
   }
 
-  // Pointer Visage
   const handlePointerDownBox = (e: React.PointerEvent) => {
     e.stopPropagation()
     isDraggingRef.current = true
@@ -854,7 +914,6 @@ export default function AjouterPelerin() {
     isResizingRef.current = false
   }
 
-  // Pointer Passeport
   const handlePassportPointerDownBox = (e: React.PointerEvent) => {
     e.stopPropagation()
     isPassportDraggingRef.current = true
@@ -890,7 +949,6 @@ export default function AjouterPelerin() {
     isPassportResizingRef.current = false
   }
 
-  // Scan OCR caméra / fichier (Non modifié)
   const handleAutoFill = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const scanFile = e.target.files?.[0]
     if (!scanFile) return
@@ -1055,7 +1113,7 @@ export default function AjouterPelerin() {
             {/* BLOC GAUCHE */}
             <div className="lg:col-span-5 space-y-5 lg:sticky lg:top-24">
               
-              {/* OPTIONS DE SCAN MULTI-MODES */}
+              {/* OPTIONS DE SCAN */}
               <div className="p-5 bg-blue-50/70 rounded-3xl border-2 border-dashed border-blue-200 shadow-inner space-y-3">
                 <div className="flex items-center justify-between">
                   <label className="text-[10px] font-black text-blue-900 uppercase italic flex items-center gap-2">
@@ -1065,7 +1123,6 @@ export default function AjouterPelerin() {
                 </div>
 
                 <div className="grid grid-cols-2 gap-2">
-                  {/* Scan Caméra / Image */}
                   <label className="flex flex-col items-center justify-center p-3 bg-white rounded-2xl border border-blue-100 cursor-pointer hover:border-blue-300 active:scale-95 transition shadow-xs text-center">
                     <ScanLine className="text-blue-600 mb-1" size={18} />
                     <span className="text-[9px] font-black text-blue-900 uppercase leading-tight">
@@ -1074,7 +1131,6 @@ export default function AjouterPelerin() {
                     <input type="file" className="hidden" accept="image/*" onChange={handleAutoFill} disabled={isScanning} />
                   </label>
 
-                  {/* Numériseur TWAIN USB Universel */}
                   <button
                     type="button"
                     onClick={triggerTwainScan}
@@ -1086,7 +1142,6 @@ export default function AjouterPelerin() {
                     <span className="text-[7.5px] opacity-80">Scanner à plat / USB</span>
                   </button>
 
-                  {/* Scanner Pleine Page (WebSocket ou Natif Tauri) */}
                   <button
                     type="button"
                     onClick={toggleFullPageScanner}
@@ -1101,7 +1156,6 @@ export default function AjouterPelerin() {
                     <span className="text-[7.5px] opacity-75">{isFullPageListening ? 'Actif' : 'Vitre USB'}</span>
                   </button>
 
-                  {/* Scanner Douchette USB */}
                   <button
                     type="button"
                     onClick={() => {
@@ -1122,7 +1176,6 @@ export default function AjouterPelerin() {
                   </button>
                 </div>
 
-                {/* Champ d'écoute douchette USB avec saisie continue tolérante */}
                 {showPhysicalScannerInput && (
                   <div className="p-3 bg-white rounded-2xl border-2 border-emerald-400 shadow-sm animate-in fade-in space-y-1.5">
                     <div className="flex items-center justify-between text-[10px] font-black text-emerald-800 uppercase">
@@ -1151,7 +1204,7 @@ export default function AjouterPelerin() {
                 )}
               </div>
 
-              {/* SECTION PHOTO D'IDENTITÉ */}
+              {/* SECTION PHOTO */}
               <div className="p-4 bg-gray-50 rounded-2xl border border-gray-100 space-y-3">
                 <div className="flex items-center justify-between">
                   <span className="text-[10px] font-black text-gray-700 uppercase flex items-center gap-1.5">
@@ -1460,7 +1513,7 @@ export default function AjouterPelerin() {
               </button>
 
               {message.text && (
-                <div className={`p-4 rounded-2xl text-center font-bold text-[10px] uppercase tracking-wider shadow-sm border ${message.type === 'success' ? 'bg-green-100 text-green-700 border-green-200' : 'bg-red-100 text-red-700 border-red-200'}`}>
+                <div className={`p-4 rounded-2xl text-center font-bold text-[10px] uppercase tracking-wider shadow-sm border ${message.type === 'success' ? 'bg-green-100 text-green-700 border-green-200' : message.type === 'info' ? 'bg-blue-100 text-blue-700 border-blue-200' : 'bg-red-100 text-red-700 border-red-200'}`}>
                   {message.text}
                 </div>
               )}
