@@ -63,7 +63,7 @@ export const account_profiles = new Table({
   indexes: { user: ['user_id'], type: ['profile_type'] }
 });
 
-// 4. Pèlerins (avec rattachement des chambres d'hôtel)
+// 4. Pèlerins (avec notes et photo d'identité optionnelle)
 export const pelerins = new Table({
   name: 'pelerins',
   columns: [
@@ -75,9 +75,11 @@ export const pelerins = new Table({
     column.text('date_expiration'),
     column.text('sexe'),
     column.text('telephone_pelerin'),
-    column.integer('sur_plateforme_gouv'), // boolean SQLite -> integer (0 ou 1)
+    column.integer('sur_plateforme_gouv'),
     column.integer('sur_plateforme_nusuk'),
     column.text('document_url'),
+    column.text('photo_url'),
+    column.text('notes'),
     column.text('nom_package'),
     column.real('prix_package'),
     column.real('total_paye'),
@@ -89,8 +91,8 @@ export const pelerins = new Table({
     column.text('hotel_mecque'),
     column.text('hotel_medine'),
     column.integer('hotel_statut'),
-    column.text('chambre_mecque_id'), // 👈 ID de la chambre à La Mecque
-    column.text('chambre_medine_id'), // 👈 ID de la chambre à Médine
+    column.text('chambre_mecque_id'),
+    column.text('chambre_medine_id'),
     column.text('groupe_encadrement'),
     column.text('date_depart'),
     column.text('date_retour'),
@@ -326,13 +328,15 @@ export const hotels = new Table({
   columns: [
     column.text('agence_id'),
     column.text('nom'),
-    column.text('ville'), // 'Mecque' ou 'Médine'
+    column.text('ville'),
     column.text('adresse'),
+    column.integer('campagne'),
     column.text('created_at')
   ],
   indexes: {
     agence: ['agence_id'],
-    ville: ['ville']
+    ville: ['ville'],
+    campagne: ['campagne']
   }
 });
 
@@ -345,7 +349,7 @@ export const chambres = new Table({
     column.text('numero_chambre'),
     column.text('etage'),
     column.integer('capacite'),
-    column.text('genre_chambre'), // 'Hommes', 'Femmes', 'Mixte'
+    column.text('genre_chambre'),
     column.text('created_at')
   ],
   indexes: {

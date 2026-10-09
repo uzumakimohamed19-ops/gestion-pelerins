@@ -2,15 +2,30 @@
 import { useEffect, useState } from 'react'
 import { useSearchParams, useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
-import { Save, ArrowLeft, Loader2, Upload, FileCheck, AlertCircle, User, CreditCard, Syringe, Hotel, Calendar } from 'lucide-react'
-import { uploadPassportFile } from '@/lib/hajjPassport'
+import { 
+  Save, ArrowLeft, Loader2, Upload, FileCheck, AlertCircle, 
+  User, CreditCard, Syringe, Hotel, Calendar, FileText, Camera, Image as ImageIcon 
+} from 'lucide-react'
+import { uploadPassportFile, getPassportPublicUrl } from '@/lib/hajjPassport'
 import Link from 'next/link'
 
 // Petit composant Switch réutilisable pour les champs booléens
-const FormToggle = ({ label, checked, onChange, disabled = false }: { label: string, checked: boolean, onChange: (val: boolean) => void, disabled?: boolean }) => (
+const FormToggle = ({ 
+  label, 
+  checked, 
+  onChange, 
+  disabled = false 
+}: { 
+  label: string, 
+  checked: boolean, 
+  onChange: (val: boolean) => void, 
+  disabled?: boolean 
+}) => (
   <div 
     onClick={() => !disabled && onChange(!checked)}
-    className={`flex items-center justify-between p-4 border rounded-2xl transition-all select-none ${disabled ? 'bg-amber-50 border-amber-200 cursor-not-allowed' : 'bg-gray-50 border-gray-100 cursor-pointer hover:bg-gray-100'}`}
+    className={`flex items-center justify-between p-4 border rounded-2xl transition-all select-none ${
+      disabled ? 'bg-amber-50 border-amber-200 cursor-not-allowed' : 'bg-gray-50 border-gray-100 cursor-pointer hover:bg-gray-100'
+    }`}
   >
     <span className={`text-xs font-black uppercase tracking-wider ${disabled ? 'text-amber-700' : 'text-gray-600'}`}>{label}</span>
     <div className={`w-12 h-6 flex items-center rounded-full p-1 transition-all duration-300 ${checked ? 'bg-blue-600' : 'bg-gray-300'}`}>
@@ -37,12 +52,17 @@ export default function ModifierPelerin() {
   const [loading, setLoading] = useState(true)
   const [updating, setUpdating] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  
+  // Fichiers
   const [file, setFile] = useState<File | null>(null)
+  const [photoFile, setPhotoFile] = useState<File | null>(null)
+  const [photoPreview, setPhotoPreview] = useState<string | null>(null)
+
   const [prixPackageInput, setPrixPackageInput] = useState('')
   const [totalPayeInput, setTotalPayeInput] = useState('')
   const [sessionLocked, setSessionLocked] = useState(false)
 
-  // TOUS LES CHAMPS DE LA BASE DE DONNÉES EXACTEMENT ALIGNÉS
+  // TOUS LES CHAMPS DE LA BASE DE DONNÉES ALIGNÉS (AVEC PHOTO ET NOTES)
   const [formData, setFormData] = useState({
     prenom: '',
     nom_complet: '',
@@ -73,15 +93,28 @@ export default function ModifierPelerin() {
     sur_plateforme_nusuk: false,
     date_inscription: '',
     campagne: new Date().getFullYear(),
-    document_url: ''
+    document_url: '',
+    photo_url: '',
+    notes: ''
   })
 
   const isGouvLocked = Boolean(formData.sur_plateforme_gouv)
-  const isFieldLockedForGouv = (field: string) => isGouvLocked && !['nom_package', 'prix_package', 'total_paye'].includes(field)
+  const isFieldLockedForGouv = (field: string) => isGouvLocked && !['nom_package', 'prix_package', 'total_paye', 'notes'].includes(field)
 
-  // Gestionnaire dynamique des inputs de type texte, date, nombre
   const handleInputChange = (field: string, value: string | number | boolean) => {
     setFormData(prev => ({ ...prev, [field]: value }))
+  }
+
+  // Sélection de la nouvelle photo d'identité
+  const handlePhotoSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const f = e.target.files?.[0]
+    if (!f) return
+    setPhotoFile(f)
+    const reader = new FileReader()
+    reader.onload = () => {
+      setPhotoPreview(reader.result as string)
+    }
+    reader.readAsDataURL(f)
   }
 
   useEffect(() => {
@@ -184,10 +217,17 @@ export default function ModifierPelerin() {
             sur_plateforme_nusuk: !!data.sur_plateforme_nusuk,
             date_inscription: data.date_inscription || '',
             campagne: data.campagne || new Date().getFullYear(),
-            document_url: data.document_url || ''
+            document_url: data.document_url || '',
+            photo_url: data.photo_url || '',
+            notes: data.notes || ''
           })
+
           setPrixPackageInput(formatAmount(prixPackage))
           setTotalPayeInput(formatAmount(totalPaye))
+
+          if (data.photo_url) {
+            setPhotoPreview(getPassportPublicUrl(data.photo_url))
+          }
         }
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Erreur inconnue'
@@ -210,14 +250,20 @@ export default function ModifierPelerin() {
     
     try {
       let finalDocUrl = formData.document_url
+      let finalPhotoUrl = formData.photo_url
 
-      // 1. Upload du scan du passeport
+      // 1. Upload scan passeport si nouveau fichier
       if (file) {
         const uploaded = await uploadPassportFile(file)
         finalDocUrl = uploaded.path
       }
 
-      // Utilitaire pour transformer les chaînes vides en NULL pour PostgreSQL
+      // 2. Upload photo d'identité si nouveau fichier
+      if (photoFile) {
+        const uploadedPhoto = await uploadPassportFile(photoFile)
+        finalPhotoUrl = uploadedPhoto.path
+      }
+
       const cleanValue = <T,>(val: T) => (val === '' ? null : val)
 
       let activeSessionId: string | null = null
@@ -231,20 +277,21 @@ export default function ModifierPelerin() {
         activeSessionId = sessionData?.id ?? null
       }
 
-      // Payload adapté à la structure de la table pelerins
       const updatePayload = isGouvLocked
         ? {
             nom_package: cleanValue(formData.nom_package),
             prix_package: formData.prix_package,
             total_paye: formData.total_paye,
             document_url: finalDocUrl,
+            photo_url: finalPhotoUrl || null,
+            notes: cleanValue(formData.notes),
             hajj_session_id: formData.sur_plateforme_gouv ? activeSessionId : null
           }
         : {
-            agence_id: formData.agence_id, // Nécessaire si vérifié par RLS
+            agence_id: formData.agence_id,
             prenom: cleanValue(formData.prenom),
             nom_complet: formData.nom_complet,
-            sexe: cleanValue(formData.sexe), // Envoie 'HOMME', 'FEMME' ou null
+            sexe: cleanValue(formData.sexe),
             telephone_pelerin: cleanValue(formData.telephone_pelerin),
             date_naissance: cleanValue(formData.date_naissance),
             num_passeport: formData.num_passeport,
@@ -271,10 +318,11 @@ export default function ModifierPelerin() {
             date_inscription: cleanValue(formData.date_inscription),
             campagne: formData.campagne || null,
             document_url: finalDocUrl,
+            photo_url: finalPhotoUrl || null,
+            notes: cleanValue(formData.notes),
             hajj_session_id: formData.sur_plateforme_gouv ? activeSessionId : null
           }
 
-      // 2. Mise à jour de Supabase
       const { error: updateError } = await supabase
         .from('pelerins')
         .update(updatePayload)
@@ -282,7 +330,6 @@ export default function ModifierPelerin() {
 
       if (updateError) throw updateError
 
-      // 3. Navigation
       router.push(`/hajj/pelerin?id=${id}`)
       router.refresh()
 
@@ -324,7 +371,7 @@ export default function ModifierPelerin() {
 
         {isGouvLocked && (
           <div className="mb-6 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-bold text-emerald-700">
-            Ce pèlerin est déjà enregistré sur GOUV. Les informations personnelles et opérationnelles sont verrouillées. Seuls les montants financiers et le scan du passeport peuvent être mis à jour.
+            Ce pèlerin est déjà enregistré sur GOUV. Les informations personnelles et opérationnelles sont verrouillées. Seuls les montants financiers, les notes et les documents peuvent être mis à jour.
           </div>
         )}
 
@@ -415,11 +462,12 @@ export default function ModifierPelerin() {
             </div>
           </div>
 
-          {/* SECTION 2: PIÈCES D'IDENTITÉ & DOCUMENTS */}
+          {/* SECTION 2: PIÈCES D'IDENTITÉ, SCAN & PHOTO */}
           <div className="space-y-4 pt-4 border-t border-gray-50">
             <h3 className="text-xs font-black text-indigo-600 uppercase tracking-widest flex items-center gap-2">
-              <CreditCard size={16} /> 2. Documents & Références
+              <CreditCard size={16} /> 2. Documents & Photo d'identité
             </h3>
+            
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               <div>
                 <label className="block text-[10px] font-black text-gray-400 mb-1.5 uppercase tracking-wider">N° Passeport *</label>
@@ -448,8 +496,12 @@ export default function ModifierPelerin() {
                   className={`w-full px-4 py-3.5 rounded-xl border-2 border-gray-100 bg-gray-50 text-gray-900 font-bold outline-none transition-all text-sm ${isFieldLockedForGouv('reference') ? 'opacity-60 cursor-not-allowed bg-slate-100' : 'focus:border-blue-600 focus:bg-white'}`}
                 />
               </div>
+            </div>
 
-              <div className="md:col-span-2 lg:col-span-3">
+            {/* UPLOAD SCAN PASSEPORT & PHOTO D'IDENTITÉ CÔTE À CÔTE */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2">
+              {/* Scan Passeport */}
+              <div>
                 <label className="block text-[10px] font-black text-gray-400 mb-1.5 uppercase tracking-wider">Scan du Passeport (Image ou PDF)</label>
                 <label className="flex items-center justify-center gap-3 w-full px-5 py-5 rounded-xl border-2 border-dashed border-gray-200 bg-gray-50 hover:bg-blue-50 hover:border-blue-400 cursor-pointer transition-all">
                   {file ? (
@@ -458,7 +510,7 @@ export default function ModifierPelerin() {
                     </div>
                   ) : (
                     <div className="flex items-center gap-2 text-gray-400 font-bold italic text-sm">
-                      <Upload size={20} /> {formData.document_url ? "Remplacer le document existant" : "Sélectionner un fichier"}
+                      <Upload size={20} /> {formData.document_url ? "Remplacer le scan existant" : "Sélectionner un fichier"}
                     </div>
                   )}
                   <input 
@@ -466,6 +518,40 @@ export default function ModifierPelerin() {
                     onChange={(e) => setFile(e.target.files?.[0] || null)}
                   />
                 </label>
+              </div>
+
+              {/* Photo d'identité (Optionnelle) */}
+              <div>
+                <label className="block text-[10px] font-black text-gray-400 mb-1.5 uppercase tracking-wider flex items-center justify-between">
+                  <span>Photo d'identité (Optionnelle)</span>
+                  {photoPreview && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setPhotoFile(null)
+                        setPhotoPreview(null)
+                        handleInputChange('photo_url', '')
+                      }}
+                      className="text-red-500 hover:text-red-700 text-[10px] font-bold cursor-pointer"
+                    >
+                      Supprimer la photo
+                    </button>
+                  )}
+                </label>
+                <div className="flex items-center gap-3 p-3 bg-gray-50 border-2 border-gray-100 rounded-xl">
+                  <div className="w-12 h-14 rounded-lg bg-white border border-gray-200 flex items-center justify-center overflow-hidden shrink-0">
+                    {photoPreview ? (
+                      <img src={photoPreview} alt="Aperçu identité" className="w-full h-full object-cover" />
+                    ) : (
+                      <ImageIcon size={20} className="text-gray-300" />
+                    )}
+                  </div>
+                  <label className="flex-1 py-3 px-3 bg-white border border-gray-200 hover:border-blue-400 rounded-lg text-center text-xs font-bold text-blue-600 cursor-pointer transition">
+                    <Camera size={14} className="inline mr-1.5" />
+                    {photoPreview ? "Changer la photo" : "Ajouter une photo"}
+                    <input type="file" className="hidden" accept="image/*" onChange={handlePhotoSelect} />
+                  </label>
+                </div>
               </div>
             </div>
           </div>
@@ -525,10 +611,26 @@ export default function ModifierPelerin() {
             </div>
           </div>
 
-          {/* SECTION 4: SUIVI OPÉRATIONNEL & VOLS */}
+          {/* SECTION 4: NOTES & REMARQUES PARTICULIÈRES */}
+          <div className="space-y-4 pt-4 border-t border-gray-50">
+            <h3 className="text-xs font-black text-slate-700 uppercase tracking-widest flex items-center gap-2">
+              <FileText size={16} className="text-blue-600" /> 4. Notes & Remarques (Optionnel)
+            </h3>
+            <div>
+              <textarea
+                rows={3}
+                value={formData.notes}
+                onChange={(e) => handleInputChange('notes', e.target.value)}
+                placeholder="Régime alimentaire, état de santé particulier, demandes spéciales..."
+                className="w-full p-4 rounded-xl border-2 border-gray-100 bg-gray-50 text-gray-900 font-semibold text-xs outline-none focus:border-blue-600 focus:bg-white transition resize-none"
+              />
+            </div>
+          </div>
+
+          {/* SECTION 5: SUIVI OPÉRATIONNEL & VOLS */}
           <div className="space-y-4 pt-4 border-t border-gray-50">
             <h3 className="text-xs font-black text-purple-600 uppercase tracking-widest flex items-center gap-2">
-              <Calendar size={16} /> 4. Logistique & Transports (Vols)
+              <Calendar size={16} /> 5. Logistique & Transports (Vols)
             </h3>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
@@ -551,10 +653,10 @@ export default function ModifierPelerin() {
             </div>
           </div>
 
-          {/* SECTION 5: HÉBERGEMENT KSA & FORMATION */}
+          {/* SECTION 6: HÉBERGEMENT KSA & FORMATION */}
           <div className="space-y-4 pt-4 border-t border-gray-50">
             <h3 className="text-xs font-black text-orange-500 uppercase tracking-widest flex items-center gap-2">
-              <Hotel size={16} /> 5. Formations & Hébergements KSA
+              <Hotel size={16} /> 6. Formations & Hébergements KSA
             </h3>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               <div>
@@ -604,10 +706,10 @@ export default function ModifierPelerin() {
             </div>
           </div>
 
-          {/* SECTION 6: ETATS ET ETAPES (BOOLEANS SWITCHES) */}
+          {/* SECTION 7: JALONS & BOOLEANS */}
           <div className="space-y-4 pt-4 border-t border-gray-50">
             <h3 className="text-xs font-black text-teal-600 uppercase tracking-widest flex items-center gap-2">
-              <Syringe size={16} /> 6. Jalons administratifs & Sanitaires
+              <Syringe size={16} /> 7. Jalons administratifs & Sanitaires
             </h3>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
               <FormToggle 
@@ -644,7 +746,7 @@ export default function ModifierPelerin() {
                 <FormToggle 
                   label={sessionLocked ? 'GOUV (verrouillé)' : 'Enregistré Gouv.ml'} 
                   checked={formData.sur_plateforme_gouv} 
-                  onChange={(val) => handleInputChange('sur_plateforme_gouv', val)}
+                  onChange={(val) => handleInputChange('sur_plateforme_gouv', val)} 
                   disabled={sessionLocked || isGouvLocked}
                 />
                 {sessionLocked && (

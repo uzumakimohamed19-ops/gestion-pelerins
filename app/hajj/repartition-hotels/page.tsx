@@ -32,15 +32,18 @@ import {
   Maximize2,
   Minimize2,
 } from 'lucide-react'
+import { getPassportPublicUrl } from '@/lib/hajjPassport'
 
 type Pelerin = {
   id: string
+  agence_id?: string
   nom_complet: string
   prenom?: string
   num_passeport: string
   sexe: string
   telephone_pelerin?: string
   document_url?: string | null
+  photo_url?: string | null
   date_naissance?: string | null
   date_inscription?: string | null
   date_depart?: string | null
@@ -58,7 +61,8 @@ type Pelerin = {
 type Chambre = {
   id: string
   hotel_id: string
-  numero_chambre: string
+  agence_id: string
+  numero_chambre?: string | null
   etage?: string | null
   capacite: number
   genre_chambre: 'Hommes' | 'Femmes' | 'Mixte'
@@ -68,9 +72,26 @@ type Chambre = {
 
 type Hotel = {
   id: string
+  agence_id: string
   nom: string
   ville: 'Mecque' | 'Médine'
   adresse?: string | null
+  campagne?: number | string | null
+}
+
+const TYPES_CHAMBRES_HAJJ = [
+  { label: 'Single (1 lit)', capacite: 1 },
+  { label: 'Double (2 lits)', capacite: 2 },
+  { label: 'Triple (3 lits)', capacite: 3 },
+  { label: 'Quadruple (4 lits)', capacite: 4 },
+  { label: 'Quintuple (5 lits)', capacite: 5 },
+  { label: 'Sextuple (6 lits)', capacite: 6 },
+  { label: 'Suite / Dortoir (8 lits)', capacite: 8 },
+]
+
+function getLabelTypeChambre(capacite: number): string {
+  const match = TYPES_CHAMBRES_HAJJ.find((t) => t.capacite === capacite)
+  return match ? match.label : `${capacite} lits`
 }
 
 function formatNomComplet(p: { prenom?: string | null; nom_complet?: string | null }): string {
@@ -117,15 +138,11 @@ async function getBase64ImageFromUrl(url: string): Promise<string | null> {
   }
 }
 
-function parseRoomNumbers(
-  input: string,
-  count: number,
-  existingCount: number
-): string[] {
+function parseRoomNumbersStrict(input: string, count: number): string[] {
   const clean = input.trim()
 
   if (!clean) {
-    return Array.from({ length: count }, (_, i) => String(existingCount + i + 1))
+    return Array.from({ length: count }, () => '')
   }
 
   const rangeMatch = clean.match(/^(\d+)\s*(?:à|a|-|\.\.)\s*(\d+)$/i)
@@ -135,7 +152,6 @@ function parseRoomNumbers(
     const total = Math.abs(end - start) + 1
     const step = start <= end ? 1 : -1
     const actualCount = Math.min(count, total)
-
     return Array.from({ length: actualCount }, (_, i) => String(start + i * step))
   }
 
@@ -150,51 +166,41 @@ function parseRoomNumbers(
 
 export default function RepartitionHotelsPage() {
   const db = usePowerSync()
-
-  // 1. Année sélectionnée via le contexte global
   const { selectedYear } = useYear()
 
-  // 📺 Mode plein écran immersif (pour afficher au-dessus de tout)
   const [isFullscreen, setIsFullscreen] = useState(false)
+  const [currentAgenceId, setCurrentAgenceId] = useState<string | null>(null)
 
   const [villeActive, setVilleActive] = useState<'Mecque' | 'Médine'>('Mecque')
   const [selectedHotelId, setSelectedHotelId] = useState<string>('all')
   const [isProcessing, setIsProcessing] = useState(false)
   const [mobileTab, setMobileTab] = useState<'pelerins' | 'chambres'>('chambres')
 
-  // Sélection multiple
   const [selectedPelerinIds, setSelectedPelerinIds] = useState<Set<string>>(new Set())
 
-  // Filtres
   const [showAdvancedFilters, setShowAdvancedFilters] = useState(false)
   const [searchPelerin, setSearchPelerin] = useState('')
   const [genreFiltre, setGenreFiltre] = useState<'tous' | 'H' | 'F'>('tous')
   const [filtreTrancheAge, setFiltreTrancheAge] = useState<'tous' | '-40' | '40-60' | '60+'>('tous')
   const [filtreAssocie, setFiltreAssocie] = useState<string>('tous')
   const [filtreDateDepart, setFiltreDateDepart] = useState<string>('tous')
-  const [filtreTri, setFiltreTri] = useState<'nom_asc' | 'nom_desc' | 'age_desc' | 'age_asc' | 'date_inscr'>('nom_asc')
+  const [filtreTri, setFiltreTri] = useState<'inscription_asc' | 'inscription_desc' | 'nom_asc' | 'nom_desc' | 'age_desc'>('inscription_asc')
 
-  // Pagination
   const [pagePelerins, setPagePelerins] = useState(1)
   const [itemsPerPage, setItemsPerPage] = useState(30)
-
-  // Nom d'agence
   const [nomAgenceAffichee, setNomAgenceAffichee] = useState<string>('AGENCE DE VOYAGE')
 
-  // Modales
   const [showAddHotelModal, setShowAddHotelModal] = useState(false)
   const [showAddChambreModal, setShowAddChambreModal] = useState(false)
 
-  // Formulaire Hôtel
   const [nouveauNomHotel, setNouveauNomHotel] = useState('')
   const [nouvelleAdresseHotel, setNouvelleAdresseHotel] = useState('')
   const [isCreatingHotel, startCreateHotelTransition] = useTransition()
 
-  // Formulaire Chambres
   const [nombreChambresACreer, setNombreChambresACreer] = useState<number>(1)
   const [chambreNumeroPattern, setChambreNumeroPattern] = useState('')
   const [chambreEtage, setChambreEtage] = useState('')
-  const [chambreCapacite, setChambreCapacite] = useState<number>(4)
+  const [capaciteSelectionnee, setCapaciteSelectionnee] = useState<number>(4)
   const [chambreGenre, setChambreGenre] = useState<'Hommes' | 'Femmes' | 'Mixte'>('Hommes')
   const [chambreTargetHotelId, setChambreTargetHotelId] = useState<string>('')
   const [isCreatingChambre, startCreateChambreTransition] = useTransition()
@@ -202,15 +208,14 @@ export default function RepartitionHotelsPage() {
   const [modalError, setModalError] = useState<string | null>(null)
   const [isExporting, setIsExporting] = useState(false)
 
-  // Réinitialisation de la sélection au changement d'année
   useEffect(() => {
     setSelectedPelerinIds(new Set())
+    setSelectedHotelId('all')
     setPagePelerins(1)
   }, [selectedYear])
 
-  // Chargement du nom de l'agence
   useEffect(() => {
-    async function chargerNomAgence() {
+    async function chargerAgenceConnectee() {
       try {
         const { data: userData } = await getUser()
         const uid = userData?.user?.id
@@ -222,25 +227,31 @@ export default function RepartitionHotelsPage() {
           .eq('id', uid)
           .single()
 
+        if (profile?.agence_id) {
+          setCurrentAgenceId(profile.agence_id)
+        }
         // @ts-expect-error join type
         const nom = profile?.agences?.nom_agence
         if (nom) setNomAgenceAffichee(nom)
-      } catch {}
+      } catch (err) {
+        console.error('Erreur chargement agence :', err)
+      }
     }
-    chargerNomAgence()
+    chargerAgenceConnectee()
   }, [])
 
-  // 1. REQUÊTE POWERSYNC SANS ERREUR D'ALIAS SQL
+  // 1. REQUÊTE PÈLERINS : INCLUT photo_url
   const { data: rawPelerins = [] } = useQuery<any>(
-    `SELECT id, nom_complet, prenom, num_passeport, sexe, telephone_pelerin, document_url,
+    `SELECT id, agence_id, nom_complet, prenom, num_passeport, sexe, telephone_pelerin, document_url, photo_url,
             date_naissance, date_inscription, date_depart, created_at, reference, agence_ou_personne_associee,
             campagne, visa_obtenu, total_paye, prix_package,
             chambre_mecque_id, chambre_medine_id 
      FROM pelerins 
-     ORDER BY created_at DESC`
+     WHERE agence_id = ?
+     ORDER BY created_at ASC`,
+    [currentAgenceId ?? '']
   )
 
-  // 2. FILTRAGE PAR ANNÉE ROBUSTE
   const pelerins: Pelerin[] = useMemo(() => {
     if (!rawPelerins || rawPelerins.length === 0) return []
 
@@ -256,16 +267,13 @@ export default function RepartitionHotelsPage() {
     const targetYearNum = Number(selectedYear)
 
     return mapped.filter((p: Pelerin) => {
-      // 1. Si la colonne campagne est renseignée
       if (p.campagne !== undefined && p.campagne !== null) {
         return Number(p.campagne) === targetYearNum
       }
-      // 2. Fallback date_inscription
       if (p.date_inscription) {
         const y = new Date(p.date_inscription).getFullYear()
         if (!isNaN(y)) return y === targetYearNum
       }
-      // 3. Fallback created_at
       if (p.created_at) {
         const y = new Date(p.created_at).getFullYear()
         if (!isNaN(y)) return y === targetYearNum
@@ -274,21 +282,47 @@ export default function RepartitionHotelsPage() {
     })
   }, [rawPelerins, selectedYear])
 
-  // 3. Hôtels
-  const { data: hotels = [] } = useQuery<Hotel>(
-    `SELECT id, nom, ville, adresse FROM hotels ORDER BY nom ASC`
+  const { data: rawHotels = [] } = useQuery<Hotel>(
+    `SELECT id, agence_id, nom, ville, adresse, campagne, created_at
+     FROM hotels 
+     WHERE agence_id = ? 
+     ORDER BY nom ASC`,
+    [currentAgenceId ?? '']
   )
 
-  // 4. Chambres
-  const { data: chambres = [] } = useQuery<Chambre>(
-    `SELECT c.id, c.hotel_id, c.numero_chambre, c.etage, c.capacite, c.genre_chambre,
+  const hotels: Hotel[] = useMemo(() => {
+    if (!rawHotels || rawHotels.length === 0) return []
+    if (selectedYear === 'all' || !selectedYear) return rawHotels
+
+    const targetYearNum = Number(selectedYear)
+
+    return rawHotels.filter((h: any) => {
+      if (h.campagne !== undefined && h.campagne !== null && String(h.campagne).trim() !== '') {
+        return Number(h.campagne) === targetYearNum
+      }
+      if (h.created_at) {
+        const y = new Date(h.created_at).getFullYear()
+        if (!isNaN(y)) return y === targetYearNum
+      }
+      return false
+    })
+  }, [rawHotels, selectedYear])
+
+  const { data: rawChambres = [] } = useQuery<Chambre>(
+    `SELECT c.id, c.hotel_id, c.agence_id, c.numero_chambre, c.etage, c.capacite, c.genre_chambre,
             h.nom as hotel_nom, h.ville
      FROM chambres c
      JOIN hotels h ON c.hotel_id = h.id
-     ORDER BY CAST(c.numero_chambre AS INTEGER) ASC, c.numero_chambre ASC`
+     WHERE c.agence_id = ?
+     ORDER BY CAST(c.numero_chambre AS INTEGER) ASC, c.created_at ASC`,
+    [currentAgenceId ?? '']
   )
 
-  // Associés disponibles
+  const chambres: Chambre[] = useMemo(() => {
+    const validHotelIds = new Set(hotels.map((h) => h.id))
+    return rawChambres.filter((c) => validHotelIds.has(c.hotel_id))
+  }, [rawChambres, hotels])
+
   const uniqueAssocies = useMemo(() => {
     const set = new Set<string>()
     pelerins.forEach((p) => {
@@ -299,7 +333,6 @@ export default function RepartitionHotelsPage() {
     return Array.from(set).sort()
   }, [pelerins])
 
-  // Dates de départ disponibles
   const uniqueDatesDepart = useMemo(() => {
     const set = new Set<string>()
     pelerins.forEach((p) => {
@@ -308,7 +341,6 @@ export default function RepartitionHotelsPage() {
     return Array.from(set).sort()
   }, [pelerins])
 
-  // Pèlerins en attente de chambre pour cette année
   const pelerinsEnAttenteFiltres = useMemo(() => {
     return pelerins.filter((p) => {
       const chambreId = villeActive === 'Mecque' ? p.chambre_mecque_id : p.chambre_medine_id
@@ -338,6 +370,12 @@ export default function RepartitionHotelsPage() {
 
       return true
     }).sort((a, b) => {
+      if (filtreTri === 'inscription_asc') {
+        return (a.created_at || '').localeCompare(b.created_at || '')
+      }
+      if (filtreTri === 'inscription_desc') {
+        return (b.created_at || '').localeCompare(a.created_at || '')
+      }
       const nomA = formatNomComplet(a)
       const nomB = formatNomComplet(b)
       if (filtreTri === 'nom_desc') return nomB.localeCompare(nomA)
@@ -346,14 +384,6 @@ export default function RepartitionHotelsPage() {
         const ageA = calculateAge(a.date_naissance) || 0
         const ageB = calculateAge(b.date_naissance) || 0
         return ageB - ageA
-      }
-      if (filtreTri === 'age_asc') {
-        const ageA = calculateAge(a.date_naissance) || 999
-        const ageB = calculateAge(b.date_naissance) || 999
-        return ageA - ageB
-      }
-      if (filtreTri === 'date_inscr') {
-        return (b.date_inscription || '').localeCompare(a.date_inscription || '')
       }
       return 0
     })
@@ -368,14 +398,12 @@ export default function RepartitionHotelsPage() {
     filtreTri,
   ])
 
-  // Pagination
   const totalPagesPelerins = Math.ceil(pelerinsEnAttenteFiltres.length / itemsPerPage) || 1
   const pelerinsAffiches = useMemo(() => {
     const debut = (pagePelerins - 1) * itemsPerPage
     return pelerinsEnAttenteFiltres.slice(debut, debut + itemsPerPage)
   }, [pelerinsEnAttenteFiltres, pagePelerins, itemsPerPage])
 
-  // Chambres filtrées
   const chambresFiltrees = useMemo(() => {
     return chambres.filter((c) => {
       if (c.ville !== villeActive) return false
@@ -384,7 +412,6 @@ export default function RepartitionHotelsPage() {
     })
   }, [chambres, villeActive, selectedHotelId])
 
-  // Sélection multiple
   const toggleSelectPelerin = (id: string) => {
     setSelectedPelerinIds((prev) => {
       const next = new Set(prev)
@@ -406,14 +433,13 @@ export default function RepartitionHotelsPage() {
     setSelectedPelerinIds(new Set())
   }
 
-  // Assignation groupée
   const assignerGroupeDansChambre = async (chambre: Chambre, placesRestantes: number) => {
     const countToAssign = selectedPelerinIds.size
     if (countToAssign === 0 || isProcessing) return
 
     if (countToAssign > placesRestantes) {
       alert(
-        `Impossible d'assigner ${countToAssign} pèlerin(s) dans la chambre ${chambre.numero_chambre} : il ne reste que ${placesRestantes} place(s) disponible(s).`
+        `Impossible d'assigner ${countToAssign} pèlerin(s) dans cette chambre : il ne reste que ${placesRestantes} place(s) disponible(s).`
       )
       return
     }
@@ -443,7 +469,6 @@ export default function RepartitionHotelsPage() {
     }
   }
 
-  // Retirer un pèlerin
   const retirerChambre = async (pelerinId: string) => {
     if (isProcessing) return
     setIsProcessing(true)
@@ -460,29 +485,28 @@ export default function RepartitionHotelsPage() {
     }
   }
 
-  // Supprimer chambre
   const handleDeleteChambre = async (chambre: Chambre) => {
+    const identifiantChambre = chambre.numero_chambre ? `N° ${chambre.numero_chambre}` : getLabelTypeChambre(chambre.capacite)
     const confirmDelete = window.confirm(
-      `Confirmez-vous la suppression de la chambre ${chambre.numero_chambre} ? Les pèlerins logés seront remis en liste d'attente.`
+      `Confirmez-vous la suppression de la chambre ${identifiantChambre} ?`
     )
     if (!confirmDelete) return
 
     const champ = chambre.ville === 'Mecque' ? 'chambre_mecque_id' : 'chambre_medine_id'
 
     try {
-      await db.execute(`UPDATE pelerins SET ${champ} = NULL WHERE ${champ} = ?`, [chambre.id])
-      await supabase.from('pelerins').update({ [champ]: null }).eq(champ, chambre.id)
-      await db.execute(`DELETE FROM chambres WHERE id = ?`, [chambre.id])
-      await supabase.from('chambres').delete().eq('id', chambre.id)
+      await db.execute(`UPDATE pelerins SET ${champ} = NULL WHERE ${champ} = ? AND agence_id = ?`, [chambre.id, chambre.agence_id])
+      await supabase.from('pelerins').update({ [champ]: null }).eq(champ, chambre.id).eq('agence_id', chambre.agence_id)
+      await db.execute(`DELETE FROM chambres WHERE id = ? AND agence_id = ?`, [chambre.id, chambre.agence_id])
+      await supabase.from('chambres').delete().eq('id', chambre.id).eq('agence_id', chambre.agence_id)
     } catch (err) {
       console.error('Erreur suppression chambre :', err)
       alert('Impossible de supprimer la chambre.')
     }
   }
 
-  // Supprimer hôtel
   const handleDeleteHotel = async () => {
-    if (selectedHotelId === 'all') return
+    if (selectedHotelId === 'all' || !currentAgenceId) return
     const targetHotel = hotels.find((h) => h.id === selectedHotelId)
     if (!targetHotel) return
 
@@ -497,15 +521,15 @@ export default function RepartitionHotelsPage() {
 
     try {
       for (const chId of chambreIds) {
-        await db.execute(`UPDATE pelerins SET ${champ} = NULL WHERE ${champ} = ?`, [chId])
+        await db.execute(`UPDATE pelerins SET ${champ} = NULL WHERE ${champ} = ? AND agence_id = ?`, [chId, currentAgenceId])
       }
       if (chambreIds.length > 0) {
-        await supabase.from('pelerins').update({ [champ]: null }).in(champ, chambreIds)
+        await supabase.from('pelerins').update({ [champ]: null }).in(champ, chambreIds).eq('agence_id', currentAgenceId)
       }
-      await db.execute(`DELETE FROM chambres WHERE hotel_id = ?`, [targetHotel.id])
-      await supabase.from('chambres').delete().eq('hotel_id', targetHotel.id)
-      await db.execute(`DELETE FROM hotels WHERE id = ?`, [targetHotel.id])
-      await supabase.from('hotels').delete().eq('id', targetHotel.id)
+      await db.execute(`DELETE FROM chambres WHERE hotel_id = ? AND agence_id = ?`, [targetHotel.id, currentAgenceId])
+      await supabase.from('chambres').delete().eq('hotel_id', targetHotel.id).eq('agence_id', currentAgenceId)
+      await db.execute(`DELETE FROM hotels WHERE id = ? AND agence_id = ?`, [targetHotel.id, currentAgenceId])
+      await supabase.from('hotels').delete().eq('id', targetHotel.id).eq('agence_id', currentAgenceId)
 
       setSelectedHotelId('all')
     } catch (err) {
@@ -513,50 +537,40 @@ export default function RepartitionHotelsPage() {
     }
   }
 
-  // Créer hôtel
   const handleCreateHotel = (e: React.FormEvent) => {
     e.preventDefault()
-    if (!nouveauNomHotel.trim()) return
+    if (!nouveauNomHotel.trim() || !currentAgenceId) return
 
     setModalError(null)
 
+    const anneeCampagne = selectedYear !== 'all' && selectedYear ? Number(selectedYear) : new Date().getFullYear()
+
     startCreateHotelTransition(async () => {
       try {
-        const { data: userData } = await getUser()
-        const uid = userData?.user?.id
-        if (!uid) throw new Error('Utilisateur non connecté.')
-
-        const { data: profile } = await supabase
-          .from('profiles')
-          .select('agence_id')
-          .eq('id', uid)
-          .single()
-
-        const agenceId = profile?.agence_id
-        if (!agenceId) throw new Error('Aucune agence rattachée.')
-
         const { data: createdHotel, error: hotelErr } = await supabase
           .from('hotels')
           .insert({
-            agence_id: agenceId,
+            agence_id: currentAgenceId,
             nom: nouveauNomHotel.trim(),
             ville: villeActive,
             adresse: nouvelleAdresseHotel.trim() || null,
+            campagne: anneeCampagne,
           })
-          .select('id, nom, ville')
+          .select('id, agence_id, nom, ville, campagne')
           .single()
 
         if (hotelErr || !createdHotel) throw new Error(hotelErr?.message || 'Erreur création hôtel.')
 
         await db.execute(
-          `INSERT OR REPLACE INTO hotels (id, agence_id, nom, ville, adresse, created_at)
-           VALUES (?, ?, ?, ?, ?, ?)`,
+          `INSERT OR REPLACE INTO hotels (id, agence_id, nom, ville, adresse, campagne, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`,
           [
             createdHotel.id,
-            agenceId,
+            createdHotel.agence_id,
             createdHotel.nom,
             createdHotel.ville,
             nouvelleAdresseHotel.trim() || null,
+            anneeCampagne,
             new Date().toISOString(),
           ]
         ).catch(() => {})
@@ -571,41 +585,25 @@ export default function RepartitionHotelsPage() {
     })
   }
 
-  // Créer chambres
   const handleCreateChambre = (e: React.FormEvent) => {
     e.preventDefault()
-    if (!chambreTargetHotelId || nombreChambresACreer < 1) return
+    if (!chambreTargetHotelId || nombreChambresACreer < 1 || !currentAgenceId) return
 
     setModalError(null)
 
     startCreateChambreTransition(async () => {
       try {
-        const { data: userData } = await getUser()
-        const uid = userData?.user?.id
-        if (!uid) throw new Error('Utilisateur non connecté.')
-
-        const { data: profile } = await supabase
-          .from('profiles')
-          .select('agence_id')
-          .eq('id', uid)
-          .single()
-
-        const agenceId = profile?.agence_id
-        if (!agenceId) throw new Error('Aucune agence rattachée.')
-
-        const existingRoomsOfHotel = chambres.filter((c) => c.hotel_id === chambreTargetHotelId)
-        const roomNumbers = parseRoomNumbers(
+        const roomNumbers = parseRoomNumbersStrict(
           chambreNumeroPattern,
-          nombreChambresACreer,
-          existingRoomsOfHotel.length
+          nombreChambresACreer
         )
 
         const payloads = roomNumbers.map((num) => ({
           hotel_id: chambreTargetHotelId,
-          agence_id: agenceId,
-          numero_chambre: num,
+          agence_id: currentAgenceId,
+          numero_chambre: num && num.trim() !== '' ? num.trim() : '',
           etage: chambreEtage.trim() || null,
-          capacite: chambreCapacite,
+          capacite: capaciteSelectionnee,
           genre_chambre: chambreGenre,
         }))
 
@@ -624,7 +622,7 @@ export default function RepartitionHotelsPage() {
               ch.id,
               ch.hotel_id,
               ch.agence_id,
-              ch.numero_chambre,
+              ch.numero_chambre ?? '',
               ch.etage,
               ch.capacite,
               ch.genre_chambre,
@@ -643,7 +641,7 @@ export default function RepartitionHotelsPage() {
     })
   }
 
-  // Export PDF 1 Chambre
+  // 📄 EXPORT PDF 1 CHAMBRE AVEC PHOTO RÉELLE DU PÈLERIN
   const exportPdfChambreUnique = async (chambre: Chambre) => {
     try {
       setIsExporting(true)
@@ -686,15 +684,18 @@ export default function RepartitionHotelsPage() {
       doc.roundedRect(14, 50, 182, 30, 3, 3, 'FD')
 
       doc.setFont('helvetica', 'bold')
-      doc.setFontSize(22)
+      doc.setFontSize(20)
       doc.setTextColor(37, 99, 235)
-      doc.text(`CHAMBRE N° ${chambre.numero_chambre}`, 22, 65)
+      const titreChambrePdf = chambre.numero_chambre && chambre.numero_chambre.trim() !== ''
+        ? `CHAMBRE N° ${chambre.numero_chambre}`
+        : `${getLabelTypeChambre(chambre.capacite).toUpperCase()}`
+      doc.text(titreChambrePdf, 22, 65)
 
       doc.setFont('helvetica', 'normal')
       doc.setFontSize(10)
       doc.setTextColor(71, 85, 105)
       doc.text(
-        `Étage : ${chambre.etage ? chambre.etage : 'RDC'}  |  Type : ${chambre.genre_chambre}`,
+        `Étage : ${chambre.etage ? chambre.etage : 'RDC'}  |  Type : ${getLabelTypeChambre(chambre.capacite)} [${chambre.genre_chambre}]`,
         22,
         73
       )
@@ -740,13 +741,39 @@ export default function RepartitionHotelsPage() {
 
           const photoX = 17.5
           const photoY = startY + 3
-          doc.setFillColor(isFemme ? 253 : 238, isFemme ? 242 : 242, isFemme ? 248 : 255)
-          doc.roundedRect(photoX, photoY, 16, 20, 1.5, 1.5, 'FD')
-          doc.setFont('helvetica', 'bold')
-          doc.setFontSize(10)
-          doc.setTextColor(isFemme ? 190 : 37, isFemme ? 24 : 99, isFemme ? 93 : 235)
-          const initiales = `${occ.prenom?.charAt(0) || ''}${occ.nom_complet?.charAt(0) || ''}`.toUpperCase() || 'P'
-          doc.text(initiales, photoX + 8, photoY + 11.5, { align: 'center' })
+          const photoW = 16
+          const photoH = 20
+
+          // 📷 RÉCUPÉRATION ET INSERTION DE LA VRAIE PHOTO DU PÈLERIN
+          let photoInseree = false
+          if (occ.photo_url) {
+            const realUrl = getPassportPublicUrl(occ.photo_url)
+            if (realUrl) {
+              const base64Data = await getBase64ImageFromUrl(realUrl)
+              if (base64Data) {
+                try {
+                  const format = base64Data.includes('image/png') ? 'PNG' : 'JPEG'
+                  doc.addImage(base64Data, format, photoX, photoY, photoW, photoH)
+                  doc.setDrawColor(203, 213, 225)
+                  doc.roundedRect(photoX, photoY, photoW, photoH, 1.5, 1.5, 'D')
+                  photoInseree = true
+                } catch {
+                  photoInseree = false
+                }
+              }
+            }
+          }
+
+          // Fallback sur l'avatar avec initiales si pas de photo
+          if (!photoInseree) {
+            doc.setFillColor(isFemme ? 253 : 238, isFemme ? 242 : 242, isFemme ? 248 : 255)
+            doc.roundedRect(photoX, photoY, photoW, photoH, 1.5, 1.5, 'FD')
+            doc.setFont('helvetica', 'bold')
+            doc.setFontSize(10)
+            doc.setTextColor(isFemme ? 190 : 37, isFemme ? 24 : 99, isFemme ? 93 : 235)
+            const initiales = `${occ.prenom?.charAt(0) || ''}${occ.nom_complet?.charAt(0) || ''}`.toUpperCase() || 'P'
+            doc.text(initiales, photoX + 8, photoY + 11.5, { align: 'center' })
+          }
 
           const textX = photoX + 21
           doc.setFont('helvetica', 'bold')
@@ -771,7 +798,10 @@ export default function RepartitionHotelsPage() {
       doc.setTextColor(100, 116, 139)
       doc.text(`${nomAgenceAffichee.toUpperCase()} — LOGISTIQUE HAJJ & OMRA`, 105, 281, { align: 'center' })
 
-      doc.save(`Chambre_${chambre.numero_chambre}_${chambre.hotel_nom}.pdf`)
+      const filenameNum = chambre.numero_chambre && chambre.numero_chambre.trim() !== ''
+        ? `Chambre_${chambre.numero_chambre}`
+        : `Chambre_${chambre.capacite}lits`
+      doc.save(`${filenameNum}_${chambre.hotel_nom}.pdf`)
     } catch (err) {
       console.error(err)
     } finally {
@@ -779,7 +809,7 @@ export default function RepartitionHotelsPage() {
     }
   }
 
-  // Export PDF Livre Complet
+  // 📄 EXPORT PDF HÔTEL COMPLET AVEC PHOTO RÉELLE
   const exportPdfHotelComplet = async () => {
     try {
       setIsExporting(true)
@@ -865,7 +895,10 @@ export default function RepartitionHotelsPage() {
         doc.setFont('helvetica', 'bold')
         doc.setFontSize(9)
         doc.setTextColor(15, 23, 42)
-        doc.text(`CHAMBRE N° ${ch.numero_chambre} ${ch.etage ? `(Étage ${ch.etage})` : ''} — ${ch.hotel_nom}`, 18, currentY + 6)
+        const descTitre = ch.numero_chambre && ch.numero_chambre.trim() !== ''
+          ? `CHAMBRE N° ${ch.numero_chambre}`
+          : `${getLabelTypeChambre(ch.capacite).toUpperCase()}`
+        doc.text(`${descTitre} ${ch.etage ? `(Étage ${ch.etage})` : ''} — ${ch.hotel_nom}`, 18, currentY + 6)
 
         doc.setFontSize(8)
         doc.setTextColor(37, 99, 235)
@@ -889,15 +922,51 @@ export default function RepartitionHotelsPage() {
             doc.setDrawColor(226, 232, 240)
             doc.roundedRect(14, currentY, 182, 24, 2.5, 2.5, 'FD')
 
+            const photoX = 17
+            const photoY = currentY + 2.5
+            const photoW = 14
+            const photoH = 19
+
+            // 📷 INSERTION PHOTO RÉELLE
+            let photoInseree = false
+            if (occ.photo_url) {
+              const realUrl = getPassportPublicUrl(occ.photo_url)
+              if (realUrl) {
+                const base64Data = await getBase64ImageFromUrl(realUrl)
+                if (base64Data) {
+                  try {
+                    const format = base64Data.includes('image/png') ? 'PNG' : 'JPEG'
+                    doc.addImage(base64Data, format, photoX, photoY, photoW, photoH)
+                    doc.setDrawColor(203, 213, 225)
+                    doc.roundedRect(photoX, photoY, photoW, photoH, 1.5, 1.5, 'D')
+                    photoInseree = true
+                  } catch {
+                    photoInseree = false
+                  }
+                }
+              }
+            }
+
+            if (!photoInseree) {
+              doc.setFillColor(isFemme ? 253 : 238, isFemme ? 242 : 242, isFemme ? 248 : 255)
+              doc.roundedRect(photoX, photoY, photoW, photoH, 1.5, 1.5, 'FD')
+              doc.setFont('helvetica', 'bold')
+              doc.setFontSize(9)
+              doc.setTextColor(isFemme ? 190 : 37, isFemme ? 24 : 99, isFemme ? 93 : 235)
+              const initiales = `${occ.prenom?.charAt(0) || ''}${occ.nom_complet?.charAt(0) || ''}`.toUpperCase() || 'P'
+              doc.text(initiales, photoX + 7, photoY + 11, { align: 'center' })
+            }
+
+            const textX = photoX + 18
             doc.setFont('helvetica', 'bold')
             doc.setFontSize(8.5)
             doc.setTextColor(15, 23, 42)
-            doc.text(nomAffichage, 20, currentY + 6.5)
+            doc.text(nomAffichage, textX, currentY + 6.5)
 
             doc.setFont('helvetica', 'normal')
             doc.setFontSize(7)
             doc.setTextColor(100, 116, 139)
-            doc.text(`${isFemme ? 'Femme' : 'Homme'} ${age ? `• ${age} ans` : ''} | Pass: ${occ.num_passeport || '-'} | Tél: ${occ.telephone_pelerin || '-'}`, 20, currentY + 12)
+            doc.text(`${isFemme ? 'Femme' : 'Homme'} ${age ? `• ${age} ans` : ''} | Pass: ${occ.num_passeport || '-'} | Tél: ${occ.telephone_pelerin || '-'}`, textX, currentY + 12)
 
             currentY += 26
           }
@@ -920,7 +989,7 @@ export default function RepartitionHotelsPage() {
     setFiltreTrancheAge('tous')
     setFiltreAssocie('tous')
     setFiltreDateDepart('tous')
-    setFiltreTri('nom_asc')
+    setFiltreTri('inscription_asc')
     setPagePelerins(1)
   }
 
@@ -934,7 +1003,6 @@ export default function RepartitionHotelsPage() {
           : 'pb-24'
       }`}
     >
-      {/* ─── BARRE SUPÉRIEURE ─── */}
       <div className="bg-white border-b border-slate-200 sticky top-0 z-30 px-3 sm:px-6 py-3 shadow-2xs">
         <div className="max-w-7xl mx-auto flex flex-col md:flex-row md:items-center justify-between gap-3">
           <div className="flex items-center justify-between">
@@ -959,7 +1027,6 @@ export default function RepartitionHotelsPage() {
             </div>
 
             <div className="flex items-center gap-1.5 md:hidden">
-              {/* Bouton Agrandir sur mobile */}
               <button
                 onClick={() => setIsFullscreen(!isFullscreen)}
                 className={`p-1.5 rounded-lg border text-xs font-bold transition ${
@@ -982,7 +1049,6 @@ export default function RepartitionHotelsPage() {
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
-            {/* 🖥️ BOUTON PLEIN ÉCRAN / AGRANDIR POUR GAGNER DE L'ESPACE */}
             <button
               onClick={() => setIsFullscreen(!isFullscreen)}
               className={`hidden md:flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold border transition shadow-xs cursor-pointer ${
@@ -1061,7 +1127,6 @@ export default function RepartitionHotelsPage() {
           </div>
         </div>
 
-        {/* Onglet Tactile Mobile */}
         <div className="grid grid-cols-2 gap-1 mt-2.5 pt-2 border-t border-slate-100 lg:hidden">
           <button
             onClick={() => setMobileTab('chambres')}
@@ -1091,11 +1156,9 @@ export default function RepartitionHotelsPage() {
         </div>
       </div>
 
-      {/* ─── CORPS ─── */}
       <div className="max-w-7xl mx-auto px-3 sm:px-6 py-4 sm:py-6">
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
 
-          {/* COLONNE GAUCHE : LISTE DES PÈLERINS */}
           <div
             className={`lg:col-span-5 bg-white border border-slate-200 rounded-2xl p-3.5 sm:p-4 shadow-xs sticky top-20 ${
               mobileTab === 'pelerins' ? 'block' : 'hidden lg:block'
@@ -1128,6 +1191,7 @@ export default function RepartitionHotelsPage() {
                   filtreTrancheAge !== 'tous' ||
                   filtreAssocie !== 'tous' ||
                   filtreDateDepart !== 'tous' ||
+                  filtreTri !== 'inscription_asc' ||
                   searchPelerin) && (
                   <button
                     type="button"
@@ -1141,12 +1205,11 @@ export default function RepartitionHotelsPage() {
               </div>
             </div>
 
-            {/* Barre de recherche */}
             <div className="relative mb-2">
               <Search size={14} className="absolute left-3 top-2.5 text-slate-400" />
               <input
                 type="text"
-                placeholder="Nom, prénom, passeport, ref..."
+                placeholder="Rechercher pèlerin, passeport, ref..."
                 value={searchPelerin}
                 onChange={(e) => {
                   setSearchPelerin(e.target.value)
@@ -1156,7 +1219,6 @@ export default function RepartitionHotelsPage() {
               />
             </div>
 
-            {/* Filtres rapides Homme / Femme */}
             <div className="flex gap-1.5 text-[11px] font-bold mb-2">
               <button
                 onClick={() => { setGenreFiltre('tous'); setPagePelerins(1) }}
@@ -1190,7 +1252,6 @@ export default function RepartitionHotelsPage() {
               </button>
             </div>
 
-            {/* Tiroir Filtres avancés */}
             {showAdvancedFilters && (
               <div className="p-2.5 bg-slate-50 rounded-xl border border-slate-200 mb-2.5 space-y-2 animate-in fade-in text-xs">
                 <div>
@@ -1267,17 +1328,16 @@ export default function RepartitionHotelsPage() {
                     onChange={(e) => setFiltreTri(e.target.value as any)}
                     className="w-full p-1.5 bg-white border border-slate-200 rounded-lg text-[10px] font-bold outline-none"
                   >
+                    <option value="inscription_asc">1er inscrit en premier (Ordre d'inscription)</option>
+                    <option value="inscription_desc">Dernier inscrit en premier</option>
                     <option value="nom_asc">Nom complet (A-Z)</option>
                     <option value="nom_desc">Nom complet (Z-A)</option>
                     <option value="age_desc">Âge (Plus âgés d'abord)</option>
-                    <option value="age_asc">Âge (Plus jeunes d'abord)</option>
-                    <option value="date_inscr">Date d'inscription récente</option>
                   </select>
                 </div>
               </div>
             )}
 
-            {/* Barre de sélection multiple */}
             <div className="flex items-center justify-between p-2 mb-2 bg-blue-50/70 border border-blue-100 rounded-xl text-xs">
               <div className="flex items-center gap-1.5">
                 <button
@@ -1305,7 +1365,6 @@ export default function RepartitionHotelsPage() {
               </div>
             </div>
 
-            {/* Liste scrollable des pèlerins */}
             <div className="space-y-1.5 max-h-[55vh] overflow-y-auto pr-1">
               {pelerinsAffiches.length === 0 ? (
                 <div className="text-center py-8 text-slate-400 text-xs">
@@ -1313,11 +1372,12 @@ export default function RepartitionHotelsPage() {
                   Aucun pèlerin en attente pour cette campagne.
                 </div>
               ) : (
-                pelerinsAffiches.map((p) => {
+                pelerinsAffiches.map((p, indexOnPage) => {
                   const isSelected = selectedPelerinIds.has(p.id)
                   const isFemme = isPelerinFemme(p.sexe)
                   const age = calculateAge(p.date_naissance)
                   const nomCompletAffiche = formatNomComplet(p)
+                  const numeroOrdre = (pagePelerins - 1) * itemsPerPage + indexOnPage + 1
 
                   return (
                     <div
@@ -1330,6 +1390,10 @@ export default function RepartitionHotelsPage() {
                       }`}
                     >
                       <div className="flex items-center gap-2.5 min-w-0 pr-2">
+                        <div className="shrink-0 w-6 h-6 rounded-lg bg-slate-100 border border-slate-200 text-slate-600 font-mono font-bold text-[10px] flex items-center justify-center">
+                          #{numeroOrdre}
+                        </div>
+
                         <div className="shrink-0 text-blue-600">
                           {isSelected ? (
                             <CheckSquare size={16} className="text-blue-600 fill-blue-50" />
@@ -1339,7 +1403,6 @@ export default function RepartitionHotelsPage() {
                         </div>
 
                         <div className="min-w-0">
-                          {/* 🌟 Prénom en premier suivi du Nom Complet */}
                           <div className="font-bold text-slate-900 flex items-center gap-1.5 truncate">
                             <span className="truncate">{nomCompletAffiche}</span>
                             <span
@@ -1375,7 +1438,6 @@ export default function RepartitionHotelsPage() {
               )}
             </div>
 
-            {/* Pagination */}
             {totalPagesPelerins > 1 && (
               <div className="flex items-center justify-between pt-2.5 mt-2 border-t border-slate-100 text-xs">
                 <span className="text-[10px] text-slate-400 font-bold">
@@ -1404,13 +1466,11 @@ export default function RepartitionHotelsPage() {
             )}
           </div>
 
-          {/* COLONNE DROITE : LES CHAMBRES */}
           <div
             className={`lg:col-span-7 space-y-3.5 ${
               mobileTab === 'chambres' ? 'block' : 'hidden lg:block'
             }`}
           >
-            {/* Bannière de sélection multiple active */}
             {countSelected > 0 && (
               <div className="p-3 bg-blue-600 text-white rounded-2xl shadow-lg flex items-center justify-between animate-in fade-in slide-in-from-top-2">
                 <div className="flex items-center gap-2">
@@ -1429,7 +1489,6 @@ export default function RepartitionHotelsPage() {
               </div>
             )}
 
-            {/* Barre de filtrage par hôtel */}
             <div className="flex items-center justify-between bg-white p-2.5 sm:p-3 rounded-2xl border border-slate-200 shadow-xs">
               <div className="flex items-center gap-2 min-w-0">
                 <Filter size={14} className="text-slate-400 shrink-0" />
@@ -1468,7 +1527,7 @@ export default function RepartitionHotelsPage() {
             {chambresFiltrees.length === 0 ? (
               <div className="bg-white border border-dashed border-slate-300 rounded-2xl p-8 text-center space-y-3">
                 <BedDouble size={28} className="mx-auto text-slate-300" />
-                <p className="text-xs font-bold text-slate-700">Aucune chambre créée pour {villeActive}</p>
+                <p className="text-xs font-bold text-slate-700">Aucun hôtel ou chambre enregistré pour {villeActive} ({selectedYear !== 'all' ? selectedYear : 'cette campagne'})</p>
                 <button
                   onClick={() => {
                     if (hotels.filter((h) => h.ville === villeActive).length === 0) {
@@ -1480,7 +1539,7 @@ export default function RepartitionHotelsPage() {
                   }}
                   className="px-3.5 py-1.5 bg-blue-600 text-white rounded-xl text-xs font-bold cursor-pointer"
                 >
-                  Créer des chambres
+                  Ajouter un hôtel pour {selectedYear !== 'all' ? selectedYear : 'cette campagne'}
                 </button>
               </div>
             ) : (
@@ -1496,6 +1555,10 @@ export default function RepartitionHotelsPage() {
                   const isPlein = placesRestantes === 0
                   const hasEnoughRoomForBatch = countSelected > 0 && placesRestantes >= countSelected
 
+                  const titreAffiche = chambre.numero_chambre && chambre.numero_chambre.trim() !== ''
+                    ? `Chambre N° ${chambre.numero_chambre}`
+                    : `Chambre ${getLabelTypeChambre(chambre.capacite)}`
+
                   return (
                     <div
                       key={chambre.id}
@@ -1510,7 +1573,7 @@ export default function RepartitionHotelsPage() {
                       <div>
                         <div className="flex items-center justify-between mb-1">
                           <span className="font-mono font-black text-sm text-slate-900">
-                            Chambre {chambre.numero_chambre}
+                            {titreAffiche}
                             {chambre.etage && (
                               <span className="text-[10px] text-slate-400 font-sans ml-1">
                                 (Étage {chambre.etage})
@@ -1570,11 +1633,10 @@ export default function RepartitionHotelsPage() {
                           </span>
                         </div>
 
-                        {/* Liste des occupants */}
                         <div className="space-y-1.5 pt-2 border-t border-slate-100 min-h-[70px]">
                           {occupants.length === 0 ? (
                             <p className="text-[10px] text-slate-400 italic text-center py-2.5">
-                              Chambre libre ({placesRestantes} places)
+                              {getLabelTypeChambre(chambre.capacite)} libre ({placesRestantes} lits)
                             </p>
                           ) : (
                             occupants.map((occ) => {
@@ -1610,7 +1672,6 @@ export default function RepartitionHotelsPage() {
                         </div>
                       </div>
 
-                      {/* Bouton d'assignation en lot */}
                       {countSelected > 0 && (
                         <div className="mt-2.5 pt-2 border-t border-slate-100">
                           {hasEnoughRoomForBatch ? (
@@ -1644,7 +1705,6 @@ export default function RepartitionHotelsPage() {
         </div>
       </div>
 
-      {/* ─── MODALE 1 : HÔTEL ─── */}
       {showAddHotelModal && (
         <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-3xl border border-slate-100 shadow-2xl max-w-sm w-full p-5 space-y-3.5 animate-in fade-in zoom-in-95">
@@ -1652,7 +1712,7 @@ export default function RepartitionHotelsPage() {
               <div className="flex items-center gap-1.5">
                 <Building2 size={16} className="text-blue-600" />
                 <h3 className="text-xs font-black text-slate-900">
-                  Ajouter un Hôtel ({villeActive})
+                  Ajouter un Hôtel ({villeActive} - {selectedYear !== 'all' ? selectedYear : 'Campagne courante'})
                 </h3>
               </div>
               <button onClick={() => setShowAddHotelModal(false)} className="text-slate-400 cursor-pointer">
@@ -1674,7 +1734,7 @@ export default function RepartitionHotelsPage() {
                 <input
                   type="text"
                   required
-                  placeholder="Ex: Hôtel Al Kiswah, Pullman Zamzam..."
+                  placeholder="Nom de l'hôtel"
                   value={nouveauNomHotel}
                   onChange={(e) => setNouveauNomHotel(e.target.value)}
                   className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold outline-none focus:border-blue-600"
@@ -1687,7 +1747,7 @@ export default function RepartitionHotelsPage() {
                 </label>
                 <input
                   type="text"
-                  placeholder="Ex: Ibrahim Al Khalil Rd"
+                  placeholder="Adresse ou quartier"
                   value={nouvelleAdresseHotel}
                   onChange={(e) => setNouvelleAdresseHotel(e.target.value)}
                   className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold outline-none focus:border-blue-600"
@@ -1715,7 +1775,6 @@ export default function RepartitionHotelsPage() {
         </div>
       )}
 
-      {/* ─── MODALE 2 : CHAMBRES MULTIPLES ─── */}
       {showAddChambreModal && (
         <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-3xl border border-slate-100 shadow-2xl max-w-sm w-full p-5 space-y-3.5 animate-in fade-in zoom-in-95">
@@ -1723,7 +1782,7 @@ export default function RepartitionHotelsPage() {
               <div className="flex items-center gap-1.5">
                 <BedDouble size={16} className="text-blue-600" />
                 <h3 className="text-xs font-black text-slate-900">
-                  Créer des Chambres
+                  Ajouter des Chambres
                 </h3>
               </div>
               <button onClick={() => setShowAddChambreModal(false)} className="text-slate-400 cursor-pointer">
@@ -1758,10 +1817,27 @@ export default function RepartitionHotelsPage() {
                 </select>
               </div>
 
+              <div>
+                <label className="text-[10px] font-black uppercase text-slate-400 block mb-1">
+                  Type de Chambre / Capacité Lits *
+                </label>
+                <select
+                  value={capaciteSelectionnee}
+                  onChange={(e) => setCapaciteSelectionnee(Number(e.target.value))}
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold outline-none focus:border-blue-600 cursor-pointer"
+                >
+                  {TYPES_CHAMBRES_HAJJ.map((type) => (
+                    <option key={type.capacite} value={type.capacite}>
+                      {type.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
               <div className="p-3 bg-blue-50/60 rounded-2xl border border-blue-100 space-y-2.5">
                 <div className="flex items-center gap-1.5 text-blue-700 text-xs font-bold">
                   <Sparkles size={14} />
-                  <span>Quantité & Numérotation</span>
+                  <span>Quantité & Numéro</span>
                 </div>
 
                 <div className="grid grid-cols-2 gap-2">
@@ -1781,61 +1857,41 @@ export default function RepartitionHotelsPage() {
 
                   <div>
                     <label className="text-[9px] font-bold text-slate-500 block mb-1">
-                      Numérotation (Optionnel)
+                      Numéro (Optionnel)
                     </label>
                     <input
                       type="text"
-                      placeholder={nombreChambresACreer > 1 ? 'Ex: 1 à 10 ou 101' : 'Ex: 402'}
+                      placeholder="Laisser vide si non numérotée"
                       value={chambreNumeroPattern}
                       onChange={(e) => setChambreNumeroPattern(e.target.value)}
                       className="w-full px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-bold outline-none focus:border-blue-600"
                     />
                   </div>
                 </div>
-
-                <p className="text-[9.5px] text-slate-400 leading-tight">
-                  {chambreNumeroPattern.trim()
-                    ? `Aperçu : les chambres seront créées avec ces numéros.`
-                    : `Sans saisie, les ${nombreChambresACreer} chambres seront numérotées dans l'ordre.`}
-                </p>
               </div>
 
-              <div className="grid grid-cols-3 gap-2">
+              <div className="grid grid-cols-2 gap-2">
                 <div>
-                  <label className="text-[9px] font-bold text-slate-500 block mb-1">
-                    Étage
+                  <label className="text-[10px] font-black uppercase text-slate-400 block mb-1">
+                    Étage (Optionnel)
                   </label>
                   <input
                     type="text"
-                    placeholder="Ex: 4"
+                    placeholder="Étage"
                     value={chambreEtage}
                     onChange={(e) => setChambreEtage(e.target.value)}
-                    className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-bold outline-none focus:border-blue-600"
+                    className="w-full px-2.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold outline-none focus:border-blue-600"
                   />
                 </div>
 
                 <div>
-                  <label className="text-[9px] font-bold text-slate-500 block mb-1">
-                    Lits / Ch.
-                  </label>
-                  <input
-                    type="number"
-                    min={1}
-                    max={10}
-                    value={chambreCapacite}
-                    onChange={(e) => setChambreCapacite(Number(e.target.value))}
-                    className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-bold outline-none focus:border-blue-600"
-                  />
-                </div>
-
-                <div>
-                  <label className="text-[9px] font-bold text-slate-500 block mb-1">
+                  <label className="text-[10px] font-black uppercase text-slate-400 block mb-1">
                     Genre
                   </label>
                   <select
                     value={chambreGenre}
                     onChange={(e) => setChambreGenre(e.target.value as any)}
-                    className="w-full px-1.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-bold outline-none focus:border-blue-600 cursor-pointer"
+                    className="w-full px-2 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold outline-none focus:border-blue-600 cursor-pointer"
                   >
                     <option value="Hommes">Hommes</option>
                     <option value="Femmes">Femmes</option>
