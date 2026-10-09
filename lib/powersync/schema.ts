@@ -1,4 +1,9 @@
-import { Column, ColumnType, Schema, Table as PowerSyncTable } from '@powersync/web';
+import {
+  Column,
+  ColumnType,
+  Schema,
+  Table as PowerSyncTable
+} from '@powersync/common';
 
 type LegacyTableOptions = {
   name: string;
@@ -6,19 +11,20 @@ type LegacyTableOptions = {
   indexes?: Record<string, string[]>;
 };
 
-// Compatibilité avec l'ancien format de schéma utilisé par cette application.
+// Fonctions d'aide pour les colonnes
 const column = {
   text: (name: string) => new Column({ name, type: ColumnType.TEXT }),
   integer: (name: string) => new Column({ name, type: ColumnType.INTEGER }),
   real: (name: string) => new Column({ name, type: ColumnType.REAL }),
 };
 
+// Constructeur compatible sans typage superflu
 const Table: any = function createLegacyTable({ columns, indexes }: LegacyTableOptions) {
   const mappedColumns = Object.fromEntries(
     columns.map((currentColumn) => [currentColumn.name, { type: currentColumn.type }]),
   );
 
-  return new PowerSyncTable(mappedColumns as any, { indexes });
+  return new PowerSyncTable(mappedColumns as any, { indexes } as any);
 };
 
 // 1. Agences (avec logo synchronisé)
@@ -257,7 +263,7 @@ export const budgets_mensuels = new Table({
   ]
 });
 
-// 11. Budgets modulables de l'agence (Suivi budgétaire personnalisé)
+// 11. Budgets modulables de l'agence
 export const budgets_agence = new Table({
   name: 'budgets_agence',
   columns: [
@@ -401,7 +407,7 @@ export const gouv_postulations_log = new Table({
   ]
 });
 
-// Assemblage de l'AppSchema complet
+// Assemblage complet du schéma
 export const AppSchema = new Schema({
   agences,
   profiles,

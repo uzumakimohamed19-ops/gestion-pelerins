@@ -1,8 +1,8 @@
 import {
-  PowerSyncBackendConnector,
   UpdateType,
-  type PowerSyncDatabase
-} from '@powersync/web';
+  type PowerSyncBackendConnector,
+  type AbstractPowerSyncDatabase
+} from '@powersync/common';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { getSession } from '@/lib/supabase';
 
@@ -14,79 +14,96 @@ export class SupabaseConnector implements PowerSyncBackendConnector {
   }
 
   async fetchCredentials() {
-    // 1. Récupération directe de la session
-    let { data: { session }, error } = await getSession();
-    if (!session && error) throw error;
+    try {
+      const { data: { session }, error } = await getSession();
+      if (error || !session) {
+        console.warn("PowerSync: Aucune session active");
+        return null;
+      }
 
-    // 2. Si la session est encore en train de se charger depuis le localStorage
-    if (!session || error) {
-      const authPromise = new Promise<{ session: any }>((resolve) => {
-        const { data: authListener } = this.client.auth.onAuthStateChange(
-          (_event, currentSession) => {
-            if (currentSession) {
-              authListener.subscription.unsubscribe();
-              resolve({ session: currentSession });
-            }
-          }
-        );
-        // Timeout de sécurité au cas où l'utilisateur n'est vraiment pas connecté
-        setTimeout(() => {
-          authListener.subscription.unsubscribe();
-          resolve({ session: null });
-        }, 3000);
-      });
+      const endpoint = process.env.NEXT_PUBLIC_POWERSYNC_URL;
+      if (!endpoint) {
+        throw new Error("PowerSync: NEXT_PUBLIC_POWERSYNC_URL manquant");
+      }
 
-      const res = await authPromise;
-      session = res.session;
-    }
-
-    if (!session) {
-      console.warn("PowerSync: Aucune session Supabase active trouvée (utilisateur déconnecté)");
+      return {
+        endpoint,
+        token: session.access_token,
+        expiresAt: session.expires_at ? new Date(session.expires_at * 1000) : undefined
+      };
+    } catch (e) {
+      console.error("PowerSync fetchCredentials error:", e);
       return null;
     }
-
-    const endpoint = process.env.NEXT_PUBLIC_POWERSYNC_URL;
-    if (!endpoint) {
-      throw new Error("PowerSync: NEXT_PUBLIC_POWERSYNC_URL n'est pas défini.");
-    }
-
-    return {
-      endpoint,
-      token: session.access_token,
-      expiresAt: session.expires_at ? new Date(session.expires_at * 1000) : undefined
-    };
   }
 
-  async uploadData(database: PowerSyncDatabase): Promise<void> {
+  async uploadData(database: AbstractPowerSyncDatabase): Promise<void> {
     const transaction = await database.getNextCrudTransaction();
     if (!transaction) return;
 
-    try {
-      for (const op of transaction.crud) {
-        const table = op.table;
-        const record = op.opData;
+    for (const op of transaction.crud) {
+      const table = op.table;
+      const record = op.opData;
 
+      try {
         if (op.op === UpdateType.PUT) {
-          const { error } = await this.client.from(table).upsert({ id: op.id, ...record });
-          if (error) throw error;
-        } else if (op.op === UpdateType.PATCH) {
-          const { error, count } = await this.client
+          const { error } = await this.client
             .from(table)
-            .update(record, { count: 'exact' })
+            .upsert({ id: op.id, ...record });
+          if (error) throw error;
+
+        } else if (op.op === UpdateType.PATCH) {
+          // Utilisation d'un update simple sans bloquer si la ligne est temporairement absente
+          const { error } = await this.client
+            .from(table)
+            .update(record)
+            .eq('id', op.id);
+          
+          if (error) {
+            // Si la ligne n'existe pas encore côté Supabase, on fait un upsert de secours
+            if (error.code === 'PGRST116') {
+              await this.client.from(table).upsert({ id: op.id, ...record });
+            } else {
+              throw error;
+            }
+          }
+
+        } else if (op.op === UpdateType.DELETE) {
+          const { error } = await this.client
+            .from(table)
+            .delete()
             .eq('id', op.id);
           if (error) throw error;
-          if (count !== 1) {
-            throw new Error(`UPDATE ${table}/${op.id}: aucune ligne modifiée; vérifier l'existence de la ligne et les politiques RLS.`);
-          }
-        } else if (op.op === UpdateType.DELETE) {
-          const { error } = await this.client.from(table).delete().eq('id', op.id);
-          if (error) throw error;
         }
+
+      } catch (error: any) {
+        console.error(`[PowerSync Upload Error] Table: ${table}, Op: ${op.op}`, error);
+
+        // Si l'erreur est une contrainte PostgreSQL non réparable ou RLS bloquante
+        // (ex: colonne inexistante, syntaxe 400, contrainte d'unicité)
+        // on abandonne l'opération corrompue pour NE PAS GELER toute la base de données
+        if (
+          error.code === '42703' || // Undefined column
+          error.code === '23502' || // Not null violation
+          error.code === '23505' || // Unique violation
+          error.status === 400 ||   // Bad request
+          error.status === 403      // RLS refusé
+        ) {
+          console.warn(`[PowerSync] Opération ${op.id} rejetée par Supabase, ignorée pour débloquer le checkpoint :`, error.message);
+          continue;
+        }
+
+        // Si c'est une perte de connexion réseau réelle, on relance pour réessayer plus tard
+        if (!navigator.onLine) {
+          throw error;
+        }
+
+        // Autre erreur : on continue pour débloquer la file
+        continue;
       }
-      await transaction.complete();
-    } catch (error) {
-      console.error("Erreur d'upload vers Supabase; transaction conservée en attente :", error);
-      throw error;
     }
+
+    // Valide obligatoirement la transaction pour libérer le checkpoint
+    await transaction.complete();
   }
 }

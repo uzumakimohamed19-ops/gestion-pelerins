@@ -7,7 +7,8 @@ export const powersync = new PowerSyncDatabase({
   database: {
     dbFilename: 'gestion_pelerins.db',
     disableSSRWarning: true,
-    enableMultiTabs: Capacitor.getPlatform() === 'web'
+    // MultiTabs activé uniquement sur le Web pour éviter les conflits d'onglets
+    enableMultiTabs: typeof window !== 'undefined' && Capacitor.getPlatform() === 'web'
   }
 });
 
