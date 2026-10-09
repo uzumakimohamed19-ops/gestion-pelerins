@@ -70,16 +70,28 @@ export class SupabaseConnector implements PowerSyncBackendConnector {
           const { error } = await this.client.from(table).upsert({ id: op.id, ...record });
           if (error) throw error;
         } else if (op.op === UpdateType.PATCH) {
-          const { error } = await this.client.from(table).update(record).eq('id', op.id);
+          const { error, count } = await this.client
+            .from(table)
+            .update(record, { count: 'exact' })
+            .eq('id', op.id);
           if (error) throw error;
+          if (count !== 1) {
+            throw new Error(`UPDATE ${table}/${op.id}: aucune ligne modifiée; vérifier l'existence de la ligne et les politiques RLS.`);
+          }
         } else if (op.op === UpdateType.DELETE) {
-          const { error } = await this.client.from(table).delete().eq('id', op.id);
+          const { error, count } = await this.client
+            .from(table)
+            .delete({ count: 'exact' })
+            .eq('id', op.id);
           if (error) throw error;
+          if (count !== 1) {
+            throw new Error(`DELETE ${table}/${op.id}: aucune ligne supprimée; vérifier l'existence de la ligne et les politiques RLS.`);
+          }
         }
       }
       await transaction.complete();
     } catch (error) {
-      console.error("Erreur d'upload vers Supabase :", error);
+      console.error("Erreur d'upload vers Supabase; transaction conservée en attente :", error);
       throw error;
     }
   }

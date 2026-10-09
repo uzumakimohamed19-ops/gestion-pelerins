@@ -123,21 +123,25 @@ export default function ClientPowerSyncWrapper({
     }
 
     // Écoute des événements d'authentification Supabase
-    const { data: authListener } = supabase.auth.onAuthStateChange(async (event, session) => {
+    const { data: authListener } = supabase.auth.onAuthStateChange((event, session) => {
       if (!isMounted) return;
       console.log(`ℹ️ Supabase Auth Event : ${event}`);
 
       if (session && (event === "SIGNED_IN" || event === "INITIAL_SESSION" || event === "TOKEN_REFRESHED")) {
-        await connectToPowerSync();
+        window.setTimeout(() => {
+          void connectToPowerSync();
+        }, 0);
       } else if (event === "SIGNED_OUT") {
-        clearReconnectTimers();
-        isConnectingRef.current = false;
-        try {
-          await powersync.disconnect();
-          console.log("⚪ PowerSync : Déconnecté");
-        } catch {
-          /* ignore */
-        }
+        window.setTimeout(() => {
+          if (!isMounted) return;
+          clearReconnectTimers();
+          isConnectingRef.current = false;
+          void powersync.disconnect().then(() => {
+            console.log("⚪ PowerSync : Déconnecté");
+          }).catch(() => {
+            /* ignore */
+          });
+        }, 0);
       }
     });
 
