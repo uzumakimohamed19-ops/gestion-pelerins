@@ -251,20 +251,73 @@ async function autoDetectAndCropNusuk(imageSrc: string): Promise<{
   })
 }
 
-function parseMrzRawLines(rawLines: string[]) {
-  const clean = rawLines.map(l => l.trim().toUpperCase().replace(/[^A-Z0-9<]/g, '')).filter(l => l.length >= 30)
-  if (clean.length < 2) return null
+// 🎯 NOUVEAU PARSEUR MRZ HYBRIDE ET ULTRA-ROBUSTE
+function parseMrzRawLines(rawInput: string | string[]) {
+  const fullText = Array.isArray(rawInput) ? rawInput.join('\n') : String(rawInput || '')
 
-  const l1 = clean[clean.length - 2]
-  const l2 = clean[clean.length - 1]
+  // 1. Détection du format étiqueté Thales (ex: LNM, FNM, PNM, DOB, SEX, EDT)
+  if (fullText.includes('LNM') || fullText.includes('PNM') || fullText.includes('FNM')) {
+    const getTag = (tag: string) => {
+      const match = fullText.match(new RegExp(`(?:^|,)${tag}([^,\r\n]+)`, 'i'))
+      return match ? match[1].trim() : ''
+    }
 
-  if (!l1.startsWith('P') || l1.length < 44 || l2.length < 44) return null
+    const nom = getTag('LNM').replace(/</g, ' ').trim()
+    const prenom = getTag('FNM').replace(/</g, ' ').trim()
+    const numPasseport = getTag('PNM').replace(/</g, '').trim()
+    const rawSex = getTag('SEX').toUpperCase()
+    const sexe = rawSex.startsWith('F') ? 'FEMME' : rawSex.startsWith('M') ? 'HOMME' : ''
 
+    const cleanDate = (dStr: string) => {
+      const digits = dStr.replace(/\D/g, '')
+      if (digits.length === 8) return `${digits.slice(0, 4)}-${digits.slice(4, 6)}-${digits.slice(6, 8)}`
+      if (digits.length === 6) {
+        const yy = parseInt(digits.slice(0, 2), 10)
+        const fullY = yy > (new Date().getFullYear() % 100) ? 1900 + yy : 2000 + yy
+        return `${fullY}-${digits.slice(2, 4)}-${digits.slice(4, 6)}`
+      }
+      return dStr.includes('-') ? dStr : ''
+    }
+
+    const dateNaissance = cleanDate(getTag('DOB'))
+    const dateExpiration = cleanDate(getTag('EDT'))
+
+    if (nom || numPasseport) {
+      return { nom, prenom, numPasseport, sexe, dateNaissance, dateExpiration }
+    }
+  }
+
+  // 2. Détection standard MRZ TD3 (Passeports 2 lignes de 44 caractères)
+  const lines = fullText
+    .split(/\r?\n/)
+    .map(l => l.trim().toUpperCase().replace(/[^A-Z0-9<]/g, ''))
+    .filter(l => l.length >= 30)
+
+  let l1 = ''
+  let l2 = ''
+
+  if (lines.length >= 2) {
+    l1 = lines[lines.length - 2]
+    l2 = lines[lines.length - 1]
+  } else {
+    // Si la douchette envoie les 88 caractères en un seul bloc sans retour chariot
+    const rawContinuous = fullText.toUpperCase().replace(/[^A-Z0-9<]/g, '')
+    const pIdx = rawContinuous.indexOf('P<')
+    if (pIdx !== -1 && rawContinuous.length >= pIdx + 88) {
+      l1 = rawContinuous.slice(pIdx, pIdx + 44)
+      l2 = rawContinuous.slice(pIdx + 44, pIdx + 88)
+    }
+  }
+
+  if (!l1 || !l2 || l1.length < 42 || l2.length < 42) return null
+
+  // Ligne 1 : Nom et Prénoms
   const nameSection = l1.slice(5)
   const parts = nameSection.split('<<').filter(Boolean)
   const nom = (parts[0] || '').replace(/</g, ' ').trim()
   const prenom = (parts[1] || '').replace(/</g, ' ').trim()
 
+  // Ligne 2 : Numéro, Date Naissance, Sexe, Date Expiration
   const numPasseport = l2.slice(0, 9).replace(/</g, '').trim()
 
   const rawDob = l2.slice(13, 19)
@@ -324,8 +377,9 @@ export default function AjouterPelerin() {
   const [showPhysicalScannerInput, setShowPhysicalScannerInput] = useState(false)
   const [mrzBuffer, setMrzBuffer] = useState('')
   const physicalInputRef = useRef<HTMLInputElement>(null)
+  const mrzTimeoutRef = useRef<NodeJS.Timeout | null>(null)
 
-  // 📡 Passerelle TWAIN / Scanner Pleine Page
+  // Passerelle TWAIN / Scanner Pleine Page
   const [isTwainScanning, setIsTwainScanning] = useState(false)
   const [isFullPageConnected, setIsFullPageConnected] = useState(false)
   const [isFullPageListening, setIsFullPageListening] = useState(false)
@@ -394,15 +448,12 @@ export default function AjouterPelerin() {
     if (localAgenceId) setAgenceId(localAgenceId)
   }, [localProfiles])
 
-  // Helper interne pour traiter une image complète numérisée (Tauri ou Web)
   const processScannedPassportImage = async (fullDataUrl: string) => {
     setCropImageSrc(fullDataUrl)
 
-    // 1. Compression et attachement automatique du passeport (< 400 Ko)
     const formatted = await compressAndFormatPassportNusuk(fullDataUrl)
     setFileToUpload(formatted.file)
 
-    // 2. Découpage automatique du visage Nusuk
     try {
       const autoCrop = await autoDetectAndCropNusuk(fullDataUrl)
       setPhotoFile(autoCrop.file)
@@ -411,7 +462,6 @@ export default function AjouterPelerin() {
       setCropImgDims(autoCrop.dims)
     } catch {}
 
-    // 3. Extraction OCR du texte en arrière-plan
     const targetEndpoint = `${getApiUrl()}/api/scan-mrz`
     try {
       const ocrRes = await fetch(targetEndpoint, {
@@ -434,12 +484,10 @@ export default function AjouterPelerin() {
     }
   }
 
-  // 🎯 DÉCLENCHEMENT UNIVERSEL SCANNER TWAIN (Natif Tauri ou Web Service local)
   const triggerTwainScan = async () => {
     setIsTwainScanning(true)
     setMessage({ text: '⚡ Numérisation en cours sur le scanner USB...', type: 'info' })
 
-    // 1. SI L'APPLICATION TOURNE DANS TAURI : Appel direct de la commande native Rust
     if (isRunningInTauri()) {
       try {
         // @ts-expect-error Tauri API globale
@@ -459,7 +507,6 @@ export default function AjouterPelerin() {
       }
     }
 
-    // 2. EN MODE WEB CLASSIQUE OU FALLBACK : Appel HTTP de la passerelle locale
     try {
       const res = await fetch('http://127.0.0.1:18622/scan', {
         method: 'POST',
@@ -495,7 +542,6 @@ export default function AjouterPelerin() {
     }
   }
 
-  // 📡 SCANNER PLEINE PAGE : Gère Tauri en natif ou WebSocket local en Web
   const toggleFullPageScanner = async () => {
     if (isFullPageListening) {
       if (fullPageWsRef.current) fullPageWsRef.current.close()
@@ -505,7 +551,6 @@ export default function AjouterPelerin() {
       return
     }
 
-    // 1. SI DANS TAURI : Appel direct natif de la vitre de lecture
     if (isRunningInTauri()) {
       try {
         // @ts-expect-error Tauri API globale
@@ -547,7 +592,6 @@ export default function AjouterPelerin() {
       }
     }
 
-    // 2. EN MODE WEB OU FALLBACK : WebSocket local 127.0.0.1:9090
     const wsUrl = 'ws://127.0.0.1:9090'
     setMessage({ text: 'Connexion au scanner pleine page...', type: 'info' })
 
@@ -629,27 +673,47 @@ export default function AjouterPelerin() {
     return digits === '' ? '' : Number(digits).toLocaleString('fr-FR')
   }
 
+  // 🎯 FONCTION DE TRAITEMENT AVEC TEMPORISATION ANTI-COUPURE DOUCHETTE
+  const evaluateMrzBuffer = (buffer: string) => {
+    const parsed = parseMrzRawLines(buffer)
+    if (parsed) {
+      if (parsed.nom) setNom(parsed.nom)
+      if (parsed.prenom) setPrenom(parsed.prenom)
+      if (parsed.numPasseport) setPasseport(parsed.numPasseport)
+      if (parsed.sexe) setSexe(parsed.sexe)
+      if (parsed.dateNaissance) setDateNaissance(parsed.dateNaissance)
+      if (parsed.dateExpiration) setDateExpiration(parsed.dateExpiration)
+
+      setMessage({ text: "✅ PASSEPORT LU PAR LE SCANNER PHYSIQUE !", type: 'success' })
+      setShowPhysicalScannerInput(false)
+      setMrzBuffer('')
+    } else {
+      setMessage({ text: "⚠️ Données MRZ incomplètes. Veuillez glisser à nouveau le passeport.", type: 'error' })
+    }
+  }
+
+  const handlePhysicalScanChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const newVal = e.target.value
+    setMrzBuffer(newVal)
+
+    // Si la douchette tape très vite sans déclencher correctement la touche Entrée,
+    // on déclenche automatiquement le parsing 150ms après le dernier caractère reçu
+    if (mrzTimeoutRef.current) clearTimeout(mrzTimeoutRef.current)
+    if (newVal.length >= 40) {
+      mrzTimeoutRef.current = setTimeout(() => {
+        evaluateMrzBuffer(newVal)
+      }, 150)
+    }
+  }
+
   const handlePhysicalScanKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter') {
       e.preventDefault()
-      const raw = mrzBuffer.trim()
-      const lines = raw.split(/\r?\n/).filter(Boolean)
-      const parsed = parseMrzRawLines(lines)
-
-      if (parsed) {
-        if (parsed.nom) setNom(parsed.nom)
-        if (parsed.prenom) setPrenom(parsed.prenom)
-        if (parsed.numPasseport) setPasseport(parsed.numPasseport)
-        if (parsed.sexe) setSexe(parsed.sexe)
-        if (parsed.dateNaissance) setDateNaissance(parsed.dateNaissance)
-        if (parsed.dateExpiration) setDateExpiration(parsed.dateExpiration)
-
-        setMessage({ text: "✅ PASSEPORT LU PAR LE SCANNER PHYSIQUE !", type: 'success' })
-        setShowPhysicalScannerInput(false)
-        setMrzBuffer('')
-      } else {
-        setMessage({ text: "⚠️ Données MRZ incomplètes.", type: 'error' })
-      }
+      // Évite l'interruption prématurée si la douchette envoie un Entrée entre la ligne 1 et 2
+      if (mrzTimeoutRef.current) clearTimeout(mrzTimeoutRef.current)
+      mrzTimeoutRef.current = setTimeout(() => {
+        evaluateMrzBuffer(mrzBuffer)
+      }, 120)
     }
   }
 
@@ -826,7 +890,7 @@ export default function AjouterPelerin() {
     isPassportResizingRef.current = false
   }
 
-  // Scan OCR caméra / fichier
+  // Scan OCR caméra / fichier (Non modifié)
   const handleAutoFill = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const scanFile = e.target.files?.[0]
     if (!scanFile) return
@@ -1058,7 +1122,7 @@ export default function AjouterPelerin() {
                   </button>
                 </div>
 
-                {/* Champ d'écoute douchette USB */}
+                {/* Champ d'écoute douchette USB avec saisie continue tolérante */}
                 {showPhysicalScannerInput && (
                   <div className="p-3 bg-white rounded-2xl border-2 border-emerald-400 shadow-sm animate-in fade-in space-y-1.5">
                     <div className="flex items-center justify-between text-[10px] font-black text-emerald-800 uppercase">
@@ -1078,16 +1142,16 @@ export default function AjouterPelerin() {
                       ref={physicalInputRef}
                       type="text"
                       value={mrzBuffer}
-                      onChange={(e) => setMrzBuffer(e.target.value)}
+                      onChange={handlePhysicalScanChange}
                       onKeyDown={handlePhysicalScanKeyDown}
-                      placeholder="Passez le passeport dans le lecteur..."
+                      placeholder="Glissez le passeport dans la douchette..."
                       className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono font-bold text-slate-900 outline-none focus:border-emerald-500"
                     />
                   </div>
                 )}
               </div>
 
-              {/* 📷 SECTION PHOTO D'IDENTITÉ : CROP AUTOMATIQUE + CHOIX DE RECADRER */}
+              {/* SECTION PHOTO D'IDENTITÉ */}
               <div className="p-4 bg-gray-50 rounded-2xl border border-gray-100 space-y-3">
                 <div className="flex items-center justify-between">
                   <span className="text-[10px] font-black text-gray-700 uppercase flex items-center gap-1.5">
@@ -1166,7 +1230,7 @@ export default function AjouterPelerin() {
                 </p>
               </div>
 
-              {/* 📄 SECTION PIÈCE JOINTE PASSEPORT */}
+              {/* SECTION PIÈCE JOINTE PASSEPORT */}
               <div className="p-4 bg-gray-50 rounded-2xl border border-gray-100 space-y-2.5">
                 <div className="flex items-center justify-between">
                   <span className="text-[10px] font-black text-gray-700 uppercase flex items-center gap-1.5">
