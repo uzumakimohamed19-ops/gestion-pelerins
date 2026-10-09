@@ -16,6 +16,7 @@ export class SupabaseConnector implements PowerSyncBackendConnector {
   async fetchCredentials() {
     // 1. Récupération directe de la session
     let { data: { session }, error } = await getSession();
+    if (!session && error) throw error;
 
     // 2. Si la session est encore en train de se charger depuis le localStorage
     if (!session || error) {
@@ -46,8 +47,7 @@ export class SupabaseConnector implements PowerSyncBackendConnector {
 
     const endpoint = process.env.NEXT_PUBLIC_POWERSYNC_URL;
     if (!endpoint) {
-      console.error("PowerSync: NEXT_PUBLIC_POWERSYNC_URL n'est pas défini dans .env");
-      return null;
+      throw new Error("PowerSync: NEXT_PUBLIC_POWERSYNC_URL n'est pas défini.");
     }
 
     return {
@@ -79,14 +79,8 @@ export class SupabaseConnector implements PowerSyncBackendConnector {
             throw new Error(`UPDATE ${table}/${op.id}: aucune ligne modifiée; vérifier l'existence de la ligne et les politiques RLS.`);
           }
         } else if (op.op === UpdateType.DELETE) {
-          const { error, count } = await this.client
-            .from(table)
-            .delete({ count: 'exact' })
-            .eq('id', op.id);
+          const { error } = await this.client.from(table).delete().eq('id', op.id);
           if (error) throw error;
-          if (count !== 1) {
-            throw new Error(`DELETE ${table}/${op.id}: aucune ligne supprimée; vérifier l'existence de la ligne et les politiques RLS.`);
-          }
         }
       }
       await transaction.complete();

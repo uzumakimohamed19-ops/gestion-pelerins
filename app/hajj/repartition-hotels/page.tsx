@@ -455,11 +455,6 @@ export default function RepartitionHotelsPage() {
         [chambre.id, ...idsArray]
       )
 
-      await supabase
-        .from('pelerins')
-        .update({ [champ]: chambre.id })
-        .in('id', idsArray)
-
       setSelectedPelerinIds(new Set())
     } catch (e) {
       console.error('Erreur assignation groupée :', e)
@@ -477,7 +472,6 @@ export default function RepartitionHotelsPage() {
 
     try {
       await db.execute(`UPDATE pelerins SET ${champ} = NULL WHERE id = ?`, [pelerinId])
-      await supabase.from('pelerins').update({ [champ]: null }).eq('id', pelerinId)
     } catch (e) {
       console.error('Erreur retrait :', e)
     } finally {
@@ -496,9 +490,7 @@ export default function RepartitionHotelsPage() {
 
     try {
       await db.execute(`UPDATE pelerins SET ${champ} = NULL WHERE ${champ} = ? AND agence_id = ?`, [chambre.id, chambre.agence_id])
-      await supabase.from('pelerins').update({ [champ]: null }).eq(champ, chambre.id).eq('agence_id', chambre.agence_id)
       await db.execute(`DELETE FROM chambres WHERE id = ? AND agence_id = ?`, [chambre.id, chambre.agence_id])
-      await supabase.from('chambres').delete().eq('id', chambre.id).eq('agence_id', chambre.agence_id)
     } catch (err) {
       console.error('Erreur suppression chambre :', err)
       alert('Impossible de supprimer la chambre.')
@@ -523,13 +515,8 @@ export default function RepartitionHotelsPage() {
       for (const chId of chambreIds) {
         await db.execute(`UPDATE pelerins SET ${champ} = NULL WHERE ${champ} = ? AND agence_id = ?`, [chId, currentAgenceId])
       }
-      if (chambreIds.length > 0) {
-        await supabase.from('pelerins').update({ [champ]: null }).in(champ, chambreIds).eq('agence_id', currentAgenceId)
-      }
       await db.execute(`DELETE FROM chambres WHERE hotel_id = ? AND agence_id = ?`, [targetHotel.id, currentAgenceId])
-      await supabase.from('chambres').delete().eq('hotel_id', targetHotel.id).eq('agence_id', currentAgenceId)
       await db.execute(`DELETE FROM hotels WHERE id = ? AND agence_id = ?`, [targetHotel.id, currentAgenceId])
-      await supabase.from('hotels').delete().eq('id', targetHotel.id).eq('agence_id', currentAgenceId)
 
       setSelectedHotelId('all')
     } catch (err) {
