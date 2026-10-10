@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react'
 import { useSearchParams, useRouter } from 'next/navigation'
 import { usePowerSync, useQuery } from '@powersync/react'
-import { supabase, getUser } from '@/lib/supabase'
+import { requireSupabaseRows, supabase, getUser } from '@/lib/supabase'
 import { 
   User, CreditCard, ArrowLeft, Pencil, Printer, Save, Syringe, 
   BookOpen, Hotel, Plane, Loader2, ShieldCheck, Tag, Building, 
@@ -244,10 +244,20 @@ export default function DetailsPelerin() {
         payment_date: paymentForm.paymentDate || new Date().toISOString().slice(0, 10),
         payment_mode: paymentForm.paymentMode,
         notes: paymentForm.notes.trim() || null,
+        created_at: new Date().toISOString(),
       }
+      const { error: paymentError } = await supabase.from('pelerin_payments').insert(insertedPayment)
+      if (paymentError) throw paymentError
+      const { data: updatedRows, error: updateError } = await supabase
+        .from('pelerins')
+        .update({ total_paye: nextTotalPaid })
+        .eq('id', p.id)
+        .select('id')
+      requireSupabaseRows(updatedRows, updateError, 'mise à jour du total payé')
+
       await db.execute(
-        'INSERT INTO pelerin_payments (id, pelerin_id, amount, payment_date, payment_mode, notes, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
-        [insertedPayment.id, insertedPayment.pelerin_id, insertedPayment.amount, insertedPayment.payment_date, insertedPayment.payment_mode, insertedPayment.notes, new Date().toISOString()],
+        'INSERT OR REPLACE INTO pelerin_payments (id, pelerin_id, amount, payment_date, payment_mode, notes, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+        [insertedPayment.id, insertedPayment.pelerin_id, insertedPayment.amount, insertedPayment.payment_date, insertedPayment.payment_mode, insertedPayment.notes, insertedPayment.created_at],
       )
       await db.execute('UPDATE pelerins SET total_paye = ? WHERE id = ?', [nextTotalPaid, p.id])
 
@@ -268,6 +278,31 @@ export default function DetailsPelerin() {
 
     try {
       const nextDocumentUrl = p.document_url || null
+      const updatedFields = {
+        reference: p.reference || null,
+        agence_ou_personne_associee: p.agence_ou_personne_associee || null,
+        vacciné: p.vacciné ? 1 : 0,
+        visite_medicale: p.visite_medicale ? 1 : 0,
+        formation_suivie: p.formation_suivie ? 1 : 0,
+        date_formation: p.date_formation || null,
+        groupe_formation: p.groupe_formation || null,
+        hotel_mecque: p.hotel_mecque || null,
+        hotel_medine: p.hotel_medine || null,
+        hotel_statut: p.hotel_statut ? 1 : 0,
+        groupe_encadrement: p.groupe_encadrement || null,
+        date_depart: p.date_depart || null,
+        date_retour: p.date_retour || null,
+        visa_obtenu: p.visa_obtenu ? 1 : 0,
+        document_url: nextDocumentUrl,
+        notes: p.notes || null,
+      }
+      const { data, error } = await supabase
+        .from('pelerins')
+        .update(updatedFields)
+        .eq('id', p.id)
+        .select('id')
+      requireSupabaseRows(data, error, 'mise à jour du dossier')
+
       await db.execute(
         `UPDATE pelerins SET 
             reference = ?, 
@@ -287,25 +322,7 @@ export default function DetailsPelerin() {
             document_url = ?, 
             notes = ? 
          WHERE id = ?`,
-        [
-          p.reference || null,
-          p.agence_ou_personne_associee || null,
-          p.vacciné ? 1 : 0,
-          p.visite_medicale ? 1 : 0,
-          p.formation_suivie ? 1 : 0,
-          p.date_formation || null,
-          p.groupe_formation || null,
-          p.hotel_mecque || null,
-          p.hotel_medine || null,
-          p.hotel_statut ? 1 : 0,
-          p.groupe_encadrement || null,
-          p.date_depart || null,
-          p.date_retour || null,
-          p.visa_obtenu ? 1 : 0,
-          nextDocumentUrl,
-          p.notes || null,
-          p.id
-        ],
+        [...Object.values(updatedFields), p.id],
       )
       setPelerin({ ...p, document_url: nextDocumentUrl })
       alert("🚀 Dossier mis à jour avec succès !")

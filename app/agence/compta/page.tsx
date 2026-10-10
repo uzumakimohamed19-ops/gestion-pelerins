@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback, useMemo } from 'react'
 import { usePowerSync, useQuery } from '@powersync/react'
-import { supabase, getUser } from '../../../lib/supabase'
+import { requireSupabaseRows, supabase, getUser } from '../../../lib/supabase'
 import { useYear } from '@/lib/YearContext'
 import { YearSelector } from '@/components/YearSelector'
 import {
@@ -241,10 +241,24 @@ function FormDepense({
     setSaving(true)
     setError('')
     try {
+      const depense = {
+        id: crypto.randomUUID(),
+        agence_id: agenceId,
+        libelle: libelle.trim(),
+        categorie,
+        montant: +montant,
+        mode_paiement: mode,
+        date_depense: date,
+        notes: notes.trim() || null,
+        created_at: new Date().toISOString(),
+      }
+      const { error: supabaseError } = await supabase.from('depenses').insert(depense)
+      if (supabaseError) throw supabaseError
+
       await db.execute(
-        `INSERT INTO depenses (id, agence_id, libelle, categorie, montant, mode_paiement, date_depense, notes, created_at) 
+        `INSERT OR REPLACE INTO depenses (id, agence_id, libelle, categorie, montant, mode_paiement, date_depense, notes, created_at) 
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [crypto.randomUUID(), agenceId, libelle.trim(), categorie, +montant, mode, date, notes.trim() || null, new Date().toISOString()]
+        [depense.id, depense.agence_id, depense.libelle, depense.categorie, depense.montant, depense.mode_paiement, depense.date_depense, depense.notes, depense.created_at]
       )
       onAdded()
       onClose()
@@ -401,12 +415,26 @@ function FormBudgetModulable({
     const montant = parseInt(nouveauPlafond.replace(/\D/g, ''), 10) || 0
     const catId = nouveauLabel.trim().toUpperCase().replace(/\s+/g, '_')
     const newId = crypto.randomUUID()
+    const now = new Date().toISOString()
+    const budget = {
+      id: newId,
+      agence_id: agenceId,
+      categorie_id: catId,
+      label: nouveauLabel.trim(),
+      couleur: nouvelleCouleur,
+      montant_plafond: montant,
+      periode_type: 'MOIS',
+      created_at: now,
+      updated_at: now,
+    }
 
     try {
+      const { error } = await supabase.from('budgets_agence').insert(budget)
+      if (error) throw error
       await db.execute(
-        `INSERT INTO budgets_agence (id, agence_id, categorie_id, label, couleur, montant_plafond, periode_type, created_at, updated_at)
+        `INSERT OR REPLACE INTO budgets_agence (id, agence_id, categorie_id, label, couleur, montant_plafond, periode_type, created_at, updated_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [newId, agenceId, catId, nouveauLabel.trim(), nouvelleCouleur, montant, 'MOIS', new Date().toISOString(), new Date().toISOString()]
+        [budget.id, budget.agence_id, budget.categorie_id, budget.label, budget.couleur, budget.montant_plafond, budget.periode_type, budget.created_at, budget.updated_at]
       )
       setNouveauLabel('')
       setNouveauPlafond('')
@@ -418,6 +446,13 @@ function FormBudgetModulable({
   const handleSupprimerPoste = async (id: string, label: string) => {
     if (!confirm(`Supprimer le poste budgétaire "${label}" de votre base de données ?`)) return
     try {
+      const { data, error } = await supabase
+        .from('budgets_agence')
+        .delete()
+        .eq('id', id)
+        .eq('agence_id', agenceId)
+        .select('id')
+      requireSupabaseRows(data, error, 'suppression du poste budgétaire')
       await db.execute(`DELETE FROM budgets_agence WHERE id = ? AND agence_id = ?`, [id, agenceId])
     } catch (e: any) {
       alert("Erreur lors de la suppression : " + e?.message)
@@ -428,9 +463,16 @@ function FormBudgetModulable({
     setSaving(true)
     try {
       for (const item of localList) {
+        const updatedAt = new Date().toISOString()
+        const { data, error } = await supabase
+          .from('budgets_agence')
+          .update({ montant_plafond: item.montant_plafond, updated_at: updatedAt })
+          .eq('id', item.id)
+          .select('id')
+        requireSupabaseRows(data, error, 'mise à jour du budget')
         await db.execute(
           `UPDATE budgets_agence SET montant_plafond = ?, updated_at = ? WHERE id = ?`,
-          [item.montant_plafond, new Date().toISOString(), item.id]
+          [item.montant_plafond, updatedAt, item.id]
         )
       }
       onClose()
@@ -602,13 +644,21 @@ function ModalReglerCreance({
     const nouveauTotalVerse = Number(operation.montant_verse || 0) + montantNum
     const totalVente = Number(operation.prix_vente || 0)
     const nouveauStatut = nouveauTotalVerse >= totalVente ? 'PAYE' : 'AVANCE'
+    const updatedAt = new Date().toISOString()
 
     try {
+      const { data, error } = await supabase
+        .from('operations_agence')
+        .update({ montant_verse: nouveauTotalVerse, statut_paiement: nouveauStatut, updated_at: updatedAt })
+        .eq('id', operation.id)
+        .select('id')
+      requireSupabaseRows(data, error, 'enregistrement de l’encaissement')
+
       await db.execute(
         `UPDATE operations_agence 
          SET montant_verse = ?, statut_paiement = ?, updated_at = ? 
          WHERE id = ?`,
-        [nouveauTotalVerse, nouveauStatut, new Date().toISOString(), operation.id]
+        [nouveauTotalVerse, nouveauStatut, updatedAt, operation.id]
       )
       onEncaisse()
       onClose()
@@ -734,13 +784,34 @@ export default function ComptabiliteAgence() {
     async function initDefaultBudgets() {
       if (!agenceId) return
       try {
-        const check = await db.getAll(`SELECT id FROM budgets_agence WHERE agence_id = ? LIMIT 1`, [agenceId])
-        if (check.length === 0) {
-          for (const b of BUDGETS_DEFAUT) {
+        const { data: existingBudgets, error: selectError } = await supabase
+          .from('budgets_agence')
+          .select('categorie_id')
+          .eq('agence_id', agenceId)
+        if (selectError) throw selectError
+
+        const existingCategories = new Set((existingBudgets ?? []).map((budget) => budget.categorie_id))
+        const now = new Date().toISOString()
+        const defaultsToInsert = BUDGETS_DEFAUT
+          .filter((budget) => !existingCategories.has(budget.categorie_id))
+          .map((budget) => ({
+            ...budget,
+            id: crypto.randomUUID(),
+            agence_id: agenceId,
+            periode_type: 'MOIS',
+            created_at: now,
+            updated_at: now,
+          }))
+
+        if (defaultsToInsert.length > 0) {
+          const { error: insertError } = await supabase.from('budgets_agence').insert(defaultsToInsert)
+          if (insertError) throw insertError
+
+          for (const budget of defaultsToInsert) {
             await db.execute(
-              `INSERT INTO budgets_agence (id, agence_id, categorie_id, label, couleur, montant_plafond, periode_type, created_at, updated_at)
+              `INSERT OR REPLACE INTO budgets_agence (id, agence_id, categorie_id, label, couleur, montant_plafond, periode_type, created_at, updated_at)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-              [crypto.randomUUID(), agenceId, b.categorie_id, b.label, b.couleur, b.montant_plafond, 'MOIS', new Date().toISOString(), new Date().toISOString()]
+              [budget.id, budget.agence_id, budget.categorie_id, budget.label, budget.couleur, budget.montant_plafond, budget.periode_type, budget.created_at, budget.updated_at]
             )
           }
         }
@@ -877,10 +948,32 @@ export default function ComptabiliteAgence() {
 
   const delDep = async (dep: Depense) => {
     if (!confirm(`Supprimer la dépense "${dep.libelle}" ?`)) return
+    const archive = {
+      id: crypto.randomUUID(),
+      agence_id: dep.agence_id,
+      depense_id: dep.id,
+      libelle: dep.libelle,
+      categorie: dep.categorie,
+      montant: dep.montant,
+      mode_paiement: dep.mode_paiement,
+      date_depense: dep.date_depense,
+      notes: dep.notes || null,
+      created_at: dep.created_at,
+      supprime_le: new Date().toISOString(),
+    }
+    const { error: archiveError } = await supabase.from('depenses_supprimees').insert(archive)
+    if (archiveError) throw archiveError
+    const { data: deletedRows, error: deleteError } = await supabase
+      .from('depenses')
+      .delete()
+      .eq('id', dep.id)
+      .select('id')
+    requireSupabaseRows(deletedRows, deleteError, 'suppression de la dépense')
+
     await db.execute(
-      `INSERT INTO depenses_supprimees (id, agence_id, depense_id, libelle, categorie, montant, mode_paiement, date_depense, notes, created_at, supprime_le) 
+      `INSERT OR REPLACE INTO depenses_supprimees (id, agence_id, depense_id, libelle, categorie, montant, mode_paiement, date_depense, notes, created_at, supprime_le) 
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [crypto.randomUUID(), dep.agence_id, dep.id, dep.libelle, dep.categorie, dep.montant, dep.mode_paiement, dep.date_depense, dep.notes || null, dep.created_at, new Date().toISOString()]
+      [archive.id, archive.agence_id, archive.depense_id, archive.libelle, archive.categorie, archive.montant, archive.mode_paiement, archive.date_depense, archive.notes, archive.created_at, archive.supprime_le]
     )
     await db.execute('DELETE FROM depenses WHERE id = ?', [dep.id])
   }

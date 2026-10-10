@@ -2,7 +2,7 @@
 import { useEffect, useState, useMemo } from 'react'
 import { useSearchParams } from 'next/navigation' 
 import { usePowerSync, useQuery } from '@powersync/react'
-import { supabase } from '@/lib/supabase'
+import { requireSupabaseRows, supabase } from '@/lib/supabase'
 import { Search, Globe, ShieldCheck, Eye, CreditCard, AlertCircle, ArrowLeft, Lock } from 'lucide-react'
 import Link from 'next/link'
 import { useYear } from '@/lib/YearContext'
@@ -90,6 +90,15 @@ export default function ListeAdminPelerins() {
       const query = field === 'sur_plateforme_gouv'
         ? 'UPDATE pelerins SET sur_plateforme_gouv = ?, hajj_session_id = ? WHERE id = ?'
         : 'UPDATE pelerins SET sur_plateforme_nusuk = ? WHERE id = ?'
+      const updates = field === 'sur_plateforme_gouv'
+        ? { sur_plateforme_gouv: value ? 1 : 0, hajj_session_id: sessionId }
+        : { sur_plateforme_nusuk: value ? 1 : 0 }
+      const { data, error } = await supabase
+        .from('pelerins')
+        .update(updates)
+        .eq('id', pelerinId)
+        .select('id')
+      requireSupabaseRows(data, error, 'mise à jour du statut')
       await db.execute(query, field === 'sur_plateforme_gouv' ? [value ? 1 : 0, sessionId, pelerinId] : [value ? 1 : 0, pelerinId])
     } catch (err) {
       console.error('Erreur toggleStatus', err)

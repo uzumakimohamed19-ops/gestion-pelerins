@@ -984,8 +984,11 @@ export default function NouvelleOperation() {
     try {
       const columns = Object.keys(payload)
       const values = columns.map(c => (payload as any)[c])
+      const { error } = await supabase.from('operations_agence').insert(payload)
+      if (error) throw error
+
       await db.execute(
-        `INSERT INTO operations_agence (${columns.join(', ')}) VALUES (${columns.map(() => '?').join(', ')})`,
+        `INSERT OR REPLACE INTO operations_agence (${columns.join(', ')}) VALUES (${columns.map(() => '?').join(', ')})`,
         values
       )
       setShowRecu(true)

@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useRef } from 'react'
-import { usePowerSync, useQuery } from '@powersync/react'
+import { useQuery } from '@powersync/react'
 import { supabase, getUser } from '@/lib/supabase'
 import { 
   ScanLine, Loader2, Save, Upload, RotateCcw, Smartphone, 
@@ -404,8 +404,6 @@ function parseMrzRawLines(rawInput: string | string[]) {
 }
 
 export default function AjouterPelerin() {
-  const db = usePowerSync()
-
   // Données formulaire
   const [nom, setNom] = useState('')
   const [prenom, setPrenom] = useState('')
@@ -1056,37 +1054,31 @@ export default function AjouterPelerin() {
         photoUrl = uploadedPhoto.path
       }
 
-      await db.execute(
-        `INSERT INTO pelerins (
-          id, nom_complet, prenom, reference, num_passeport, telephone_pelerin, 
-          sexe, date_naissance, date_expiration, date_inscription, campagne, 
-          prix_package, total_paye, nom_package, document_url, photo_url, notes,
-          agence_id, agence_ou_personne_associee, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [
-          crypto.randomUUID(),
-          nom.trim(),
-          prenom.trim(),
-          reference.trim() || null,
-          passeport.trim() || null,
-          phone.trim() || null,
-          sexe || null,
-          dateNaissance || null,
-          dateExpiration || null,
-          dateInscription || null,
-          campagne || null,
-          total,
-          paye,
-          nomPackage.trim() || null,
-          fileUrl || null,
-          photoUrl || null,
-          notes.trim() || null,
-          agenceId,
-          associe.trim() || null,
-          new Date().toISOString(),
-        ],
-      )
-      setMessage({ text: "✅ ENREGISTRÉ AVEC SUCCÈS !", type: 'success' })
+      const { error } = await supabase.from('pelerins').insert({
+        id: crypto.randomUUID(),
+        nom_complet: nom.trim(),
+        prenom: prenom.trim(),
+        reference: reference.trim() || null,
+        num_passeport: passeport.trim() || null,
+        telephone_pelerin: phone.trim() || null,
+        sexe: sexe || null,
+        date_naissance: dateNaissance || null,
+        date_expiration: dateExpiration || null,
+        date_inscription: dateInscription || null,
+        campagne: campagne || null,
+        prix_package: total,
+        total_paye: paye,
+        nom_package: nomPackage.trim() || null,
+        document_url: fileUrl || null,
+        photo_url: photoUrl || null,
+        notes: notes.trim() || null,
+        agence_id: agenceId,
+        agence_ou_personne_associee: associe.trim() || null,
+        created_at: new Date().toISOString(),
+      })
+      if (error) throw error
+
+      setMessage({ text: "✅ PÈLERIN ENREGISTRÉ SUR SUPABASE.", type: 'success' })
       setTimeout(resetForm, 2000)
     } catch (err: unknown) {
       console.error(err)

@@ -3,7 +3,7 @@
 import { createContext, useContext, useEffect, useMemo, useState, useCallback, useRef } from 'react'
 import { usePathname, useRouter } from 'next/navigation'
 import { usePowerSync, useQuery } from '@powersync/react'
-import { supabase, getSession, isOfflineMode } from '@/lib/supabase'
+import { requireSupabaseRows, supabase, getSession, isOfflineMode } from '@/lib/supabase'
 import { Capacitor } from '@capacitor/core'
 import { App as CapacitorApp } from '@capacitor/app'
 import { NativeBiometric } from '@capgo/capacitor-native-biometric'
@@ -503,11 +503,22 @@ export default function ProfileProvider({ children }: { children: React.ReactNod
       const id = crypto.randomUUID()
       const now = new Date().toISOString()
       const pinHash = await hashPin(pin)
+      const profile = {
+        id,
+        user_id: userId,
+        name: name.trim(),
+        profile_type: type,
+        pin_hash: pinHash,
+        created_at: now,
+        updated_at: now,
+      }
+      const { error } = await supabase.from('account_profiles').insert(profile)
+      if (error) throw error
 
       await db.execute(
-        `INSERT INTO account_profiles (id, user_id, name, profile_type, pin_hash, created_at, updated_at) 
+        `INSERT OR REPLACE INTO account_profiles (id, user_id, name, profile_type, pin_hash, created_at, updated_at) 
          VALUES (?, ?, ?, ?, ?, ?, ?)`,
-        [id, userId, name.trim(), type, pinHash, now, now]
+        [profile.id, profile.user_id, profile.name, profile.profile_type, profile.pin_hash, profile.created_at, profile.updated_at]
       )
     },
     [db, userId, localProfiles]
@@ -525,6 +536,12 @@ export default function ProfileProvider({ children }: { children: React.ReactNod
 
       const newHash = await hashPin(newPin)
       const now = new Date().toISOString()
+      const { data, error } = await supabase
+        .from('account_profiles')
+        .update({ pin_hash: newHash, updated_at: now })
+        .eq('id', profileId)
+        .select('id')
+      requireSupabaseRows(data, error, 'mise à jour du PIN')
 
       await db.execute(
         `UPDATE account_profiles SET pin_hash = ?, updated_at = ? WHERE id = ?`,

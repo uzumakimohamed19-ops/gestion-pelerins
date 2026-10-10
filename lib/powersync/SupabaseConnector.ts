@@ -14,27 +14,23 @@ export class SupabaseConnector implements PowerSyncBackendConnector {
   }
 
   async fetchCredentials() {
-    try {
-      const { data: { session }, error } = await getSession();
-      if (error || !session) {
-        console.warn("PowerSync: Aucune session active");
-        return null;
-      }
-
-      const endpoint = process.env.NEXT_PUBLIC_POWERSYNC_URL;
-      if (!endpoint) {
-        throw new Error("PowerSync: NEXT_PUBLIC_POWERSYNC_URL manquant");
-      }
-
-      return {
-        endpoint,
-        token: session.access_token,
-        expiresAt: session.expires_at ? new Date(session.expires_at * 1000) : undefined
-      };
-    } catch (e) {
-      console.error("PowerSync fetchCredentials error:", e);
+    const { data: { session }, error } = await getSession();
+    if (error) throw error;
+    if (!session) {
+      console.warn("PowerSync: Aucune session active");
       return null;
     }
+
+    const endpoint = process.env.NEXT_PUBLIC_POWERSYNC_URL;
+    if (!endpoint) {
+      throw new Error("PowerSync: NEXT_PUBLIC_POWERSYNC_URL manquant");
+    }
+
+    return {
+      endpoint,
+      token: session.access_token,
+      expiresAt: session.expires_at ? new Date(session.expires_at * 1000) : undefined
+    };
   }
 
   async uploadData(database: AbstractPowerSyncDatabase): Promise<void> {
@@ -53,20 +49,11 @@ export class SupabaseConnector implements PowerSyncBackendConnector {
           if (error) throw error;
 
         } else if (op.op === UpdateType.PATCH) {
-          // Utilisation d'un update simple sans bloquer si la ligne est temporairement absente
           const { error } = await this.client
             .from(table)
             .update(record)
             .eq('id', op.id);
-          
-          if (error) {
-            // Si la ligne n'existe pas encore côté Supabase, on fait un upsert de secours
-            if (error.code === 'PGRST116') {
-              await this.client.from(table).upsert({ id: op.id, ...record });
-            } else {
-              throw error;
-            }
-          }
+          if (error) throw error;
 
         } else if (op.op === UpdateType.DELETE) {
           const { error } = await this.client
@@ -78,32 +65,11 @@ export class SupabaseConnector implements PowerSyncBackendConnector {
 
       } catch (error: any) {
         console.error(`[PowerSync Upload Error] Table: ${table}, Op: ${op.op}`, error);
-
-        // Si l'erreur est une contrainte PostgreSQL non réparable ou RLS bloquante
-        // (ex: colonne inexistante, syntaxe 400, contrainte d'unicité)
-        // on abandonne l'opération corrompue pour NE PAS GELER toute la base de données
-        if (
-          error.code === '42703' || // Undefined column
-          error.code === '23502' || // Not null violation
-          error.code === '23505' || // Unique violation
-          error.status === 400 ||   // Bad request
-          error.status === 403      // RLS refusé
-        ) {
-          console.warn(`[PowerSync] Opération ${op.id} rejetée par Supabase, ignorée pour débloquer le checkpoint :`, error.message);
-          continue;
-        }
-
-        // Si c'est une perte de connexion réseau réelle, on relance pour réessayer plus tard
-        if (!navigator.onLine) {
-          throw error;
-        }
-
-        // Autre erreur : on continue pour débloquer la file
-        continue;
+        throw error;
       }
     }
 
-    // Valide obligatoirement la transaction pour libérer le checkpoint
+    // N'acquitter la transaction qu'après la réussite de toutes ses opérations.
     await transaction.complete();
   }
 }

@@ -3,6 +3,7 @@
 import { useState, useMemo } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { usePowerSync, useQuery } from '@powersync/react'
+import { requireSupabaseRows, supabase } from '@/lib/supabase'
 import { Loader2, ArrowLeft, Building2, Phone, MapPin, CheckCircle2, Search, Users, ArrowRight, RefreshCw, Globe, Trash2 } from 'lucide-react'
 import Link from 'next/link'
 
@@ -25,6 +26,12 @@ export default function AgencePelerinsPage() {
     setUpdatingId(pelerinId + field)
     try {
       const column = field === 'sur_plateforme_gouv' ? 'sur_plateforme_gouv' : 'sur_plateforme_nusuk'
+      const { data, error } = await supabase
+        .from('pelerins')
+        .update({ [column]: value ? 1 : 0 })
+        .eq('id', pelerinId)
+        .select('id')
+      requireSupabaseRows(data, error, 'mise à jour du statut')
       await db.execute(`UPDATE pelerins SET ${column} = ? WHERE id = ?`, [value ? 1 : 0, pelerinId])
     } finally {
       setUpdatingId(null)

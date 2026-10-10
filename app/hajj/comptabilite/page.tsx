@@ -1,6 +1,7 @@
 'use client'
 import { useEffect, useState, useMemo, useRef } from 'react'
 import { usePowerSync, useQuery } from '@powersync/react'
+import { requireSupabaseRows, supabase } from '@/lib/supabase'
 import { useYear } from '@/lib/YearContext'
 import { YearSelector } from '@/components/YearSelector'
 import {
@@ -237,9 +238,20 @@ export default function ComptabiliteHajj() {
 
     // Envoi du montant total consolidé dans la table depenses_hajj
     try {
+      const depense = {
+        id: crypto.randomUUID(),
+        type_cible: typeCible,
+        cible_valeur: finalValeur,
+        libelle: finalLibelle || 'Frais divers',
+        montant: montantTotalStocke,
+        created_at: new Date().toISOString(),
+      }
+      const { error } = await supabase.from('depenses_hajj').insert(depense)
+      if (error) throw error
+
       await db.execute(
-        'INSERT INTO depenses_hajj (id, type_cible, cible_valeur, libelle, montant, created_at) VALUES (?, ?, ?, ?, ?, ?)',
-        [crypto.randomUUID(), typeCible, finalValeur, finalLibelle || 'Frais divers', montantTotalStocke, new Date().toISOString()],
+        'INSERT OR REPLACE INTO depenses_hajj (id, type_cible, cible_valeur, libelle, montant, created_at) VALUES (?, ?, ?, ?, ?, ?)',
+        [depense.id, depense.type_cible, depense.cible_valeur, depense.libelle, depense.montant, depense.created_at],
       )
       setCibleValeur('')
       setMontantSaisi('')
@@ -254,6 +266,8 @@ export default function ComptabiliteHajj() {
   const handleDeleteDepense = async (id: string) => {
     if (!confirm('Supprimer cette écriture de dépense ?')) return
     try {
+      const { data, error } = await supabase.from('depenses_hajj').delete().eq('id', id).select('id')
+      requireSupabaseRows(data, error, 'suppression de la dépense Hajj')
       await db.execute('DELETE FROM depenses_hajj WHERE id = ?', [id])
     } catch {
       alert("Erreur lors de la suppression de la dépense.")

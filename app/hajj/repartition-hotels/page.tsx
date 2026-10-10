@@ -4,7 +4,7 @@ import React, { useState, useMemo, useTransition, useEffect } from 'react'
 import Link from 'next/link'
 import { useQuery, usePowerSync } from '@powersync/react'
 import { useYear } from '@/lib/YearContext'
-import { supabase, getUser } from '@/lib/supabase'
+import { requireSupabaseRows, supabase, getUser } from '@/lib/supabase'
 import jsPDF from 'jspdf'
 import {
   ArrowLeft,
@@ -449,6 +449,12 @@ export default function RepartitionHotelsPage() {
     const idsArray = Array.from(selectedPelerinIds)
 
     try {
+      const { data, error } = await supabase
+        .from('pelerins')
+        .update({ [champ]: chambre.id })
+        .in('id', idsArray)
+        .select('id')
+      requireSupabaseRows(data, error, 'assignation des pèlerins', idsArray.length)
       const placeholders = idsArray.map(() => '?').join(',')
       await db.execute(
         `UPDATE pelerins SET ${champ} = ? WHERE id IN (${placeholders})`,
@@ -471,6 +477,12 @@ export default function RepartitionHotelsPage() {
     const champ = villeActive === 'Mecque' ? 'chambre_mecque_id' : 'chambre_medine_id'
 
     try {
+      const { data, error } = await supabase
+        .from('pelerins')
+        .update({ [champ]: null })
+        .eq('id', pelerinId)
+        .select('id')
+      requireSupabaseRows(data, error, 'retrait de la chambre')
       await db.execute(`UPDATE pelerins SET ${champ} = NULL WHERE id = ?`, [pelerinId])
     } catch (e) {
       console.error('Erreur retrait :', e)
@@ -489,8 +501,27 @@ export default function RepartitionHotelsPage() {
     const champ = chambre.ville === 'Mecque' ? 'chambre_mecque_id' : 'chambre_medine_id'
 
     try {
-      await db.execute(`UPDATE pelerins SET ${champ} = NULL WHERE ${champ} = ? AND agence_id = ?`, [chambre.id, chambre.agence_id])
-      await db.execute(`DELETE FROM chambres WHERE id = ? AND agence_id = ?`, [chambre.id, chambre.agence_id])
+      const { data: updatedPelerins, error: updateError } = await supabase
+        .from('pelerins')
+        .update({ [champ]: null })
+        .eq(champ, chambre.id)
+        .eq('agence_id', chambre.agence_id)
+        .select('id')
+      if (updateError) throw updateError
+      const { data: deletedRooms, error: deleteError } = await supabase
+        .from('chambres')
+        .delete()
+        .eq('id', chambre.id)
+        .eq('agence_id', chambre.agence_id)
+        .select('id')
+      const confirmedDeletedRooms = requireSupabaseRows(deletedRooms, deleteError, 'suppression de la chambre')
+
+      if (updatedPelerins.length > 0) {
+        const pelerinIds = updatedPelerins.map((pelerin) => pelerin.id)
+        const placeholders = pelerinIds.map(() => '?').join(',')
+        await db.execute(`UPDATE pelerins SET ${champ} = NULL WHERE id IN (${placeholders})`, pelerinIds)
+      }
+      await db.execute(`DELETE FROM chambres WHERE id = ?`, [confirmedDeletedRooms[0].id])
     } catch (err) {
       console.error('Erreur suppression chambre :', err)
       alert('Impossible de supprimer la chambre.')
@@ -512,11 +543,41 @@ export default function RepartitionHotelsPage() {
     const chambreIds = hotelChambres.map((c) => c.id)
 
     try {
-      for (const chId of chambreIds) {
-        await db.execute(`UPDATE pelerins SET ${champ} = NULL WHERE ${champ} = ? AND agence_id = ?`, [chId, currentAgenceId])
+      let updatedPelerinIds: string[] = []
+      if (chambreIds.length > 0) {
+        const { data: updatedPelerins, error: updateError } = await supabase
+          .from('pelerins')
+          .update({ [champ]: null })
+          .in(champ, chambreIds)
+          .eq('agence_id', currentAgenceId)
+          .select('id')
+        if (updateError) throw updateError
+        updatedPelerinIds = updatedPelerins.map((pelerin) => pelerin.id)
       }
-      await db.execute(`DELETE FROM chambres WHERE hotel_id = ? AND agence_id = ?`, [targetHotel.id, currentAgenceId])
-      await db.execute(`DELETE FROM hotels WHERE id = ? AND agence_id = ?`, [targetHotel.id, currentAgenceId])
+      const { data: deletedRooms, error: roomsError } = await supabase
+        .from('chambres')
+        .delete()
+        .eq('hotel_id', targetHotel.id)
+        .eq('agence_id', currentAgenceId)
+        .select('id')
+      if (roomsError) throw roomsError
+      const { data: deletedHotels, error: hotelError } = await supabase
+        .from('hotels')
+        .delete()
+        .eq('id', targetHotel.id)
+        .eq('agence_id', currentAgenceId)
+        .select('id')
+      const confirmedDeletedHotels = requireSupabaseRows(deletedHotels, hotelError, 'suppression de l’hôtel')
+
+      if (updatedPelerinIds.length > 0) {
+        const placeholders = updatedPelerinIds.map(() => '?').join(',')
+        await db.execute(`UPDATE pelerins SET ${champ} = NULL WHERE id IN (${placeholders})`, updatedPelerinIds)
+      }
+      if (deletedRooms.length > 0) {
+        const roomPlaceholders = deletedRooms.map(() => '?').join(',')
+        await db.execute(`DELETE FROM chambres WHERE id IN (${roomPlaceholders})`, deletedRooms.map((room) => room.id))
+      }
+      await db.execute(`DELETE FROM hotels WHERE id = ?`, [confirmedDeletedHotels[0].id])
 
       setSelectedHotelId('all')
     } catch (err) {

@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useRef, useTransition } from 'react'
 import Link from 'next/link'
 import { useQuery, usePowerSync } from '@powersync/react'
-import { supabase, getUser } from '@/lib/supabase'
+import { requireSupabaseRows, supabase, getUser } from '@/lib/supabase'
 import {
   ArrowLeft,
   Building2,
@@ -151,17 +151,16 @@ export default function ConfigurationAgencePage() {
 
     try {
       const base64 = await compressImageToBase64(file)
-      setLogoBase64(base64)
 
       // 1. Mise à jour Supabase Cloud en priorité
-      const { error: sbError } = await supabase
+      const { data, error: sbError } = await supabase
         .from('agences')
         .update({ logo_base64: base64 })
         .eq('id', agenceActive.id)
+        .select('id')
 
-      if (sbError) {
-        throw new Error(`Erreur Supabase: ${sbError.message} (Vérifiez les droits RLS)`)
-      }
+      requireSupabaseRows(data, sbError, 'mise à jour du logo')
+      setLogoBase64(base64)
 
       // 2. Mise à jour locale SQLite PowerSync
       try {
@@ -190,18 +189,19 @@ export default function ConfigurationAgencePage() {
 
   const handleRemoveLogo = async () => {
     if (!agenceActive?.id) return
-    setLogoBase64(null)
     setErrorMsg(null)
 
     try {
-      const { error: sbError } = await supabase
+      const { data, error: sbError } = await supabase
         .from('agences')
         .update({ logo_base64: null })
         .eq('id', agenceActive.id)
+        .select('id')
 
-      if (sbError) throw new Error(sbError.message)
+      requireSupabaseRows(data, sbError, 'suppression du logo')
 
       await db.execute(`UPDATE agences SET logo_base64 = NULL WHERE id = ?`, [agenceActive.id]).catch(() => {})
+      setLogoBase64(null)
       localStorage.removeItem(`agency_receipt_logo_${agenceActive.id}`)
       
       if (fileInputRef.current) fileInputRef.current.value = ''
@@ -228,14 +228,13 @@ export default function ConfigurationAgencePage() {
           logo_base64: logoBase64 || null,
         }
 
-        const { error: sbError } = await supabase
+        const { data, error: sbError } = await supabase
           .from('agences')
           .update(payload)
           .eq('id', agenceActive.id)
+          .select('id')
 
-        if (sbError) {
-          throw new Error(`Erreur Supabase: ${sbError.message}`)
-        }
+        requireSupabaseRows(data, sbError, 'mise à jour de l’agence')
 
         await db.execute(
           `UPDATE agences 

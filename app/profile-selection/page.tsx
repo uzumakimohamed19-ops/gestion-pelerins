@@ -17,7 +17,7 @@ import {
 } from 'lucide-react'
 import { useWorkProfile, type WorkProfileType } from '@/lib/ProfileContext'
 import { usePowerSync } from '@powersync/react'
-import { supabase, getUser } from '@/lib/supabase'
+import { requireSupabaseRows, supabase, getUser } from '@/lib/supabase'
 
 export type ExtendedProfileType = WorkProfileType | 'intermediaire'
 
@@ -465,8 +465,13 @@ export default function ProfileSelectionPage() {
     }
 
     try {
+      const { data, error } = await supabase
+        .from('account_profiles')
+        .delete()
+        .eq('id', profileId)
+        .select('id')
+      requireSupabaseRows(data, error, 'suppression du profil')
       await db.execute('DELETE FROM account_profiles WHERE id = ?', [profileId])
-      await supabase.from('account_profiles').delete().eq('id', profileId)
 
       localStorage.removeItem(`bio_enrolled_${profileId}`)
       localStorage.removeItem(`last_pin_date_${profileId}`)

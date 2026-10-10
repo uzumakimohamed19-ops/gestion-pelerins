@@ -2,11 +2,17 @@ create table if not exists public.account_profiles (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null references auth.users(id) on delete cascade,
   name text not null check (char_length(trim(name)) between 1 and 80),
-  profile_type text not null check (profile_type in ('direction', 'agent')),
+  profile_type text not null check (profile_type in ('direction', 'agent', 'intermediaire')),
   pin_hash text not null check (pin_hash ~ '^[0-9a-f]{64}$'),
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+
+alter table public.account_profiles
+  drop constraint if exists account_profiles_profile_type_check;
+alter table public.account_profiles
+  add constraint account_profiles_profile_type_check
+  check (profile_type in ('direction', 'agent', 'intermediaire'));
 
 create unique index if not exists account_profiles_one_direction
   on public.account_profiles(user_id)

@@ -3,7 +3,7 @@
 import React, { useState, useMemo, useEffect, useTransition } from 'react'
 import Link from 'next/link'
 import { useQuery, usePowerSync } from '@powersync/react'
-import { supabase, getUser } from '../../../lib/supabase'
+import { requireSupabaseRows, supabase, getUser } from '../../../lib/supabase'
 import { useWorkProfile } from '@/lib/ProfileContext'
 import {
   ArrowLeft, Plus, Search, Calendar, ArrowRightLeft,
@@ -286,17 +286,20 @@ export default function JournalOperations() {
 
         const opId = operationToDelete.id
 
-        // 2. Suppression locale dans PowerSync (se répercute automatiquement)
-        await db.execute('DELETE FROM operations_agence WHERE id = ?', [opId])
+        const { data, error } = await supabase
+          .from('operations_agence')
+          .delete()
+          .eq('id', opId)
+          .select('id')
+        requireSupabaseRows(data, error, 'suppression de l’opération')
 
-        // 3. Suppression directe de secours sur Supabase Cloud
-        await supabase.from('operations_agence').delete().eq('id', opId)
+        await db.execute('DELETE FROM operations_agence WHERE id = ?', [opId])
 
         // Réinitialisation
         setOperationToDelete(null)
         setDirectorPin('')
-      } catch {
-        setDeleteError("Code PIN du Directeur incorrect. Suppression refusée.")
+      } catch (error) {
+        setDeleteError(error instanceof Error ? error.message : "Suppression refusée.")
       }
     })
   }

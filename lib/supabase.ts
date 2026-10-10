@@ -35,6 +35,19 @@ export const supabase = createClient(
   { global: { fetch: fetchWithTimeout } },
 )
 
+export function requireSupabaseRows<T>(
+  data: T[] | null,
+  error: { message: string } | null,
+  operation: string,
+  expectedRows = 1,
+): T[] {
+  if (error) throw error
+  if (!data || data.length < expectedRows) {
+    throw new Error(`Supabase a confirmé ${data?.length ?? 0} ligne(s) sur ${expectedRows} pour l'opération « ${operation} ».`)
+  }
+  return data
+}
+
 let supabaseUserPromise: Promise<any> | null = null
 let supabaseSessionPromise: Promise<any> | null = null
 

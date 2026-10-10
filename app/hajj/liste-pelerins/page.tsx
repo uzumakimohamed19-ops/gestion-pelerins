@@ -1,7 +1,7 @@
 'use client'
 import { useEffect, useLayoutEffect, useState, useRef, useMemo } from 'react'
 import { useQuery, usePowerSync } from '@powersync/react'
-import { supabase, getUser } from '@/lib/supabase'
+import { requireSupabaseRows, supabase, getUser } from '@/lib/supabase'
 import { useYear } from '@/lib/YearContext'
 import { YearSelector } from '@/components/YearSelector'
 import Link from 'next/link'
@@ -397,6 +397,8 @@ export default function ListePelerins() {
     try {
       const idsArray = Array.from(selectedIds)
       const placeholders = idsArray.map(() => '?').join(',')
+      const { data, error } = await supabase.from('pelerins').delete().in('id', idsArray).select('id')
+      requireSupabaseRows(data, error, 'suppression des pèlerins', idsArray.length)
       await db.execute(`DELETE FROM pelerins WHERE id IN (${placeholders})`, idsArray)
 
       setSelectedIds(new Set())
@@ -568,6 +570,12 @@ export default function ListePelerins() {
     if (!quickViewPelerin) return
     const nextVal = !quickViewPelerin[field] ? 1 : 0
     try {
+      const { data, error } = await supabase
+        .from('pelerins')
+        .update({ [field]: nextVal })
+        .eq('id', quickViewPelerin.id)
+        .select('id')
+      requireSupabaseRows(data, error, 'mise à jour du dossier')
       await db.execute(`UPDATE pelerins SET ${field} = ? WHERE id = ?`, [nextVal, quickViewPelerin.id])
       setQuickViewPelerin({ ...quickViewPelerin, [field]: nextVal })
     } catch (err) {
@@ -579,7 +587,14 @@ export default function ListePelerins() {
   const handleUpdateNotesQuick = async (notesVal: string) => {
     if (!quickViewPelerin) return
     try {
-      await db.execute(`UPDATE pelerins SET notes = ? WHERE id = ?`, [notesVal.trim() || null, quickViewPelerin.id])
+      const notes = notesVal.trim() || null
+      const { data, error } = await supabase
+        .from('pelerins')
+        .update({ notes })
+        .eq('id', quickViewPelerin.id)
+        .select('id')
+      requireSupabaseRows(data, error, 'mise à jour des notes')
+      await db.execute(`UPDATE pelerins SET notes = ? WHERE id = ?`, [notes, quickViewPelerin.id])
       setQuickViewPelerin({ ...quickViewPelerin, notes: notesVal })
     } catch (err) {
       console.error(err)
@@ -596,10 +611,28 @@ export default function ListePelerins() {
     setQuickViewUpdating(true)
     try {
       const nextTotal = (quickViewPelerin.total_paye || 0) + amount
+      const payment = {
+        id: crypto.randomUUID(),
+        pelerin_id: quickViewPelerin.id,
+        amount,
+        payment_date: new Date().toISOString().slice(0, 10),
+        payment_mode: 'ESPECES',
+        notes: 'Versement rapide',
+        created_at: new Date().toISOString(),
+      }
+      const { error: paymentError } = await supabase.from('pelerin_payments').insert(payment)
+      if (paymentError) throw paymentError
+      const { data: updatedRows, error: updateError } = await supabase
+        .from('pelerins')
+        .update({ total_paye: nextTotal })
+        .eq('id', quickViewPelerin.id)
+        .select('id')
+      requireSupabaseRows(updatedRows, updateError, 'mise à jour du total payé')
+
       await db.execute(
-        `INSERT INTO pelerin_payments (id, pelerin_id, amount, payment_date, payment_mode, notes, created_at)
+        `INSERT OR REPLACE INTO pelerin_payments (id, pelerin_id, amount, payment_date, payment_mode, notes, created_at)
          VALUES (?, ?, ?, ?, ?, ?, ?)`,
-        [crypto.randomUUID(), quickViewPelerin.id, amount, new Date().toISOString().slice(0, 10), 'ESPECES', 'Versement rapide', new Date().toISOString()]
+        [payment.id, payment.pelerin_id, payment.amount, payment.payment_date, payment.payment_mode, payment.notes, payment.created_at]
       )
       await db.execute(`UPDATE pelerins SET total_paye = ? WHERE id = ?`, [nextTotal, quickViewPelerin.id])
       setQuickViewPelerin({ ...quickViewPelerin, total_paye: nextTotal })
