@@ -118,7 +118,6 @@ function compressAndFormatPassportNusuk(
       const sw = cropRegion ? cropRegion.width : img.width
       const sh = cropRegion ? cropRegion.height : img.height
 
-      // Dimensions 100% originales conservées (sans redimensionnement forcé)
       const targetW = Math.round(sw)
       const targetH = Math.round(sh)
 
@@ -132,12 +131,10 @@ function compressAndFormatPassportNusuk(
       ctx.fillRect(0, 0, targetW, targetH)
       ctx.drawImage(img, sx, sy, sw, sh, 0, 0, targetW, targetH)
 
-      // Compression adaptative pour respecter le plafond de 400 Ko de Nusuk tout en gardant la résolution
       let quality = 0.85
       const generateBlob = (q: number) => {
         canvas.toBlob((blob) => {
           if (!blob) return reject(new Error('Erreur blob'))
-          // Si le fichier dépasse 390 Ko et qu'on peut encore baisser la compression
           if (blob.size > 390 * 1024 && q > 0.45) {
             generateBlob(q - 0.1)
             return
@@ -149,6 +146,35 @@ function compressAndFormatPassportNusuk(
       }
 
       generateBlob(quality)
+    }
+    img.onerror = reject
+    img.src = imageSrc
+  })
+}
+
+// 🎯 Fonction utilitaire pour découper spécifiquement la bande MRZ sélectionnée avant l'OCR
+function extractMrzRegionBase64(
+  imageSrc: string,
+  region: { x: number; y: number; width: number; height: number }
+): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const img = new Image()
+    img.crossOrigin = 'anonymous'
+    img.onload = () => {
+      const canvas = document.createElement('canvas')
+      canvas.width = Math.max(10, Math.round(region.width))
+      canvas.height = Math.max(10, Math.round(region.height))
+      const ctx = canvas.getContext('2d')
+      if (!ctx) return reject(new Error('Erreur canvas'))
+
+      ctx.fillStyle = '#FFFFFF'
+      ctx.fillRect(0, 0, canvas.width, canvas.height)
+      ctx.drawImage(
+        img,
+        region.x, region.y, region.width, region.height,
+        0, 0, canvas.width, canvas.height
+      )
+      resolve(canvas.toDataURL('image/jpeg', 0.95))
     }
     img.onerror = reject
     img.src = imageSrc
@@ -261,12 +287,10 @@ async function autoDetectAndCropNusuk(imageSrc: string): Promise<{
   })
 }
 
-// 🎯 PARSEUR ULTRA-TOLÉRANT POUR DOUCHETTE ET OUTPUTWEDGE THALES
 function parseMrzRawLines(rawInput: string | string[]) {
   const fullText = Array.isArray(rawInput) ? rawInput.join('\n') : String(rawInput || '')
   if (!fullText || fullText.trim().length < 8) return null
 
-  // 1. Détection du format balisé Thales OutputWedge (ex: LNMFOFANA,FNMKADIATOU,SEXFemale,DOB20-05-85,EDT21-07-31,PNMPP0143807...)
   if (fullText.includes('LNM') || fullText.includes('PNM') || fullText.includes('FNM')) {
     const getTag = (tag: string) => {
       const match = fullText.match(new RegExp(`(?:^|,)${tag}([^,\r\n]+)`, 'i'))
@@ -282,7 +306,6 @@ function parseMrzRawLines(rawInput: string | string[]) {
     if (rawSex.startsWith('F')) sexe = 'FEMME'
     else if (rawSex.startsWith('M')) sexe = 'HOMME'
 
-    // Nettoyeur et formateur de dates tolérant (ex: 20-05-85 ou 1985-05-20)
     const cleanDate = (dStr: string) => {
       if (!dStr) return ''
       const dmyMatch = dStr.match(/^(\d{1,2})-(\d{1,2})-(\d{2,4})$/)
@@ -315,7 +338,6 @@ function parseMrzRawLines(rawInput: string | string[]) {
     }
   }
 
-  // 2. Détection par lignes ou bloc continu MRZ classique (PPMLI... ou P<MLI...)
   const lines = fullText
     .split(/\r?\n/)
     .map(l => l.trim().toUpperCase().replace(/[^A-Z0-9<]/g, ''))
@@ -417,7 +439,6 @@ function parseMrzRawLines(rawInput: string | string[]) {
 }
 
 export default function AjouterPelerin() {
-  // Données formulaire
   const [nom, setNom] = useState('')
   const [prenom, setPrenom] = useState('')
   const [reference, setReference] = useState('')
@@ -436,23 +457,19 @@ export default function AjouterPelerin() {
   const [nomPackage, setNomPackage] = useState('')
   const [notes, setNotes] = useState('')
 
-  // Photo finale Nusuk
   const [photoFile, setPhotoFile] = useState<File | null>(null)
   const [photoPreview, setPhotoPreview] = useState<string | null>(null)
 
-  // Scanner physique MRZ classique
   const [showPhysicalScannerInput, setShowPhysicalScannerInput] = useState(false)
   const [mrzBuffer, setMrzBuffer] = useState('')
   const physicalInputRef = useRef<HTMLInputElement>(null)
   const mrzTimeoutRef = useRef<NodeJS.Timeout | null>(null)
 
-  // Passerelle TWAIN / Scanner Pleine Page
   const [isTwainScanning, setIsTwainScanning] = useState(false)
   const [isFullPageConnected, setIsFullPageConnected] = useState(false)
   const [isFullPageListening, setIsFullPageListening] = useState(false)
   const fullPageWsRef = useRef<WebSocket | null>(null)
 
-  // Cadres de recadrage
   const [cropModalOpen, setCropModalOpen] = useState(false)
   const [cropImageSrc, setCropImageSrc] = useState<string | null>(null)
   const [cropBox, setCropBox] = useState<{ x: number; y: number; size: number }>({ x: 0, y: 0, size: 200 })
@@ -470,7 +487,17 @@ export default function AjouterPelerin() {
   const isPassportResizingRef = useRef(false)
   const passportDragStartRef = useRef<{ mouseX: number; mouseY: number; boxX: number; boxY: number; boxW: number; boxH: number }>({ mouseX: 0, mouseY: 0, boxX: 0, boxY: 0, boxW: 0, boxH: 0 })
 
-  // États techniques
+  // 🎯 ÉTATS DU NOUVEAU MODAL DE PRÉ-VISUALISATION ET CADRAGE MRZ AVANT SCAN
+  const [mrzPreviewModalOpen, setMrzPreviewModalOpen] = useState(false)
+  const [mrzPreviewImageSrc, setMrzPreviewImageSrc] = useState<string | null>(null)
+  const [mrzCropBox, setMrzCropBox] = useState<{ x: number; y: number; width: number; height: number }>({ x: 0, y: 0, width: 100, height: 50 })
+  const [mrzImgDims, setMrzImgDims] = useState<{ width: number; height: number }>({ width: 1, height: 1 })
+  const mrzContainerRef = useRef<HTMLDivElement>(null)
+  const isMrzDraggingRef = useRef(false)
+  const isMrzResizingRef = useRef(false)
+  const mrzDragStartRef = useRef<{ mouseX: number; mouseY: number; boxX: number; boxY: number; boxW: number; boxH: number }>({ mouseX: 0, mouseY: 0, boxX: 0, boxY: 0, boxW: 0, boxH: 0 })
+  const pendingScanFileRef = useRef<File | null>(null)
+
   const [fileToUpload, setFileToUpload] = useState<File | null>(null)
   const [loading, setLoading] = useState(false)
   const [isScanning, setIsScanning] = useState(false)
@@ -740,7 +767,6 @@ export default function AjouterPelerin() {
     return digits === '' ? '' : Number(digits).toLocaleString('fr-FR')
   }
 
-  // 🎯 ÉVALUATION PERMISSIVE DE LA DOUCHETTE : REMPLIT TOUT CE QUI EST LISIBLE
   const evaluateMrzBuffer = (buffer: string) => {
     const parsed = parseMrzRawLines(buffer)
     if (parsed && (parsed.nom || parsed.numPasseport || parsed.prenom)) {
@@ -751,7 +777,6 @@ export default function AjouterPelerin() {
       if (parsed.dateNaissance) setDateNaissance(parsed.dateNaissance)
       if (parsed.dateExpiration) setDateExpiration(parsed.dateExpiration)
 
-      // Avertit gentiment pour permettre une correction manuelle si une valeur est incomplète
       const isIncomplete = !parsed.nom || !parsed.numPasseport || !parsed.dateNaissance
       if (isIncomplete) {
         setMessage({ 
@@ -800,7 +825,6 @@ export default function AjouterPelerin() {
         setCropImageSrc(dataUrl)
 
         try {
-          // Compression en préservant 100% de la résolution d'origine
           const formatted = await compressAndFormatPassportNusuk(dataUrl)
           setFileToUpload(formatted.file)
         } catch {
@@ -824,13 +848,11 @@ export default function AjouterPelerin() {
     }
   }
 
-  // 🎯 Ouvre le recadreur avec 100% de la taille d'origine sélectionnée par défaut
   const openPassportCropper = () => {
     if (!cropImageSrc) return
     const img = new Image()
     img.onload = () => {
       setPassportImgDims({ width: img.width, height: img.height })
-      // Par défaut, sélectionne toute la dimension originale de l'image
       setPassportCropBox({
         x: 0,
         y: 0,
@@ -959,15 +981,93 @@ export default function AjouterPelerin() {
     isPassportResizingRef.current = false
   }
 
+  // 🎯 GESTION DES POINTEURS POUR LE CADRAGE MRZ PREVIEW
+  const handleMrzPointerDownBox = (e: React.PointerEvent) => {
+    e.stopPropagation()
+    isMrzDraggingRef.current = true
+    mrzDragStartRef.current = { mouseX: e.clientX, mouseY: e.clientY, boxX: mrzCropBox.x, boxY: mrzCropBox.y, boxW: mrzCropBox.width, boxH: mrzCropBox.height }
+  }
+  const handleMrzPointerDownHandle = (e: React.PointerEvent) => {
+    e.stopPropagation()
+    isMrzResizingRef.current = true
+    mrzDragStartRef.current = { mouseX: e.clientX, mouseY: e.clientY, boxX: mrzCropBox.x, boxY: mrzCropBox.y, boxW: mrzCropBox.width, boxH: mrzCropBox.height }
+  }
+  const handleMrzPointerMoveContainer = (e: React.PointerEvent) => {
+    if (!mrzContainerRef.current) return
+    const rect = mrzContainerRef.current.getBoundingClientRect()
+    const scaleX = mrzImgDims.width / rect.width
+
+    if (isMrzDraggingRef.current) {
+      const deltaX = (e.clientX - mrzDragStartRef.current.mouseX) * scaleX
+      const deltaY = (e.clientY - mrzDragStartRef.current.mouseY) * scaleX
+      const nextX = Math.max(0, Math.min(mrzImgDims.width - mrzCropBox.width, mrzDragStartRef.current.boxX + deltaX))
+      const nextY = Math.max(0, Math.min(mrzImgDims.height - mrzCropBox.height, mrzDragStartRef.current.boxY + deltaY))
+      setMrzCropBox(prev => ({ ...prev, x: nextX, y: nextY }))
+    } else if (isMrzResizingRef.current) {
+      const deltaX = (e.clientX - mrzDragStartRef.current.mouseX) * scaleX
+      const deltaY = (e.clientY - mrzDragStartRef.current.mouseY) * scaleX
+      const nextW = Math.max(100, Math.min(mrzImgDims.width - mrzCropBox.x, mrzDragStartRef.current.boxW + deltaX))
+      const nextH = Math.max(30, Math.min(mrzImgDims.height - mrzCropBox.y, mrzDragStartRef.current.boxH + deltaY))
+      setMrzCropBox(prev => ({ ...prev, width: nextW, height: nextH }))
+    }
+  }
+  const handleMrzPointerUpContainer = () => {
+    isMrzDraggingRef.current = false
+    isMrzResizingRef.current = false
+  }
+
+  // 🎯 ETAPE 1 : QUAND L'UTILISATEUR SÉLECTIONNE UNE PHOTO POUR SCANNER -> APERÇU ET CADRE MRZ AUTOMATIQUE
   const handleAutoFill = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const scanFile = e.target.files?.[0]
     if (!scanFile) return
-    setIsScanning(true)
-    setMessage({ text: "⚡ SCAN DU PASSEPORT & EXTRACTION AUTOMATIQUE EN COURS...", type: 'info' })
+
+    pendingScanFileRef.current = scanFile
+    setMessage({ text: "Chargement de l'aperçu du passeport...", type: 'info' })
 
     try {
       const optimizedImageUrl = await preparePassportImage(scanFile)
-      setCropImageSrc(optimizedImageUrl)
+      setMrzPreviewImageSrc(optimizedImageUrl)
+
+      const img = new Image()
+      img.onload = () => {
+        setMrzImgDims({ width: img.width, height: img.height })
+        
+        // 🎯 POSITION PAR DÉFAUT : Zone inférieure (25% bas du passeport, là où se trouve la bande MRZ)
+        const defaultW = Math.round(img.width * 0.94)
+        const defaultH = Math.round(img.height * 0.25)
+        const defaultX = Math.round((img.width - defaultW) / 2)
+        const defaultY = Math.round(img.height - defaultH - (img.height * 0.03))
+
+        setMrzCropBox({
+          x: Math.max(0, defaultX),
+          y: Math.max(0, defaultY),
+          width: defaultW,
+          height: defaultH
+        })
+
+        setMrzPreviewModalOpen(true)
+        setMessage({ text: '', type: '' })
+      }
+      img.src = optimizedImageUrl
+    } catch (err: unknown) {
+      console.error(err)
+      setMessage({ text: "Erreur lors du chargement de l'image.", type: 'error' })
+    }
+  }
+
+  // 🎯 ETAPE 2 : CONFIRMATION DU CADRE MRZ ET LANCEMENT DU SCAN OCR SUR LA ZONE CIBLÉE
+  const handleConfirmAndRunMrzScan = async () => {
+    if (!mrzPreviewImageSrc) return
+    setMrzPreviewModalOpen(false)
+    setIsScanning(true)
+    setMessage({ text: "⚡ SCAN OCR DE LA ZONE MRZ EN COURS...", type: 'info' })
+
+    const fullImageUrl = mrzPreviewImageSrc
+    setCropImageSrc(fullImageUrl)
+
+    try {
+      // 1. Découpage précis de la zone MRZ sélectionnée par l'utilisateur
+      const mrzOnlyBase64 = await extractMrzRegionBase64(fullImageUrl, mrzCropBox)
 
       const baseUrl = getApiUrl()
       const targetEndpoint = `${baseUrl}/api/scan-mrz`
@@ -978,7 +1078,7 @@ export default function AjouterPelerin() {
         const nativeResponse = await CapacitorHttp.post({
           url: targetEndpoint,
           headers: { 'Content-Type': 'application/json' },
-          data: { imageBase64: optimizedImageUrl },
+          data: { imageBase64: mrzOnlyBase64 },
           connectTimeout: 30000,
           readTimeout: 30000,
         })
@@ -995,7 +1095,7 @@ export default function AjouterPelerin() {
           res = await fetch(targetEndpoint, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ imageBase64: optimizedImageUrl }),
+            body: JSON.stringify({ imageBase64: mrzOnlyBase64 }),
           })
         } catch {
           throw new Error("Impossible de joindre le serveur de scan.")
@@ -1018,15 +1118,17 @@ export default function AjouterPelerin() {
       if (data.dateNaissance) setDateNaissance(data.dateNaissance)
       if (data.dateExpiration) setDateExpiration(data.dateExpiration)
 
+      // 2. Fichier passeport complet pour Nusuk (Dimensions 100% conservées)
       try {
-        const formatted = await compressAndFormatPassportNusuk(optimizedImageUrl)
+        const formatted = await compressAndFormatPassportNusuk(fullImageUrl)
         setFileToUpload(formatted.file)
       } catch {
-        setFileToUpload(scanFile)
+        if (pendingScanFileRef.current) setFileToUpload(pendingScanFileRef.current)
       }
 
+      // 3. Détection et extraction automatique du visage pour la photo Nusuk 200x200
       try {
-        const autoCrop = await autoDetectAndCropNusuk(optimizedImageUrl)
+        const autoCrop = await autoDetectAndCropNusuk(fullImageUrl)
         setPhotoFile(autoCrop.file)
         setPhotoPreview(autoCrop.dataUrl)
         setCropBox(autoCrop.cropBox)
@@ -1527,6 +1629,88 @@ export default function AjouterPelerin() {
 
         </div>
       </div>
+
+      {/* ── 🎯 NOUVEAU MODAL : APERÇU ET SÉLECTION DE LA ZONE MRZ AVANT OCR ── */}
+      {mrzPreviewModalOpen && mrzPreviewImageSrc && (
+        <div 
+          className="fixed inset-0 z-[9999] bg-slate-900/85 backdrop-blur-sm flex items-center justify-center p-3 sm:p-5 animate-in fade-in duration-150"
+          onPointerMove={handleMrzPointerMoveContainer}
+          onPointerUp={handleMrzPointerUpContainer}
+        >
+          <div className="bg-white rounded-3xl shadow-2xl max-w-2xl w-full overflow-hidden border border-slate-200 flex flex-col max-h-[95vh]">
+            <div className="p-4 bg-slate-900 text-white flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <ScanLine size={18} className="text-amber-400" />
+                <h3 className="font-black text-sm uppercase">Aperçu & Cadrage de la zone MRZ</h3>
+              </div>
+              <button 
+                type="button"
+                onClick={() => setMrzPreviewModalOpen(false)} 
+                className="w-8 h-8 rounded-lg bg-white/10 hover:bg-white/20 flex items-center justify-center cursor-pointer text-slate-300"
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            <p className="px-4 py-2 bg-amber-50 text-[11px] text-amber-800 font-medium border-b border-amber-200">
+              Vérifiez l'aperçu. Déplacez ou redimensionnez le <strong>cadre jaune</strong> pour entourer exactement les deux lignes MRZ au bas du passeport.
+            </p>
+
+            <div className="p-4 overflow-auto flex-1 flex items-center justify-center bg-slate-950/90 select-none">
+              <div ref={mrzContainerRef} className="relative max-w-full max-h-[55vh] inline-block touch-none">
+                <img src={mrzPreviewImageSrc} alt="Aperçu passeport" className="max-h-[55vh] w-auto max-w-full object-contain pointer-events-none block" />
+                {(() => {
+                  const scalePctX = (mrzCropBox.x / mrzImgDims.width) * 100
+                  const scalePctY = (mrzCropBox.y / mrzImgDims.height) * 100
+                  const scalePctW = (mrzCropBox.width / mrzImgDims.width) * 100
+                  const scalePctH = (mrzCropBox.height / mrzImgDims.height) * 100
+
+                  return (
+                    <div
+                      onPointerDown={handleMrzPointerDownBox}
+                      style={{
+                        left: `${scalePctX}%`,
+                        top: `${scalePctY}%`,
+                        width: `${scalePctW}%`,
+                        height: `${scalePctH}%`,
+                      }}
+                      className="absolute border-2 border-amber-400 bg-amber-400/20 shadow-lg cursor-move rounded-xl touch-none ring-2 ring-amber-500/50"
+                    >
+                      <div className="absolute inset-0 flex items-center justify-center pointer-events-none opacity-40">
+                        <Move size={20} className="text-white" />
+                      </div>
+                      <div
+                        onPointerDown={handleMrzPointerDownHandle}
+                        className="absolute -right-2.5 -bottom-2.5 w-6 h-6 bg-amber-500 border-2 border-white rounded-full flex items-center justify-center cursor-nwse-resize shadow-md touch-none"
+                      >
+                        <div className="w-1.5 h-1.5 bg-white rounded-full" />
+                      </div>
+                    </div>
+                  )
+                })()}
+              </div>
+            </div>
+
+            <div className="p-4 bg-white border-t border-slate-200 flex items-center justify-between gap-3">
+              <button
+                type="button"
+                onClick={() => setMrzPreviewModalOpen(false)}
+                className="px-4 py-2.5 rounded-xl border border-slate-300 text-slate-700 font-bold text-xs hover:bg-slate-100 cursor-pointer"
+              >
+                Annuler
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmAndRunMrzScan}
+                className="flex items-center gap-1.5 px-5 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-black text-xs transition shadow-sm cursor-pointer"
+              >
+                <ScanLine size={16} />
+                <span>Lancer le scan OCR</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── 🎯 MODAL 1 : RECADRAGE VISAGE NUSUK (200x200 px) ── */}
       {cropModalOpen && cropImageSrc && (
