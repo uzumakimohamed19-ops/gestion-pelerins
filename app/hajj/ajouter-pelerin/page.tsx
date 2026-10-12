@@ -104,6 +104,7 @@ function base64ToFile(dataurl: string, filename: string): File {
   return new File([u8arr], filename, { type: mime })
 }
 
+// 🎯 Compression du passeport en gardant la dimension originale intacte (< 400 Ko pour Nusuk)
 function compressAndFormatPassportNusuk(
   imageSrc: string, 
   cropRegion?: { x: number; y: number; width: number; height: number }
@@ -117,8 +118,9 @@ function compressAndFormatPassportNusuk(
       const sw = cropRegion ? cropRegion.width : img.width
       const sh = cropRegion ? cropRegion.height : img.height
 
-      const targetW = Math.min(1280, Math.max(800, sw))
-      const targetH = Math.round(targetW * (sh / sw))
+      // Dimensions 100% originales conservées (sans redimensionnement forcé)
+      const targetW = Math.round(sw)
+      const targetH = Math.round(sh)
 
       const canvas = document.createElement('canvas')
       canvas.width = targetW
@@ -130,12 +132,23 @@ function compressAndFormatPassportNusuk(
       ctx.fillRect(0, 0, targetW, targetH)
       ctx.drawImage(img, sx, sy, sw, sh, 0, 0, targetW, targetH)
 
-      canvas.toBlob((blob) => {
-        if (!blob) return reject(new Error('Erreur blob'))
-        const file = new File([blob], `passport_nusuk_${Date.now()}.jpg`, { type: 'image/jpeg' })
-        const dataUrl = canvas.toDataURL('image/jpeg', 0.82)
-        resolve({ file, dataUrl })
-      }, 'image/jpeg', 0.82)
+      // Compression adaptative pour respecter le plafond de 400 Ko de Nusuk tout en gardant la résolution
+      let quality = 0.85
+      const generateBlob = (q: number) => {
+        canvas.toBlob((blob) => {
+          if (!blob) return reject(new Error('Erreur blob'))
+          // Si le fichier dépasse 390 Ko et qu'on peut encore baisser la compression
+          if (blob.size > 390 * 1024 && q > 0.45) {
+            generateBlob(q - 0.1)
+            return
+          }
+          const file = new File([blob], `passport_nusuk_${Date.now()}.jpg`, { type: 'image/jpeg' })
+          const dataUrl = canvas.toDataURL('image/jpeg', q)
+          resolve({ file, dataUrl })
+        }, 'image/jpeg', q)
+      }
+
+      generateBlob(quality)
     }
     img.onerror = reject
     img.src = imageSrc
@@ -787,6 +800,7 @@ export default function AjouterPelerin() {
         setCropImageSrc(dataUrl)
 
         try {
+          // Compression en préservant 100% de la résolution d'origine
           const formatted = await compressAndFormatPassportNusuk(dataUrl)
           setFileToUpload(formatted.file)
         } catch {
@@ -799,7 +813,7 @@ export default function AjouterPelerin() {
           setPhotoPreview(result.dataUrl)
           setCropBox(result.cropBox)
           setCropImgDims(result.dims)
-          setMessage({ text: "✅ Photo extraite et passeport compressé pour Nusuk (< 400 Ko) !", type: 'success' })
+          setMessage({ text: "✅ Photo extraite et passeport compressé pour Nusuk (< 400 Ko, dimensions conservées) !", type: 'success' })
         } catch {
           setCropModalOpen(true)
         }
@@ -810,18 +824,18 @@ export default function AjouterPelerin() {
     }
   }
 
+  // 🎯 Ouvre le recadreur avec 100% de la taille d'origine sélectionnée par défaut
   const openPassportCropper = () => {
     if (!cropImageSrc) return
     const img = new Image()
     img.onload = () => {
       setPassportImgDims({ width: img.width, height: img.height })
-      const initW = Math.round(img.width * 0.9)
-      const initH = Math.round(initW * 0.72)
+      // Par défaut, sélectionne toute la dimension originale de l'image
       setPassportCropBox({
-        x: Math.round((img.width - initW) / 2),
-        y: Math.round((img.height - Math.min(img.height, initH)) / 2),
-        width: initW,
-        height: Math.min(img.height, initH)
+        x: 0,
+        y: 0,
+        width: img.width,
+        height: img.height
       })
       setPassportCropModalOpen(true)
     }
@@ -935,11 +949,9 @@ export default function AjouterPelerin() {
       setPassportCropBox(prev => ({ ...prev, x: nextX, y: nextY }))
     } else if (isPassportResizingRef.current) {
       const deltaX = (e.clientX - passportDragStartRef.current.mouseX) * scaleX
-      const nextW = Math.max(200, Math.min(passportImgDims.width - passportCropBox.x, passportDragStartRef.current.boxW + deltaX))
-      const nextH = Math.round(nextW * 0.72)
-      if (passportCropBox.y + nextH <= passportImgDims.height) {
-        setPassportCropBox(prev => ({ ...prev, width: nextW, height: nextH }))
-      }
+      const nextW = Math.max(150, Math.min(passportImgDims.width - passportCropBox.x, passportDragStartRef.current.boxW + deltaX))
+      const nextH = Math.max(100, Math.min(passportImgDims.height - passportCropBox.y, passportDragStartRef.current.boxH + ((e.clientY - passportDragStartRef.current.mouseY) * scaleX)))
+      setPassportCropBox(prev => ({ ...prev, width: nextW, height: nextH }))
     }
   }
   const handlePassportPointerUpContainer = () => {
@@ -1295,7 +1307,7 @@ export default function AjouterPelerin() {
                       {fileToUpload ? fileToUpload.name : "Joindre le fichier du passeport"}
                     </p>
                     <p className="text-[9px] text-gray-400">
-                      Auto-compression et cadrage aux dimensions Nusuk
+                      Auto-compression Nusuk (&lt; 400 Ko) • Dimensions originales préservées
                     </p>
                   </div>
                   <input type="file" className="hidden" accept="image/*,.pdf" onChange={handlePassportFileChange} />
@@ -1308,7 +1320,7 @@ export default function AjouterPelerin() {
                     className="w-full py-2 px-3 bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 rounded-xl text-center text-[10px] font-black uppercase flex items-center justify-center gap-1.5 transition cursor-pointer shadow-2xs"
                   >
                     <Crop size={13} className="text-blue-600" />
-                    <span>Cadrer / Rogner la page passeport (Nusuk)</span>
+                    <span>Redimensionner / Recadrer manuellement</span>
                   </button>
                 )}
               </div>
@@ -1620,7 +1632,7 @@ export default function AjouterPelerin() {
             </div>
 
             <p className="px-4 py-2 bg-slate-100 text-[11px] text-slate-600 font-medium">
-              Ajustez le <strong>cadre bleu</strong> pour englober la page complète du passeport (avec les zones MRZ). Le fichier sera automatiquement compressé pour Nusuk.
+              Ajustez le <strong>cadre bleu</strong> pour englober la page complète du passeport (avec les zones MRZ). Le fichier sera automatiquement compressé pour Nusuk tout en préservant la résolution.
             </p>
 
             <div className="p-4 overflow-auto flex-1 flex items-center justify-center bg-slate-950/90 select-none">
