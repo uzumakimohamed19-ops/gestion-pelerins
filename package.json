@@ -40,6 +40,7 @@
     "idb-keyval": "^6.2.5",
     "jspdf": "^4.2.1",
     "jspdf-autotable": "^5.0.8",
+    "jszip": "^3.10.2",
     "lucide-react": "^0.577.0",
     "motion": "^12.42.2",
     "mrz": "^5.0.2",

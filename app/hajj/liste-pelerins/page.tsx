@@ -1,5 +1,5 @@
 'use client'
-import { useEffect, useLayoutEffect, useState, useRef, useMemo } from 'react'
+import { useEffect, useLayoutEffect, useState, useRef, useMemo, useCallback } from 'react'
 import { useQuery, usePowerSync } from '@powersync/react'
 import { requireSupabaseRows, supabase, getUser } from '@/lib/supabase'
 import { useYear } from '@/lib/YearContext'
@@ -11,10 +11,11 @@ import {
   Building2, Phone, X, FileText, FileSpreadsheet, CheckSquare, Square, Filter, Trash2,
   TrendingUp, AlertCircle, CheckCircle2, Clock, SlidersHorizontal,
   ChevronDown, Eye, MessageCircle, Syringe, UserCheck, BookOpen, Globe,
-  ArrowDown, ArrowUp
+  ArrowDown, ArrowUp, FolderArchive
 } from 'lucide-react'
 import ExcelJS from 'exceljs'
 import { saveAs } from 'file-saver'
+import JSZip from 'jszip'
 import { getPassportPublicUrl } from '@/lib/hajjPassport'
 
 interface Pelerin {
@@ -296,7 +297,7 @@ export default function ListePelerins() {
   const [pdfShowAgence, setPdfShowAgence] = useState(true)
   const [pdfGenerating, setPdfGenerating] = useState(false)
 
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set())
   const [selectMode, setSelectMode] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
@@ -307,6 +308,10 @@ export default function ListePelerins() {
   const [quickViewPelerin, setQuickViewPelerin] = useState<Pelerin | null>(null)
   const [quickViewUpdating, setQuickViewUpdating] = useState(false)
   const [quickPaymentMontant, setQuickPaymentMontant] = useState('')
+
+  // État de chargement pour le téléchargement groupé ZIP
+  const [isDownloadingZip, setIsDownloadingZip] = useState(false)
+  const [zipProgress, setZipProgress] = useState('')
 
   useEffect(() => {
     if (filtersRestoredRef.current) return
@@ -412,6 +417,95 @@ export default function ListePelerins() {
     }
   }
 
+  // 🎯 FONCTION : TÉLÉCHARGEMENT GROUPÉ DES PASSEPORTS ET PHOTOS DANS UN FICHIER ZIP AVEC LE NOM DE L'AGENCE
+  const exporterTousLesFichiersZIP = async () => {
+    const cible = selectedIds.size > 0
+      ? pelerinsFiltrés.filter(p => selectedIds.has(p.id))
+      : pelerinsFiltrés
+
+    if (cible.length === 0) {
+      alert("Aucun pèlerin sélectionné ou trouvé.")
+      return
+    }
+
+    setIsDownloadingZip(true)
+    setZipProgress(`Initialisation de l'archive (0/${cible.length})...`)
+
+    try {
+      const zip = new JSZip()
+      let traites = 0
+
+      for (let i = 0; i < cible.length; i++) {
+        const p = cible[i]
+        setZipProgress(`Téléchargement : ${i + 1}/${cible.length} - ${p.nom_complet}`)
+
+        // Nettoyage du nom pour créer un sous-dossier valide
+        const cleanNom = `${p.nom_complet}_${p.prenom || ''}`.trim().replace(/[^a-zA-Z0-9_-]/g, '_')
+        const passNum = (p.num_passeport || 'SANS_PASS').trim().replace(/[^a-zA-Z0-9_-]/g, '_')
+        const dossierNom = `${cleanNom}_${passNum}`
+        const pelerinFolder = zip.folder(dossierNom)
+
+        // 1. Télécharger le passeport
+        if (p.document_url && pelerinFolder) {
+          try {
+            const docUrl = getPassportPublicUrl(p.document_url)
+            if (docUrl) {
+              const res = await fetch(docUrl)
+              if (res.ok) {
+                const blob = await res.blob()
+                const ext = p.document_url.toLowerCase().endsWith('.pdf') ? 'pdf' : 'jpg'
+                pelerinFolder.file(`passeport_${passNum}.${ext}`, blob)
+              }
+            }
+          } catch (e) {
+            console.warn(`Échec téléchargement passeport pour ${p.nom_complet}:`, e)
+          }
+        }
+
+        // 2. Télécharger la photo d'identité
+        if (p.photo_url && pelerinFolder) {
+          try {
+            const photoUrl = getPassportPublicUrl(p.photo_url)
+            if (photoUrl) {
+              const res = await fetch(photoUrl)
+              if (res.ok) {
+                const blob = await res.blob()
+                pelerinFolder.file(`photo_${cleanNom}.jpg`, blob)
+              }
+            }
+          } catch (e) {
+            console.warn(`Échec téléchargement photo pour ${p.nom_complet}:`, e)
+          }
+        }
+
+        traites++
+      }
+
+      setZipProgress("Compression de l'archive ZIP en cours...")
+      const zipBlob = await zip.generateAsync({ type: 'blob' })
+
+      // 🎯 Détermination propre et dynamique du nom de l'agence pour le fichier ZIP
+      const nomAgenceEffective = (
+        nomAgenceLocale || 
+        cible[0]?.agences?.nom_agence || 
+        cible[0]?.agence_ou_personne_associee || 
+        'Agence'
+      ).trim().replace(/[^a-zA-Z0-9_-]/g, '_')
+
+      const anneeLabel = selectedYear === 'all' ? 'Toutes_Campagnes' : `Campagne_${selectedYear}`
+      const dateStr = new Date().toISOString().slice(0, 10)
+
+      saveAs(zipBlob, `Passeports_Et_Photos_${nomAgenceEffective}_${anneeLabel}_${dateStr}.zip`)
+    } catch (err) {
+      console.error(err)
+      alert("Erreur lors de la création du fichier ZIP.")
+    } finally {
+      setIsDownloadingZip(false)
+      setZipProgress('')
+      setShowExportMenu(false)
+    }
+  }
+
   const exporterExcel = async () => {
     const workbook = new ExcelJS.Workbook()
     const worksheet = workbook.addWorksheet('Liste Pèlerins')
@@ -467,43 +561,45 @@ export default function ListePelerins() {
     return Array.from(new Set(rawOptions.filter(Boolean)))
   }
 
-  const pelerinsFiltrés = pelerins.filter(p => {
-    const q = searchTerm.toLowerCase()
-    const matchesSearch = !q ||
-      p.nom_complet.toLowerCase().includes(q) ||
-      p.num_passeport.toLowerCase().includes(q) ||
-      (p.agences?.nom_agence || '').toLowerCase().includes(q) ||
-      (p.telephone_pelerin || '').includes(q) ||
-      (p.reference || '').toLowerCase().includes(q) ||
-      (p.prenom || '').toLowerCase().includes(q) ||
-      (p.hotel_mecque || '').toLowerCase().includes(q) ||
-      (p.hotel_medine || '').toLowerCase().includes(q)
+  const pelerinsFiltrés = useMemo(() => {
+    return pelerins.filter(p => {
+      const q = searchTerm.toLowerCase()
+      const matchesSearch = !q ||
+        p.nom_complet.toLowerCase().includes(q) ||
+        p.num_passeport.toLowerCase().includes(q) ||
+        (p.agences?.nom_agence || '').toLowerCase().includes(q) ||
+        (p.telephone_pelerin || '').includes(q) ||
+        (p.reference || '').toLowerCase().includes(q) ||
+        (p.prenom || '').toLowerCase().includes(q) ||
+        (p.hotel_mecque || '').toLowerCase().includes(q) ||
+        (p.hotel_medine || '').toLowerCase().includes(q)
 
-    if (!matchesSearch) return false
-    if (statutPaiementFilter !== 'all' && getPaiementStatut(p) !== statutPaiementFilter) return false
-    if (plateformeFilter === 'gouv' && !p.sur_plateforme_gouv) return false
-    if (plateformeFilter === 'nusuk' && !p.sur_plateforme_nusuk) return false
-    if (plateformeFilter === 'both' && !(p.sur_plateforme_gouv && p.sur_plateforme_nusuk)) return false
-    if (plateformeFilter === 'neither' && (p.sur_plateforme_gouv || p.sur_plateforme_nusuk)) return false
+      if (!matchesSearch) return false
+      if (statutPaiementFilter !== 'all' && getPaiementStatut(p) !== statutPaiementFilter) return false
+      if (plateformeFilter === 'gouv' && !p.sur_plateforme_gouv) return false
+      if (plateformeFilter === 'nusuk' && !p.sur_plateforme_nusuk) return false
+      if (plateformeFilter === 'both' && !(p.sur_plateforme_gouv && p.sur_plateforme_nusuk)) return false
+      if (plateformeFilter === 'neither' && (p.sur_plateforme_gouv || p.sur_plateforme_nusuk)) return false
 
-    if (hotelFilter !== 'all') {
-      const matchHotel = (p.hotel_mecque?.trim() === hotelFilter) || (p.hotel_medine?.trim() === hotelFilter)
-      if (!matchHotel) return false
-    }
-
-    if (selectedFilterValue) {
-      switch (activeFilterType) {
-        case 'date': return (p.created_at ? new Date(p.created_at).toLocaleDateString('fr-FR') : 'N/A') === selectedFilterValue
-        case 'date_depart': return (p.date_depart ? new Date(p.date_depart).toLocaleDateString('fr-FR') : 'N/A') === selectedFilterValue
-        case 'date_retour': return (p.date_retour ? new Date(p.date_retour).toLocaleDateString('fr-FR') : 'N/A') === selectedFilterValue
-        case 'reference': return (p.reference || 'Sans référence') === selectedFilterValue
-        case 'agence': return (p.agence_ou_personne_associee || 'Non spécifié') === selectedFilterValue
-        case 'phone': return (p.telephone_pelerin || 'Aucun numéro') === selectedFilterValue
-        default: return true
+      if (hotelFilter !== 'all') {
+        const matchHotel = (p.hotel_mecque?.trim() === hotelFilter) || (p.hotel_medine?.trim() === hotelFilter)
+        if (!matchHotel) return false
       }
-    }
-    return true
-  })
+
+      if (selectedFilterValue) {
+        switch (activeFilterType) {
+          case 'date': return (p.created_at ? new Date(p.created_at).toLocaleDateString('fr-FR') : 'N/A') === selectedFilterValue
+          case 'date_depart': return (p.date_depart ? new Date(p.date_depart).toLocaleDateString('fr-FR') : 'N/A') === selectedFilterValue
+          case 'date_retour': return (p.date_retour ? new Date(p.date_retour).toLocaleDateString('fr-FR') : 'N/A') === selectedFilterValue
+          case 'reference': return (p.reference || 'Sans référence') === selectedFilterValue
+          case 'agence': return (p.agence_ou_personne_associee || 'Non spécifié') === selectedFilterValue
+          case 'phone': return (p.telephone_pelerin || 'Aucun numéro') === selectedFilterValue
+          default: return true
+        }
+      }
+      return true
+    })
+  }, [pelerins, searchTerm, statutPaiementFilter, plateformeFilter, hotelFilter, selectedFilterValue, activeFilterType])
 
   const totalPackage = pelerinsFiltrés.reduce((s, p) => s + (p.prix_package || 0), 0)
   const totalPaye = pelerinsFiltrés.reduce((s, p) => s + (p.total_paye || 0), 0)
@@ -531,18 +627,33 @@ export default function ListePelerins() {
 
   const handlePersistScroll = () => sessionStorage.setItem('liste_pelerins_scroll_y', window.scrollY.toString())
 
-  const toggleSelect = (id: string) => {
+  const toggleSelect = useCallback((id: string) => {
     setSelectedIds(prev => {
       const next = new Set(prev)
-      next.has(id) ? next.delete(id) : next.add(id)
+      if (next.has(id)) {
+        next.delete(id)
+      } else {
+        next.add(id)
+      }
       return next
     })
-  }
+  }, [])
 
-  const toggleSelectAll = () => {
-    if (selectedIds.size === pelerinsFiltrés.length) setSelectedIds(new Set())
-    else setSelectedIds(new Set(pelerinsFiltrés.map(p => p.id)))
-  }
+  const toggleSelectAll = useCallback(() => {
+    setSelectedIds(prev => {
+      if (prev.size === pelerinsFiltrés.length) {
+        return new Set()
+      } else {
+        return new Set(pelerinsFiltrés.map(p => p.id))
+      }
+    })
+  }, [pelerinsFiltrés])
+
+  // 🎯 CORRECTION DE L'ERREUR DE RE-RENDER INFINI
+  const handleToggleSelectMode = useCallback(() => {
+    setSelectMode(prev => !prev)
+    setSelectedIds(new Set())
+  }, [])
 
   const clearAllFilters = () => {
     setActiveFilterType(null)
@@ -655,6 +766,17 @@ export default function ListePelerins() {
   return (
     <div className="min-h-screen bg-slate-50 px-3 sm:px-4 md:px-6 py-4 sm:py-6 md:py-10">
       <div className="max-w-7xl mx-auto">
+
+        {/* ── BANNIÈRE STATUT DU TÉLÉCHARGEMENT ZIP ── */}
+        {isDownloadingZip && (
+          <div className="fixed bottom-5 right-5 z-[10000] bg-slate-900 text-white px-5 py-4 rounded-2xl shadow-2xl border border-slate-700 flex items-center gap-3 animate-in fade-in slide-in-from-bottom duration-200">
+            <Loader2 className="animate-spin text-blue-400" size={20} />
+            <div>
+              <p className="text-xs font-black uppercase tracking-wider">Téléchargement en cours</p>
+              <p className="text-[11px] text-slate-300 font-medium">{zipProgress}</p>
+            </div>
+          </div>
+        )}
 
         {/* ── MODAL COUP D'ŒIL (STYLE ÉLÉGANT, NOTES, SANS BORDURES NOIRES) ── */}
         {quickViewPelerin && (
@@ -987,8 +1109,9 @@ export default function ListePelerins() {
               )}
             </button>
 
+            {/* 🎯 CORRIGÉ : BOUTON SÉLECTIONNER SANS CRASH DE RE-RENDER */}
             <button
-              onClick={() => { setSelectMode(!selectMode); setSelectedIds(new Set()) }}
+              onClick={handleToggleSelectMode}
               className={`flex items-center gap-1.5 px-3 sm:px-4 py-2.5 sm:py-3.5 rounded-xl font-black text-xs sm:text-sm border transition cursor-pointer ${
                 selectMode
                   ? 'bg-slate-900 text-white border-slate-900'
@@ -1049,6 +1172,21 @@ export default function ListePelerins() {
                         <div className="flex-1 min-w-0">
                           <p className="font-black text-slate-900 text-xs sm:text-sm">Document PDF ({nomAgenceLocale || 'Agence'})</p>
                           <p className="text-[10px] text-slate-400 font-medium">Canevas moderne format paysage</p>
+                        </div>
+                      </button>
+
+                      {/* 🎯 BOUTON ZIP AVEC NOM D'AGENCE INCLUS DANS LE FICHIER */}
+                      <button
+                        onClick={exporterTousLesFichiersZIP}
+                        disabled={isDownloadingZip}
+                        className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-blue-50/60 transition text-left cursor-pointer border-t border-slate-100 disabled:opacity-50"
+                      >
+                        <div className="w-9 h-9 bg-blue-100 border border-blue-200 rounded-xl flex items-center justify-center shrink-0">
+                          <FolderArchive size={18} className="text-blue-700" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="font-black text-slate-900 text-xs sm:text-sm">Photos & Passeports (ZIP)</p>
+                          <p className="text-[10px] text-slate-500 font-medium">Dossier par pèlerin ({nomAgenceLocale || 'Agence'})</p>
                         </div>
                       </button>
                     </div>
@@ -1316,6 +1454,13 @@ export default function ListePelerins() {
                   className="flex items-center gap-1.5 bg-blue-600 text-white px-3 py-2 rounded-xl text-xs font-black hover:bg-blue-700 transition shadow-xs cursor-pointer"
                 >
                   <FileText size={14} /> Export
+                </button>
+                <button
+                  onClick={exporterTousLesFichiersZIP}
+                  disabled={isDownloadingZip}
+                  className="flex items-center gap-1.5 bg-slate-900 text-white px-3 py-2 rounded-xl text-xs font-black hover:bg-slate-800 transition shadow-xs cursor-pointer disabled:opacity-50"
+                >
+                  <FolderArchive size={14} /> ZIP ({selectedIds.size})
                 </button>
                 <button
                   onClick={() => setShowDeleteConfirm(true)}
