@@ -48,7 +48,7 @@
     "mrz": "^5.0.2",
     "mrz-fast": "^1.0.9",
     "next": "16.2.1",
-    "onnxruntime-web": "^1.29.0",
+    "onnxruntime-web": "^1.21.0",
     "openai": "^6.37.0",
     "react": "19.2.4",
     "react-dom": "19.2.4",
