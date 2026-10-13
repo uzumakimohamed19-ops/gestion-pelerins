@@ -10,6 +10,7 @@ import {
 } from 'lucide-react'
 import { uploadPassportFile } from '@/lib/hajjPassport'
 import { Capacitor, CapacitorHttp } from '@capacitor/core'
+import * as faceapi from '@vladmandic/face-api'
 
 function isRunningInTauri(): boolean {
   if (typeof window === 'undefined') return false
@@ -48,6 +49,25 @@ function getApiUrl(): string {
   return process.env.NEXT_PUBLIC_API_URL || ''
 }
 
+// 🎯 Gestion du modèle IA Face-API (chargement unique, même en appels simultanés)
+let isFaceModelLoaded = false
+let faceModelPromise: Promise<void> | null = null
+async function loadFaceModel() {
+  if (isFaceModelLoaded) return
+  if (!faceModelPromise) {
+    faceModelPromise = faceapi.nets.ssdMobilenetv1
+      .loadFromUri('/models')
+      .then(() => {
+        isFaceModelLoaded = true
+      })
+      .catch((err) => {
+        faceModelPromise = null
+        throw err
+      })
+  }
+  await faceModelPromise
+}
+
 function preparePassportImage(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader()
@@ -75,10 +95,16 @@ function preparePassportImage(file: File): Promise<string> {
         const contrast = 35
         const factor = (259 * (contrast + 255)) / (255 * (259 - contrast))
 
+        // Table de correspondance : 256 calculs au lieu de millions
+        const lut = new Uint8ClampedArray(256)
+        for (let v = 0; v < 256; v++) {
+          lut[v] = factor * (v - 128) + 128
+        }
+
         for (let i = 0; i < d.length; i += 4) {
-          d[i] = factor * (d[i] - 128) + 128
-          d[i + 1] = factor * (d[i + 1] - 128) + 128
-          d[i + 2] = factor * (d[i + 2] - 128) + 128
+          d[i] = lut[d[i]]
+          d[i + 1] = lut[d[i + 1]]
+          d[i + 2] = lut[d[i + 2]]
         }
         ctx.putImageData(imgData, 0, 0)
 
@@ -152,7 +178,7 @@ function compressAndFormatPassportNusuk(
   })
 }
 
-// 🎯 Fonction utilitaire pour découper spécifiquement la bande MRZ sélectionnée avant l'OCR
+// 🎯 Découpage précis de la bande MRZ sélectionnée avant l'OCR
 function extractMrzRegionBase64(
   imageSrc: string,
   region: { x: number; y: number; width: number; height: number }
@@ -210,11 +236,132 @@ async function formatNusukSquare(imageSrc: string): Promise<{ file: File; dataUr
   })
 }
 
+// 🎯 Rendu haute qualité de la photo Nusuk (200x200) : réduction progressive + netteté, JPEG < 100 Ko
+const NUSUK_PHOTO_MAX_BYTES = 95 * 1024
+
+function canvasToJpegBlob(canvas: HTMLCanvasElement, quality: number): Promise<Blob> {
+  return new Promise((resolve, reject) => {
+    canvas.toBlob(
+      (blob) => (blob ? resolve(blob) : reject(new Error('Erreur blob'))),
+      'image/jpeg',
+      quality
+    )
+  })
+}
+
+// Réduction par paliers (÷2 à chaque étape) : bien plus net qu'une réduction directe
+function resizeHighQuality(source: HTMLCanvasElement, dw: number, dh: number): HTMLCanvasElement {
+  let cur = source
+  while (cur.width / 2 >= dw && cur.height / 2 >= dh) {
+    const next = document.createElement('canvas')
+    next.width = Math.max(1, Math.floor(cur.width / 2))
+    next.height = Math.max(1, Math.floor(cur.height / 2))
+    const nctx = next.getContext('2d')
+    if (!nctx) break
+    nctx.imageSmoothingEnabled = true
+    nctx.imageSmoothingQuality = 'high'
+    nctx.drawImage(cur, 0, 0, next.width, next.height)
+    cur = next
+  }
+  const out = document.createElement('canvas')
+  out.width = Math.max(1, dw)
+  out.height = Math.max(1, dh)
+  const octx = out.getContext('2d')
+  if (octx) {
+    octx.imageSmoothingEnabled = true
+    octx.imageSmoothingQuality = 'high'
+    octx.drawImage(cur, 0, 0, out.width, out.height)
+  }
+  return out
+}
+
+// Netteté légère (masque flou 3x3) : détails du visage plus lisibles sans bruit
+function sharpenCanvas(ctx: CanvasRenderingContext2D, w: number, h: number, amount: number) {
+  const imgData = ctx.getImageData(0, 0, w, h)
+  const s = imgData.data
+  const out = new Uint8ClampedArray(s.length)
+  out.set(s)
+  const stride = w * 4
+  const center = 1 + 4 * amount
+  for (let y = 1; y < h - 1; y++) {
+    for (let x = 1; x < w - 1; x++) {
+      const i = y * stride + x * 4
+      for (let c = 0; c < 3; c++) {
+        const k = i + c
+        out[k] = s[k] * center - amount * (s[k - 4] + s[k + 4] + s[k - stride] + s[k + stride])
+      }
+    }
+  }
+  imgData.data.set(out)
+  ctx.putImageData(imgData, 0, 0)
+}
+
+async function renderNusukPhoto(
+  img: HTMLImageElement,
+  cropX: number,
+  cropY: number,
+  size: number,
+  leftCut: number = -Infinity,
+  rightCut: number = Infinity
+): Promise<{ file: File; dataUrl: string }> {
+  const canvas = document.createElement('canvas')
+  canvas.width = 200
+  canvas.height = 200
+  const ctx = canvas.getContext('2d')
+  if (!ctx) throw new Error('Erreur canvas')
+
+  ctx.fillStyle = '#FFFFFF'
+  ctx.fillRect(0, 0, 200, 200)
+
+  const ratio = 200 / size
+  const srcLeft = Math.max(cropX, 0, leftCut)
+  const srcRight = Math.min(cropX + size, img.width, rightCut)
+  const srcTop = Math.max(cropY, 0)
+  const srcBottom = Math.min(cropY + size, img.height)
+
+  if (srcRight > srcLeft && srcBottom > srcTop) {
+    const srcW = Math.max(1, Math.round(srcRight - srcLeft))
+    const srcH = Math.max(1, Math.round(srcBottom - srcTop))
+
+    // Zone utile extraite à la résolution d'origine, puis réduite par paliers
+    const region = document.createElement('canvas')
+    region.width = srcW
+    region.height = srcH
+    const rctx = region.getContext('2d')
+    if (!rctx) throw new Error('Erreur canvas')
+    rctx.drawImage(img, Math.round(srcLeft), Math.round(srcTop), srcW, srcH, 0, 0, srcW, srcH)
+
+    const dw = Math.max(1, Math.round(srcW * ratio))
+    const dh = Math.max(1, Math.round(srcH * ratio))
+    const dx = Math.round((srcLeft - cropX) * ratio)
+    const dy = Math.round((srcTop - cropY) * ratio)
+
+    const resized = resizeHighQuality(region, dw, dh)
+    ctx.drawImage(resized, dx, dy)
+  }
+
+  sharpenCanvas(ctx, 200, 200, 0.45)
+
+  // Qualité maximale tout en restant sous la limite Nusuk
+  let quality = 0.95
+  let blob = await canvasToJpegBlob(canvas, quality)
+  while (blob.size > NUSUK_PHOTO_MAX_BYTES && quality > 0.6) {
+    quality -= 0.05
+    blob = await canvasToJpegBlob(canvas, quality)
+  }
+
+  const file = new File([blob], `photo_nusuk_${Date.now()}.jpg`, { type: 'image/jpeg' })
+  const dataUrl = canvas.toDataURL('image/jpeg', quality)
+  return { file, dataUrl }
+}
+
+// 🎯 DÉTECTION ET DÉCOUPE FACIALE : visage centré (~75% du carré), aucun texte à droite, pas de vide à gauche
 async function autoDetectAndCropNusuk(imageSrc: string): Promise<{ 
   file: File; 
   dataUrl: string; 
   cropBox: { x: number; y: number; size: number }; 
-  dims: { width: number; height: number } 
+  dims: { width: number; height: number };
+  detected: boolean;
 }> {
   return new Promise((resolve, reject) => {
     const img = new Image()
@@ -225,61 +372,98 @@ async function autoDetectAndCropNusuk(imageSrc: string): Promise<{
       let cropX = 0
       let cropY = 0
       let size = 200
-
       let faceFound = false
-      if (typeof window !== 'undefined' && 'FaceDetector' in window) {
-        try {
-          // @ts-expect-error FaceDetector API standard
-          const detector = new window.FaceDetector({ fastMode: true, maxDetectedFaces: 1 })
-          const faces = await detector.detect(img)
-          if (faces && faces.length > 0) {
-            const box = faces[0].boundingBox
-            const pad = Math.max(box.width, box.height) * 0.4
-            size = Math.round(Math.min(img.width, img.height, Math.max(box.width, box.height) + pad * 2))
-            cropX = Math.round(Math.max(0, Math.min(img.width - size, box.x - pad * 0.5)))
-            cropY = Math.round(Math.max(0, Math.min(img.height - size, box.y - pad * 0.8)))
-            faceFound = true
+
+      // Limites dures : tout ce qui dépasse sera rendu en blanc (jamais de texte ni de bord de page)
+      let leftCut = -Infinity
+      let rightCut = Infinity
+
+      try {
+        await loadFaceModel()
+
+        // Détection sur une version réduite (beaucoup plus rapide), coordonnées remises à l'échelle ensuite
+        const maxSide = 1280
+        const ds = Math.min(1, maxSide / Math.max(dims.width, dims.height))
+        let detectInput: HTMLImageElement | HTMLCanvasElement = img
+        if (ds < 1) {
+          const dc = document.createElement('canvas')
+          dc.width = Math.max(1, Math.round(dims.width * ds))
+          dc.height = Math.max(1, Math.round(dims.height * ds))
+          const dctx = dc.getContext('2d')
+          if (dctx) {
+            dctx.drawImage(img, 0, 0, dc.width, dc.height)
+            detectInput = dc
           }
-        } catch {
-          faceFound = false
         }
+        const inv = detectInput === img ? 1 : 1 / ds
+
+        const detection = await faceapi.detectSingleFace(
+          detectInput,
+          new faceapi.SsdMobilenetv1Options({ minConfidence: 0.35 })
+        )
+
+        if (detection) {
+          const faceX = detection.box.x * inv
+          const faceY = detection.box.y * inv
+          const faceW = detection.box.width * inv
+          const faceH = detection.box.height * inv
+
+          const faceCx = faceX + faceW / 2
+
+          // 🛡️ Fenêtre horizontale symétrique autour du visage (rien au-delà : jamais de texte à droite)
+          leftCut = faceX - faceW * 0.42
+          rightCut = faceX + faceW * 1.42
+          const windowW = rightCut - leftCut
+
+          // 📐 Le visage occupe ~70% de la hauteur du carré (tête bien dégagée), et le carré tient toujours dans la fenêtre
+          size = Math.round(Math.min(faceH / 0.70, windowW, dims.width, dims.height))
+
+          // 🎯 Visage parfaitement centré horizontalement
+          cropX = Math.round(faceCx - size / 2)
+          cropX = Math.max(0, Math.min(dims.width - size, cropX))
+
+          // 🎯 Centrage vertical (légèrement plus de marge en haut pour les cheveux)
+          const leftover = size - faceH
+          let targetY = faceY - leftover * 0.58
+          if (targetY + size > dims.height) targetY = dims.height - size
+          if (targetY < 0) targetY = 0
+          cropY = Math.round(targetY)
+
+          faceFound = true
+        }
+      } catch (err) {
+        console.warn('Face-API : repli géométrique :', err)
       }
 
+      // Repli si l'IA n'a pas détecté le visage
       if (!faceFound) {
         if (img.width > img.height) {
-          size = Math.round(Math.min(img.height * 0.65, img.width * 0.35))
+          size = Math.round(Math.min(img.height * 0.48, img.width * 0.25))
           cropX = Math.round(img.width * 0.05)
-          cropY = Math.round(img.height * 0.15)
+          cropY = Math.round(img.height * 0.16)
         } else {
-          size = Math.round(img.width * 0.55)
-          cropX = Math.round(img.width * 0.22)
-          cropY = Math.round(img.height * 0.18)
+          size = Math.round(Math.min(img.width * 0.60, img.height * 0.60))
+          cropX = Math.round((img.width - size) / 2)
+          cropY = Math.round(Math.max(0, img.height * 0.12))
         }
       }
 
-      const canvas = document.createElement('canvas')
-      canvas.width = 200
-      canvas.height = 200
-      const ctx = canvas.getContext('2d')
-      if (!ctx) return reject(new Error('Erreur canvas'))
+      // Boîte renvoyée à l'éditeur manuel : toujours contenue dans l'image
+      const safeX = Math.round(Math.max(0, Math.min(dims.width - size, cropX)))
 
-      ctx.drawImage(img, cropX, cropY, size, size, 0, 0, 200, 200)
-
-      canvas.toBlob(
-        (blob) => {
-          if (!blob) return reject(new Error('Erreur blob'))
-          const finalFile = new File([blob], `photo_nusuk_${Date.now()}.jpg`, { type: 'image/jpeg' })
-          const dataUrl = canvas.toDataURL('image/jpeg', 0.88)
-          resolve({
-            file: finalFile,
-            dataUrl,
-            cropBox: { x: cropX, y: cropY, size },
-            dims
-          })
-        },
-        'image/jpeg',
-        0.88
-      )
+      // 🎯 Rendu carré 200x200 px haute qualité : fond blanc, zone autorisée uniquement, netteté, < 100 Ko
+      try {
+        const rendered = await renderNusukPhoto(img, cropX, cropY, size, leftCut, rightCut)
+        resolve({
+          file: rendered.file,
+          dataUrl: rendered.dataUrl,
+          cropBox: { x: safeX, y: cropY, size },
+          dims,
+          detected: faceFound
+        })
+      } catch (renderErr) {
+        reject(renderErr)
+      }
     }
 
     img.onerror = () => reject(new Error("Erreur de chargement d'image"))
@@ -487,7 +671,6 @@ export default function AjouterPelerin() {
   const isPassportResizingRef = useRef(false)
   const passportDragStartRef = useRef<{ mouseX: number; mouseY: number; boxX: number; boxY: number; boxW: number; boxH: number }>({ mouseX: 0, mouseY: 0, boxX: 0, boxY: 0, boxW: 0, boxH: 0 })
 
-  // 🎯 ÉTATS DU NOUVEAU MODAL DE PRÉ-VISUALISATION ET CADRAGE MRZ AVANT SCAN
   const [mrzPreviewModalOpen, setMrzPreviewModalOpen] = useState(false)
   const [mrzPreviewImageSrc, setMrzPreviewImageSrc] = useState<string | null>(null)
   const [mrzCropBox, setMrzCropBox] = useState<{ x: number; y: number; width: number; height: number }>({ x: 0, y: 0, width: 100, height: 50 })
@@ -535,6 +718,11 @@ export default function AjouterPelerin() {
       }
     }
     fetchUserAgence()
+  }, [])
+
+  // 🚀 Préchargement du modèle IA en arrière-plan : le premier scan n'attend plus
+  useEffect(() => {
+    loadFaceModel().catch(() => {})
   }, [])
 
   useEffect(() => {
@@ -814,6 +1002,7 @@ export default function AjouterPelerin() {
     }
   }
 
+  // 🎯 QUAND L'UTILISATEUR SÉLECTIONNE/UPLOAD SON FICHIER PASSEPORT -> DÉTECTION FACIALE ÉQUILIBRÉE ET SERRÉE
   const handlePassportFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFile = e.target.files?.[0]
     if (!selectedFile) return
@@ -824,6 +1013,7 @@ export default function AjouterPelerin() {
         const dataUrl = reader.result as string
         setCropImageSrc(dataUrl)
 
+        // 1. Sauvegarde et compression originale pour Nusuk (< 400 Ko)
         try {
           const formatted = await compressAndFormatPassportNusuk(dataUrl)
           setFileToUpload(formatted.file)
@@ -831,13 +1021,19 @@ export default function AjouterPelerin() {
           setFileToUpload(selectedFile)
         }
 
+        // 2. 🎯 DÉTECTION FACIALE NATURELLE REVISITÉE SANS VIDE À GAUCHE NI TEXTE À DROITE
         try {
           const result = await autoDetectAndCropNusuk(dataUrl)
           setPhotoFile(result.file)
           setPhotoPreview(result.dataUrl)
           setCropBox(result.cropBox)
           setCropImgDims(result.dims)
-          setMessage({ text: "✅ Photo extraite et passeport compressé pour Nusuk (< 400 Ko, dimensions conservées) !", type: 'success' })
+
+          if (result.detected) {
+            setMessage({ text: "✅ Visage cadré avec précision au format officiel Nusuk !", type: 'success' })
+          } else {
+            setMessage({ text: "✅ Document passeport chargé ! Ajustez le cadrage si besoin.", type: 'success' })
+          }
         } catch {
           setCropModalOpen(true)
         }
@@ -846,6 +1042,29 @@ export default function AjouterPelerin() {
     } else {
       setFileToUpload(selectedFile)
     }
+  }
+
+  const handlePhotoFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+
+    const reader = new FileReader()
+    reader.onload = async () => {
+      const dataUrl = reader.result as string
+      setCropImageSrc(dataUrl)
+
+      try {
+        const autoCrop = await autoDetectAndCropNusuk(dataUrl)
+        setPhotoFile(autoCrop.file)
+        setPhotoPreview(autoCrop.dataUrl)
+        setCropBox(autoCrop.cropBox)
+        setCropImgDims(autoCrop.dims)
+        setMessage({ text: "✅ Photo d'identité chargée et cadrée aux normes Nusuk (200×200px) !", type: 'success' })
+      } catch {
+        setCropModalOpen(true)
+      }
+    }
+    reader.readAsDataURL(file)
   }
 
   const openPassportCropper = () => {
@@ -880,38 +1099,16 @@ export default function AjouterPelerin() {
     if (!cropImageSrc) return
     const img = new Image()
     img.crossOrigin = 'anonymous'
-    img.onload = () => {
-      const canvas = document.createElement('canvas')
-      canvas.width = 200
-      canvas.height = 200
-      const ctx = canvas.getContext('2d')
-      if (!ctx) return
-
-      ctx.drawImage(
-        img,
-        cropBox.x,
-        cropBox.y,
-        cropBox.size,
-        cropBox.size,
-        0,
-        0,
-        200,
-        200
-      )
-
-      canvas.toBlob(
-        (blob) => {
-          if (!blob) return
-          const finalFile = new File([blob], `photo_nusuk_${Date.now()}.jpg`, { type: 'image/jpeg' })
-          const dataUrl = canvas.toDataURL('image/jpeg', 0.88)
-          setPhotoFile(finalFile)
-          setPhotoPreview(dataUrl)
-          setCropModalOpen(false)
-          setMessage({ text: "✅ Photo du pèlerin ajustée aux normes Nusuk (200×200px) !", type: 'success' })
-        },
-        'image/jpeg',
-        0.88
-      )
+    img.onload = async () => {
+      try {
+        const rendered = await renderNusukPhoto(img, cropBox.x, cropBox.y, cropBox.size)
+        setPhotoFile(rendered.file)
+        setPhotoPreview(rendered.dataUrl)
+        setCropModalOpen(false)
+        setMessage({ text: "✅ Photo du pèlerin ajustée aux normes Nusuk (200×200px) !", type: 'success' })
+      } catch {
+        setMessage({ text: "Erreur lors du recadrage de la photo.", type: 'error' })
+      }
     }
     img.src = cropImageSrc
   }
@@ -981,7 +1178,6 @@ export default function AjouterPelerin() {
     isPassportResizingRef.current = false
   }
 
-  // 🎯 GESTION DES POINTEURS POUR LE CADRAGE MRZ PREVIEW
   const handleMrzPointerDownBox = (e: React.PointerEvent) => {
     e.stopPropagation()
     isMrzDraggingRef.current = true
@@ -1016,7 +1212,6 @@ export default function AjouterPelerin() {
     isMrzResizingRef.current = false
   }
 
-  // 🎯 ETAPE 1 : QUAND L'UTILISATEUR SÉLECTIONNE UNE PHOTO POUR SCANNER -> APERÇU ET CADRE MRZ AUTOMATIQUE
   const handleAutoFill = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const scanFile = e.target.files?.[0]
     if (!scanFile) return
@@ -1032,7 +1227,6 @@ export default function AjouterPelerin() {
       img.onload = () => {
         setMrzImgDims({ width: img.width, height: img.height })
         
-        // 🎯 POSITION PAR DÉFAUT : Zone inférieure (25% bas du passeport, là où se trouve la bande MRZ)
         const defaultW = Math.round(img.width * 0.94)
         const defaultH = Math.round(img.height * 0.25)
         const defaultX = Math.round((img.width - defaultW) / 2)
@@ -1055,7 +1249,6 @@ export default function AjouterPelerin() {
     }
   }
 
-  // 🎯 ETAPE 2 : CONFIRMATION DU CADRE MRZ ET LANCEMENT DU SCAN OCR SUR LA ZONE CIBLÉE
   const handleConfirmAndRunMrzScan = async () => {
     if (!mrzPreviewImageSrc) return
     setMrzPreviewModalOpen(false)
@@ -1065,8 +1258,13 @@ export default function AjouterPelerin() {
     const fullImageUrl = mrzPreviewImageSrc
     setCropImageSrc(fullImageUrl)
 
+    // 🚀 Lancées tout de suite, elles tournent pendant l'attente réseau de l'OCR
+    const filePromise: Promise<File | null> = compressAndFormatPassportNusuk(fullImageUrl)
+      .then((f) => f.file)
+      .catch(() => pendingScanFileRef.current)
+    const facePromise = autoDetectAndCropNusuk(fullImageUrl).catch(() => null)
+
     try {
-      // 1. Découpage précis de la zone MRZ sélectionnée par l'utilisateur
       const mrzOnlyBase64 = await extractMrzRegionBase64(fullImageUrl, mrzCropBox)
 
       const baseUrl = getApiUrl()
@@ -1111,6 +1309,7 @@ export default function AjouterPelerin() {
         if (!res.ok) throw new Error(data.error || 'Échec de la lecture du passeport.')
       }
 
+      // Les champs s'affichent dès que l'OCR répond
       if (data.nom) setNom(data.nom)
       if (data.prenom) setPrenom(data.prenom)
       if (data.numPasseport) setPasseport(data.numPasseport)
@@ -1118,23 +1317,18 @@ export default function AjouterPelerin() {
       if (data.dateNaissance) setDateNaissance(data.dateNaissance)
       if (data.dateExpiration) setDateExpiration(data.dateExpiration)
 
-      // 2. Fichier passeport complet pour Nusuk (Dimensions 100% conservées)
-      try {
-        const formatted = await compressAndFormatPassportNusuk(fullImageUrl)
-        setFileToUpload(formatted.file)
-      } catch {
-        if (pendingScanFileRef.current) setFileToUpload(pendingScanFileRef.current)
-      }
+      // Fichier Nusuk + visage : généralement déjà prêts
+      const [nusukFile, autoCrop] = await Promise.all([filePromise, facePromise])
 
-      // 3. Détection et extraction automatique du visage pour la photo Nusuk 200x200
-      try {
-        const autoCrop = await autoDetectAndCropNusuk(fullImageUrl)
+      if (nusukFile) setFileToUpload(nusukFile)
+
+      if (autoCrop) {
         setPhotoFile(autoCrop.file)
         setPhotoPreview(autoCrop.dataUrl)
         setCropBox(autoCrop.cropBox)
         setCropImgDims(autoCrop.dims)
-        setMessage({ text: "✅ Passeport lu et photo recadrée automatiquement !", type: 'success' })
-      } catch {
+        setMessage({ text: "✅ Passeport lu et photo du visage extraite sans aucun texte !", type: 'success' })
+      } else {
         setMessage({ text: "✅ Passeport lu avec succès !", type: 'success' })
       }
 
@@ -1310,7 +1504,7 @@ export default function AjouterPelerin() {
                 )}
               </div>
 
-              {/* SECTION PHOTO */}
+              {/* SECTION PHOTO D'IDENTITÉ AVEC DÉTECTION FACIALE IA AUTOMATIQUE */}
               <div className="p-4 bg-gray-50 rounded-2xl border border-gray-100 space-y-3">
                 <div className="flex items-center justify-between">
                   <span className="text-[10px] font-black text-gray-700 uppercase flex items-center gap-1.5">
@@ -1359,33 +1553,14 @@ export default function AjouterPelerin() {
                         type="file" 
                         className="hidden" 
                         accept="image/*" 
-                        onChange={async (e) => {
-                          const f = e.target.files?.[0]
-                          if (f) {
-                            const reader = new FileReader()
-                            reader.onload = async () => {
-                              const d = reader.result as string
-                              setCropImageSrc(d)
-                              try {
-                                const autoCrop = await autoDetectAndCropNusuk(d)
-                                setPhotoFile(autoCrop.file)
-                                setPhotoPreview(autoCrop.dataUrl)
-                                setCropBox(autoCrop.cropBox)
-                                setCropImgDims(autoCrop.dims)
-                              } catch {
-                                setCropModalOpen(true)
-                              }
-                            }
-                            reader.readAsDataURL(f)
-                          }
-                        }} 
+                        onChange={handlePhotoFileChange} 
                       />
                     </label>
                   </div>
                 </div>
 
                 <p className="text-[9px] text-gray-400 font-medium leading-tight">
-                  Format standard : 200×200 pixels JPEG &lt; 100 Ko.
+                  Format standard : 200×200 pixels JPEG &lt; 100 Ko • Visage isolé sans texte.
                 </p>
               </div>
 
@@ -1409,7 +1584,7 @@ export default function AjouterPelerin() {
                       {fileToUpload ? fileToUpload.name : "Joindre le fichier du passeport"}
                     </p>
                     <p className="text-[9px] text-gray-400">
-                      Auto-compression Nusuk (&lt; 400 Ko) • Dimensions originales préservées
+                      Extraction faciale automatique vers la photo d'identité • Compression Nusuk (&lt; 400 Ko)
                     </p>
                   </div>
                   <input type="file" className="hidden" accept="image/*,.pdf" onChange={handlePassportFileChange} />
@@ -1630,7 +1805,7 @@ export default function AjouterPelerin() {
         </div>
       </div>
 
-      {/* ── 🎯 NOUVEAU MODAL : APERÇU ET SÉLECTION DE LA ZONE MRZ AVANT OCR ── */}
+      {/* ── MODAL APERÇU ET CADRAGE MRZ AVANT OCR ── */}
       {mrzPreviewModalOpen && mrzPreviewImageSrc && (
         <div 
           className="fixed inset-0 z-[9999] bg-slate-900/85 backdrop-blur-sm flex items-center justify-center p-3 sm:p-5 animate-in fade-in duration-150"
@@ -1720,7 +1895,7 @@ export default function AjouterPelerin() {
           onPointerUp={handlePointerUpContainer}
         >
           <div className="bg-white rounded-3xl shadow-2xl max-w-xl w-full overflow-hidden border border-slate-200 flex flex-col max-h-[95vh]">
-            <div className="p-4 bg-slate-900 text-white flex items-center justify-between">
+            <div className="p-4 bg-slate-955 text-white flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <Crop size={18} className="text-emerald-400" />
                 <h3 className="font-black text-sm uppercase">Cadrage Visage Nusuk (200×200 px)</h3>

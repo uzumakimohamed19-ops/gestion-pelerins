@@ -1,13 +1,15 @@
 'use client'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useSearchParams, useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import { 
   Save, ArrowLeft, Loader2, Upload, FileCheck, AlertCircle, 
-  User, CreditCard, Syringe, Hotel, Calendar, FileText, Camera, Image as ImageIcon 
+  User, CreditCard, Syringe, Hotel, Calendar, FileText, Camera, Image as ImageIcon,
+  ScanLine, Crop, Check, X, Move
 } from 'lucide-react'
 import { uploadPassportFile, getPassportPublicUrl } from '@/lib/hajjPassport'
 import Link from 'next/link'
+import * as faceapi from '@vladmandic/face-api'
 
 // Petit composant Switch réutilisable pour les champs booléens
 const FormToggle = ({ 
@@ -44,6 +46,288 @@ const formatAmount = (value: string | number) => {
   return digits === '' ? '' : Number(digits).toLocaleString('fr-FR')
 }
 
+// ─────────────────────────────────────────────────────────────
+// 🎯 MOTEUR DE CAPTURE PHOTO D'IDENTITÉ NUSUK (200×200, < 100 Ko)
+// ─────────────────────────────────────────────────────────────
+
+// Gestion du modèle IA Face-API (chargement unique, même en appels simultanés)
+let isFaceModelLoaded = false
+let faceModelPromise: Promise<void> | null = null
+async function loadFaceModel() {
+  if (isFaceModelLoaded) return
+  if (!faceModelPromise) {
+    faceModelPromise = faceapi.nets.ssdMobilenetv1
+      .loadFromUri('/models')
+      .then(() => {
+        isFaceModelLoaded = true
+      })
+      .catch((err) => {
+        faceModelPromise = null
+        throw err
+      })
+  }
+  await faceModelPromise
+}
+
+// Télécharge un passeport déjà enregistré et le convertit en data URL (évite les blocages CORS du canvas)
+async function fetchImageAsDataUrl(url: string): Promise<string> {
+  const res = await fetch(url)
+  if (!res.ok) throw new Error(`Téléchargement du passeport impossible (${res.status}).`)
+  const blob = await res.blob()
+  if (blob.type.includes('pdf')) {
+    throw new Error("Le passeport enregistré est un PDF : joignez une image pour extraire la photo.")
+  }
+  return await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(reader.result as string)
+    reader.onerror = () => reject(new Error('Lecture du passeport impossible.'))
+    reader.readAsDataURL(blob)
+  })
+}
+
+function readFileAsDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(reader.result as string)
+    reader.onerror = () => reject(new Error('Lecture du fichier impossible.'))
+    reader.readAsDataURL(file)
+  })
+}
+
+const NUSUK_PHOTO_MAX_BYTES = 95 * 1024
+
+function canvasToJpegBlob(canvas: HTMLCanvasElement, quality: number): Promise<Blob> {
+  return new Promise((resolve, reject) => {
+    canvas.toBlob(
+      (blob) => (blob ? resolve(blob) : reject(new Error('Erreur blob'))),
+      'image/jpeg',
+      quality
+    )
+  })
+}
+
+// Réduction par paliers (÷2 à chaque étape) : bien plus net qu'une réduction directe
+function resizeHighQuality(source: HTMLCanvasElement, dw: number, dh: number): HTMLCanvasElement {
+  let cur = source
+  while (cur.width / 2 >= dw && cur.height / 2 >= dh) {
+    const next = document.createElement('canvas')
+    next.width = Math.max(1, Math.floor(cur.width / 2))
+    next.height = Math.max(1, Math.floor(cur.height / 2))
+    const nctx = next.getContext('2d')
+    if (!nctx) break
+    nctx.imageSmoothingEnabled = true
+    nctx.imageSmoothingQuality = 'high'
+    nctx.drawImage(cur, 0, 0, next.width, next.height)
+    cur = next
+  }
+  const out = document.createElement('canvas')
+  out.width = Math.max(1, dw)
+  out.height = Math.max(1, dh)
+  const octx = out.getContext('2d')
+  if (octx) {
+    octx.imageSmoothingEnabled = true
+    octx.imageSmoothingQuality = 'high'
+    octx.drawImage(cur, 0, 0, out.width, out.height)
+  }
+  return out
+}
+
+// Netteté légère (masque flou 3x3) : détails du visage plus lisibles sans bruit
+function sharpenCanvas(ctx: CanvasRenderingContext2D, w: number, h: number, amount: number) {
+  const imgData = ctx.getImageData(0, 0, w, h)
+  const s = imgData.data
+  const out = new Uint8ClampedArray(s.length)
+  out.set(s)
+  const stride = w * 4
+  const center = 1 + 4 * amount
+  for (let y = 1; y < h - 1; y++) {
+    for (let x = 1; x < w - 1; x++) {
+      const i = y * stride + x * 4
+      for (let c = 0; c < 3; c++) {
+        const k = i + c
+        out[k] = s[k] * center - amount * (s[k - 4] + s[k + 4] + s[k - stride] + s[k + stride])
+      }
+    }
+  }
+  imgData.data.set(out)
+  ctx.putImageData(imgData, 0, 0)
+}
+
+async function renderNusukPhoto(
+  img: HTMLImageElement,
+  cropX: number,
+  cropY: number,
+  size: number,
+  leftCut: number = -Infinity,
+  rightCut: number = Infinity
+): Promise<{ file: File; dataUrl: string }> {
+  const canvas = document.createElement('canvas')
+  canvas.width = 200
+  canvas.height = 200
+  const ctx = canvas.getContext('2d')
+  if (!ctx) throw new Error('Erreur canvas')
+
+  ctx.fillStyle = '#FFFFFF'
+  ctx.fillRect(0, 0, 200, 200)
+
+  const ratio = 200 / size
+  const srcLeft = Math.max(cropX, 0, leftCut)
+  const srcRight = Math.min(cropX + size, img.width, rightCut)
+  const srcTop = Math.max(cropY, 0)
+  const srcBottom = Math.min(cropY + size, img.height)
+
+  if (srcRight > srcLeft && srcBottom > srcTop) {
+    const srcW = Math.max(1, Math.round(srcRight - srcLeft))
+    const srcH = Math.max(1, Math.round(srcBottom - srcTop))
+
+    // Zone utile extraite à la résolution d'origine, puis réduite par paliers
+    const region = document.createElement('canvas')
+    region.width = srcW
+    region.height = srcH
+    const rctx = region.getContext('2d')
+    if (!rctx) throw new Error('Erreur canvas')
+    rctx.drawImage(img, Math.round(srcLeft), Math.round(srcTop), srcW, srcH, 0, 0, srcW, srcH)
+
+    const dw = Math.max(1, Math.round(srcW * ratio))
+    const dh = Math.max(1, Math.round(srcH * ratio))
+    const dx = Math.round((srcLeft - cropX) * ratio)
+    const dy = Math.round((srcTop - cropY) * ratio)
+
+    const resized = resizeHighQuality(region, dw, dh)
+    ctx.drawImage(resized, dx, dy)
+  }
+
+  sharpenCanvas(ctx, 200, 200, 0.45)
+
+  // Qualité maximale tout en restant sous la limite Nusuk
+  let quality = 0.95
+  let blob = await canvasToJpegBlob(canvas, quality)
+  while (blob.size > NUSUK_PHOTO_MAX_BYTES && quality > 0.6) {
+    quality -= 0.05
+    blob = await canvasToJpegBlob(canvas, quality)
+  }
+
+  const file = new File([blob], `photo_nusuk_${Date.now()}.jpg`, { type: 'image/jpeg' })
+  const dataUrl = canvas.toDataURL('image/jpeg', quality)
+  return { file, dataUrl }
+}
+
+// 🎯 DÉTECTION ET DÉCOUPE FACIALE : visage centré (~70% du carré), aucun texte à droite, pas de vide à gauche
+async function autoDetectAndCropNusuk(imageSrc: string): Promise<{ 
+  file: File; 
+  dataUrl: string; 
+  cropBox: { x: number; y: number; size: number }; 
+  dims: { width: number; height: number };
+  detected: boolean;
+}> {
+  return new Promise((resolve, reject) => {
+    const img = new Image()
+    img.crossOrigin = 'anonymous'
+
+    img.onload = async () => {
+      const dims = { width: img.width, height: img.height }
+      let cropX = 0
+      let cropY = 0
+      let size = 200
+      let faceFound = false
+
+      // Limites dures : tout ce qui dépasse sera rendu en blanc (jamais de texte ni de bord de page)
+      let leftCut = -Infinity
+      let rightCut = Infinity
+
+      try {
+        await loadFaceModel()
+
+        // Détection sur une version réduite (beaucoup plus rapide), coordonnées remises à l'échelle ensuite
+        const maxSide = 1280
+        const ds = Math.min(1, maxSide / Math.max(dims.width, dims.height))
+        let detectInput: HTMLImageElement | HTMLCanvasElement = img
+        if (ds < 1) {
+          const dc = document.createElement('canvas')
+          dc.width = Math.max(1, Math.round(dims.width * ds))
+          dc.height = Math.max(1, Math.round(dims.height * ds))
+          const dctx = dc.getContext('2d')
+          if (dctx) {
+            dctx.drawImage(img, 0, 0, dc.width, dc.height)
+            detectInput = dc
+          }
+        }
+        const inv = detectInput === img ? 1 : 1 / ds
+
+        const detection = await faceapi.detectSingleFace(
+          detectInput,
+          new faceapi.SsdMobilenetv1Options({ minConfidence: 0.35 })
+        )
+
+        if (detection) {
+          const faceX = detection.box.x * inv
+          const faceY = detection.box.y * inv
+          const faceW = detection.box.width * inv
+          const faceH = detection.box.height * inv
+
+          const faceCx = faceX + faceW / 2
+
+          // 🛡️ Fenêtre horizontale symétrique autour du visage (rien au-delà : jamais de texte à droite)
+          leftCut = faceX - faceW * 0.42
+          rightCut = faceX + faceW * 1.42
+          const windowW = rightCut - leftCut
+
+          // 📐 Le visage occupe ~70% de la hauteur du carré (tête bien dégagée), et le carré tient toujours dans la fenêtre
+          size = Math.round(Math.min(faceH / 0.70, windowW, dims.width, dims.height))
+
+          // 🎯 Visage parfaitement centré horizontalement
+          cropX = Math.round(faceCx - size / 2)
+          cropX = Math.max(0, Math.min(dims.width - size, cropX))
+
+          // 🎯 Centrage vertical (légèrement plus de marge en haut pour les cheveux)
+          const leftover = size - faceH
+          let targetY = faceY - leftover * 0.58
+          if (targetY + size > dims.height) targetY = dims.height - size
+          if (targetY < 0) targetY = 0
+          cropY = Math.round(targetY)
+
+          faceFound = true
+        }
+      } catch (err) {
+        console.warn('Face-API : repli géométrique :', err)
+      }
+
+      // Repli si l'IA n'a pas détecté le visage
+      if (!faceFound) {
+        if (img.width > img.height) {
+          size = Math.round(Math.min(img.height * 0.48, img.width * 0.25))
+          cropX = Math.round(img.width * 0.05)
+          cropY = Math.round(img.height * 0.16)
+        } else {
+          size = Math.round(Math.min(img.width * 0.60, img.height * 0.60))
+          cropX = Math.round((img.width - size) / 2)
+          cropY = Math.round(Math.max(0, img.height * 0.12))
+        }
+      }
+
+      // Boîte renvoyée à l'éditeur manuel : toujours contenue dans l'image
+      const safeX = Math.round(Math.max(0, Math.min(dims.width - size, cropX)))
+
+      // 🎯 Rendu carré 200x200 px haute qualité : fond blanc, zone autorisée uniquement, netteté, < 100 Ko
+      try {
+        const rendered = await renderNusukPhoto(img, cropX, cropY, size, leftCut, rightCut)
+        resolve({
+          file: rendered.file,
+          dataUrl: rendered.dataUrl,
+          cropBox: { x: safeX, y: cropY, size },
+          dims,
+          detected: faceFound
+        })
+      } catch (renderErr) {
+        reject(renderErr)
+      }
+    }
+
+    img.onerror = () => reject(new Error("Erreur de chargement d'image"))
+    img.src = imageSrc
+  })
+}
+
 export default function ModifierPelerin() {
   const id = useSearchParams().get('id')
   const router = useRouter()
@@ -57,6 +341,18 @@ export default function ModifierPelerin() {
   const [file, setFile] = useState<File | null>(null)
   const [photoFile, setPhotoFile] = useState<File | null>(null)
   const [photoPreview, setPhotoPreview] = useState<string | null>(null)
+
+  // Capture photo d'identité (moteur Nusuk)
+  const [capturing, setCapturing] = useState(false)
+  const [captureInfo, setCaptureInfo] = useState<{ text: string; type: 'success' | 'info' | 'error' } | null>(null)
+  const [cropModalOpen, setCropModalOpen] = useState(false)
+  const [cropImageSrc, setCropImageSrc] = useState<string | null>(null)
+  const [cropBox, setCropBox] = useState<{ x: number; y: number; size: number }>({ x: 0, y: 0, size: 200 })
+  const [cropImgDims, setCropImgDims] = useState<{ width: number; height: number }>({ width: 1, height: 1 })
+  const cropContainerRef = useRef<HTMLDivElement>(null)
+  const isDraggingRef = useRef(false)
+  const isResizingRef = useRef(false)
+  const dragStartRef = useRef<{ mouseX: number; mouseY: number; boxX: number; boxY: number; boxSize: number }>({ mouseX: 0, mouseY: 0, boxX: 0, boxY: 0, boxSize: 0 })
 
   const [prixPackageInput, setPrixPackageInput] = useState('')
   const [totalPayeInput, setTotalPayeInput] = useState('')
@@ -101,20 +397,158 @@ export default function ModifierPelerin() {
   const isGouvLocked = Boolean(formData.sur_plateforme_gouv)
   const isFieldLockedForGouv = (field: string) => isGouvLocked && !['nom_package', 'prix_package', 'total_paye', 'notes'].includes(field)
 
+  // Un passeport est exploitable s'il vient d'être joint (image) ou s'il est déjà enregistré
+  const canCaptureFromPassport = Boolean((file && file.type.startsWith('image/')) || (!file && formData.document_url))
+
   const handleInputChange = (field: string, value: string | number | boolean) => {
     setFormData(prev => ({ ...prev, [field]: value }))
   }
 
-  // Sélection de la nouvelle photo d'identité
+  // 🚀 Préchargement du modèle IA en arrière-plan : la première capture n'attend plus
+  useEffect(() => {
+    loadFaceModel().catch(() => {})
+  }, [])
+
+  // Applique un résultat de cadrage automatique à l'aperçu et au fichier à enregistrer
+  const applyAutoCrop = (result: Awaited<ReturnType<typeof autoDetectAndCropNusuk>>) => {
+    setPhotoFile(result.file)
+    setPhotoPreview(result.dataUrl)
+    setCropBox(result.cropBox)
+    setCropImgDims(result.dims)
+  }
+
+  // 🎯 Capture de la photo depuis un passeport déjà enregistré (ou fraîchement joint) sans tout reprendre
+  const captureFromPassport = async () => {
+    setCapturing(true)
+    setCaptureInfo({ text: '⚡ Extraction du visage en cours...', type: 'info' })
+
+    try {
+      let dataUrl: string
+      if (file && file.type.startsWith('image/')) {
+        dataUrl = await readFileAsDataUrl(file)
+      } else if (formData.document_url) {
+        const passportUrl = getPassportPublicUrl(formData.document_url)
+        if (!passportUrl) {
+          throw new Error('Le passeport enregistré est introuvable ou inaccessible.')
+        }
+        dataUrl = await fetchImageAsDataUrl(passportUrl)
+      } else {
+        throw new Error('Aucun passeport disponible pour extraire la photo.')
+      }
+
+      setCropImageSrc(dataUrl)
+      const result = await autoDetectAndCropNusuk(dataUrl)
+      applyAutoCrop(result)
+
+      if (result.detected) {
+        setCaptureInfo({ text: '✅ Visage cadré avec précision au format officiel Nusuk !', type: 'success' })
+      } else {
+        setCaptureInfo({ text: '⚠️ Visage non détecté : ajustez le cadrage manuellement.', type: 'info' })
+        setCropModalOpen(true)
+      }
+    } catch (err: unknown) {
+      const errMsg = err instanceof Error ? err.message : String(err)
+      setCaptureInfo({ text: `❌ ${errMsg}`, type: 'error' })
+    } finally {
+      setCapturing(false)
+    }
+  }
+
+  // Sélection d'une nouvelle photo d'identité : cadrage automatique Nusuk
   const handlePhotoSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0]
     if (!f) return
-    setPhotoFile(f)
+    e.target.value = ''
+
     const reader = new FileReader()
-    reader.onload = () => {
-      setPhotoPreview(reader.result as string)
+    reader.onload = async () => {
+      const dataUrl = reader.result as string
+      setCropImageSrc(dataUrl)
+
+      try {
+        const result = await autoDetectAndCropNusuk(dataUrl)
+        applyAutoCrop(result)
+        setCaptureInfo({ text: "✅ Photo d'identité chargée et cadrée aux normes Nusuk (200×200px) !", type: 'success' })
+      } catch {
+        setPhotoFile(f)
+        setPhotoPreview(dataUrl)
+        setCaptureInfo(null)
+        setCropModalOpen(true)
+      }
     }
     reader.readAsDataURL(f)
+  }
+
+  // Validation du cadrage manuel
+  const handleConfirmCropNusuk = () => {
+    if (!cropImageSrc) return
+    const img = new Image()
+    img.crossOrigin = 'anonymous'
+    img.onload = async () => {
+      try {
+        const rendered = await renderNusukPhoto(img, cropBox.x, cropBox.y, cropBox.size)
+        setPhotoFile(rendered.file)
+        setPhotoPreview(rendered.dataUrl)
+        setCropModalOpen(false)
+        setCaptureInfo({ text: '✅ Photo du pèlerin ajustée aux normes Nusuk (200×200px) !', type: 'success' })
+      } catch {
+        setCaptureInfo({ text: '❌ Erreur lors du recadrage de la photo.', type: 'error' })
+      }
+    }
+    img.src = cropImageSrc
+  }
+
+  const handlePointerDownBox = (e: React.PointerEvent) => {
+    e.stopPropagation()
+    isDraggingRef.current = true
+    dragStartRef.current = { mouseX: e.clientX, mouseY: e.clientY, boxX: cropBox.x, boxY: cropBox.y, boxSize: cropBox.size }
+  }
+  const handlePointerDownHandle = (e: React.PointerEvent) => {
+    e.stopPropagation()
+    isResizingRef.current = true
+    dragStartRef.current = { mouseX: e.clientX, mouseY: e.clientY, boxX: cropBox.x, boxY: cropBox.y, boxSize: cropBox.size }
+  }
+  const handlePointerMoveContainer = (e: React.PointerEvent) => {
+    if (!cropContainerRef.current) return
+    const rect = cropContainerRef.current.getBoundingClientRect()
+    const scaleX = cropImgDims.width / rect.width
+
+    if (isDraggingRef.current) {
+      const deltaX = (e.clientX - dragStartRef.current.mouseX) * scaleX
+      const deltaY = (e.clientY - dragStartRef.current.mouseY) * scaleX
+      const nextX = Math.max(0, Math.min(cropImgDims.width - cropBox.size, dragStartRef.current.boxX + deltaX))
+      const nextY = Math.max(0, Math.min(cropImgDims.height - cropBox.size, dragStartRef.current.boxY + deltaY))
+      setCropBox(prev => ({ ...prev, x: nextX, y: nextY }))
+    } else if (isResizingRef.current) {
+      const delta = (e.clientX - dragStartRef.current.mouseX) * scaleX
+      const nextSize = Math.max(80, Math.min(cropImgDims.width - cropBox.x, cropImgDims.height - cropBox.y, dragStartRef.current.boxSize + delta))
+      setCropBox(prev => ({ ...prev, size: nextSize }))
+    }
+  }
+  const handlePointerUpContainer = () => {
+    isDraggingRef.current = false
+    isResizingRef.current = false
+  }
+
+  // Ouvre l'éditeur manuel : charge d'abord les dimensions si le cadrage n'a pas encore été calculé
+  const openCropEditor = () => {
+    if (!cropImageSrc) return
+    if (cropImgDims.width > 1) {
+      setCropModalOpen(true)
+      return
+    }
+    const img = new Image()
+    img.onload = () => {
+      const size = Math.round(Math.min(img.width, img.height) * 0.6)
+      setCropImgDims({ width: img.width, height: img.height })
+      setCropBox({
+        x: Math.round((img.width - size) / 2),
+        y: Math.round(Math.max(0, img.height * 0.12)),
+        size
+      })
+      setCropModalOpen(true)
+    }
+    img.src = cropImageSrc
   }
 
   useEffect(() => {
@@ -520,16 +954,17 @@ export default function ModifierPelerin() {
                 </label>
               </div>
 
-              {/* Photo d'identité (Optionnelle) */}
+              {/* Photo d'identité Nusuk (moteur de capture intégré) */}
               <div>
                 <label className="block text-[10px] font-black text-gray-400 mb-1.5 uppercase tracking-wider flex items-center justify-between">
-                  <span>Photo d'identité (Optionnelle)</span>
+                  <span>Photo d'identité Nusuk (200×200)</span>
                   {photoPreview && (
                     <button
                       type="button"
                       onClick={() => {
                         setPhotoFile(null)
                         setPhotoPreview(null)
+                        setCaptureInfo(null)
                         handleInputChange('photo_url', '')
                       }}
                       className="text-red-500 hover:text-red-700 text-[10px] font-bold cursor-pointer"
@@ -538,19 +973,62 @@ export default function ModifierPelerin() {
                     </button>
                   )}
                 </label>
-                <div className="flex items-center gap-3 p-3 bg-gray-50 border-2 border-gray-100 rounded-xl">
-                  <div className="w-12 h-14 rounded-lg bg-white border border-gray-200 flex items-center justify-center overflow-hidden shrink-0">
-                    {photoPreview ? (
-                      <img src={photoPreview} alt="Aperçu identité" className="w-full h-full object-cover" />
-                    ) : (
-                      <ImageIcon size={20} className="text-gray-300" />
-                    )}
+                <div className="p-3 bg-gray-50 border-2 border-gray-100 rounded-xl space-y-3">
+                  <div className="flex items-center gap-3">
+                    <div className="w-16 h-16 rounded-xl bg-white border border-gray-200 flex items-center justify-center overflow-hidden shrink-0 relative">
+                      {photoPreview ? (
+                        <img src={photoPreview} alt="Aperçu identité" className="w-full h-full object-cover" />
+                      ) : (
+                        <ImageIcon size={20} className="text-gray-300" />
+                      )}
+                      {photoPreview && photoFile && (
+                        <div className="absolute bottom-0 inset-x-0 bg-emerald-600 text-[8px] font-black text-white text-center py-0.5 uppercase">
+                          Nusuk OK
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="flex-1 space-y-1.5">
+                      {cropImageSrc && (
+                        <button
+                          type="button"
+                          onClick={openCropEditor}
+                          className="w-full py-2 px-2.5 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 rounded-lg text-center text-[10px] font-black uppercase flex items-center justify-center gap-1.5 transition cursor-pointer"
+                        >
+                          <Crop size={13} />
+                          <span>Ajuster Photo ID</span>
+                        </button>
+                      )}
+
+                      <label className="block w-full py-2.5 px-3 bg-white border border-gray-200 hover:border-blue-400 rounded-lg text-center text-xs font-bold text-blue-600 cursor-pointer transition">
+                        <Camera size={14} className="inline mr-1.5" />
+                        {photoPreview ? "Changer la photo" : "Ajouter une photo"}
+                        <input type="file" className="hidden" accept="image/*" onChange={handlePhotoSelect} />
+                      </label>
+                    </div>
                   </div>
-                  <label className="flex-1 py-3 px-3 bg-white border border-gray-200 hover:border-blue-400 rounded-lg text-center text-xs font-bold text-blue-600 cursor-pointer transition">
-                    <Camera size={14} className="inline mr-1.5" />
-                    {photoPreview ? "Changer la photo" : "Ajouter une photo"}
-                    <input type="file" className="hidden" accept="image/*" onChange={handlePhotoSelect} />
-                  </label>
+
+                  {canCaptureFromPassport && (
+                    <button
+                      type="button"
+                      onClick={captureFromPassport}
+                      disabled={capturing}
+                      className="w-full py-2.5 px-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-center text-[10px] font-black uppercase flex items-center justify-center gap-1.5 transition cursor-pointer active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {capturing ? <Loader2 size={14} className="animate-spin" /> : <ScanLine size={14} />}
+                      <span>{capturing ? "Extraction en cours..." : file ? "Capturer la photo depuis le nouveau passeport" : "Capturer la photo depuis le passeport enregistré"}</span>
+                    </button>
+                  )}
+
+                  {captureInfo && (
+                    <p className={`px-3 py-2 rounded-lg text-[10px] font-bold uppercase tracking-wide border ${captureInfo.type === 'success' ? 'bg-green-100 text-green-700 border-green-200' : captureInfo.type === 'info' ? 'bg-blue-100 text-blue-700 border-blue-200' : 'bg-red-100 text-red-700 border-red-200'}`}>
+                      {captureInfo.text}
+                    </p>
+                  )}
+
+                  <p className="text-[9px] text-gray-400 font-medium leading-tight">
+                    Format standard : 200×200 pixels JPEG &lt; 100 Ko • Visage isolé sans texte.
+                  </p>
                 </div>
               </div>
             </div>
@@ -773,6 +1251,87 @@ export default function ModifierPelerin() {
           </button>
         </form>
       </div>
+
+      {/* ── 🎯 MODAL : RECADRAGE VISAGE NUSUK (200x200 px) ── */}
+      {cropModalOpen && cropImageSrc && (
+        <div 
+          className="fixed inset-0 z-[9999] bg-slate-900/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-5 animate-in fade-in duration-150"
+          onPointerMove={handlePointerMoveContainer}
+          onPointerUp={handlePointerUpContainer}
+        >
+          <div className="bg-white rounded-3xl shadow-2xl max-w-xl w-full overflow-hidden border border-slate-200 flex flex-col max-h-[95vh]">
+            <div className="p-4 bg-slate-900 text-white flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Crop size={18} className="text-emerald-400" />
+                <h3 className="font-black text-sm uppercase">Cadrage Visage Nusuk (200×200 px)</h3>
+              </div>
+              <button 
+                type="button"
+                onClick={() => setCropModalOpen(false)} 
+                className="w-8 h-8 rounded-lg bg-white/10 hover:bg-white/20 flex items-center justify-center cursor-pointer text-slate-300"
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            <p className="px-4 py-2 bg-slate-100 text-[11px] text-slate-600 font-medium">
+              Glissez le <strong>cadre vert</strong> sur le visage ou utilisez la <strong>poignée</strong> pour zoomer/recadrer.
+            </p>
+
+            <div className="p-4 overflow-auto flex-1 flex items-center justify-center bg-slate-950/90 select-none">
+              <div ref={cropContainerRef} className="relative max-w-full max-h-[55vh] inline-block touch-none">
+                <img src={cropImageSrc} alt="Passeport" className="max-h-[55vh] w-auto max-w-full object-contain pointer-events-none block" />
+                {(() => {
+                  const scalePctX = (cropBox.x / cropImgDims.width) * 100
+                  const scalePctY = (cropBox.y / cropImgDims.height) * 100
+                  const scalePctW = (cropBox.size / cropImgDims.width) * 100
+
+                  return (
+                    <div
+                      onPointerDown={handlePointerDownBox}
+                      style={{
+                        left: `${scalePctX}%`,
+                        top: `${scalePctY}%`,
+                        width: `${scalePctW}%`,
+                        paddingBottom: `${scalePctW}%`,
+                      }}
+                      className="absolute border-2 border-emerald-400 bg-emerald-400/20 shadow-lg cursor-move rounded-xl touch-none group ring-2 ring-emerald-500/50"
+                    >
+                      <div className="absolute inset-0 flex items-center justify-center pointer-events-none opacity-40">
+                        <Move size={20} className="text-white" />
+                      </div>
+                      <div
+                        onPointerDown={handlePointerDownHandle}
+                        className="absolute -right-2 -bottom-2 w-6 h-6 bg-emerald-500 border-2 border-white rounded-full flex items-center justify-center cursor-nwse-resize shadow-md touch-none"
+                      >
+                        <div className="w-1.5 h-1.5 bg-white rounded-full" />
+                      </div>
+                    </div>
+                  )
+                })()}
+              </div>
+            </div>
+
+            <div className="p-4 bg-white border-t border-slate-200 flex items-center justify-between gap-3">
+              <button
+                type="button"
+                onClick={() => setCropModalOpen(false)}
+                className="px-4 py-2.5 rounded-xl border border-slate-300 text-slate-700 font-bold text-xs hover:bg-slate-100 cursor-pointer"
+              >
+                Annuler
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmCropNusuk}
+                className="flex items-center gap-1.5 px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs transition shadow-sm cursor-pointer"
+              >
+                <Check size={16} />
+                <span>Valider la photo Nusuk</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
