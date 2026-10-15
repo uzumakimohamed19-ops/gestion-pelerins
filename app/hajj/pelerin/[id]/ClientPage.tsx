@@ -223,11 +223,19 @@ export default function DetailsPelerin() {
     setPelerin({ ...p, [field]: value })
   }
 
+  // 🎯 CALCUL UNIFIÉ DES PAIEMENTS (Acompte d'inscription + Versements ajoutés)
+  const sumOfRecordedPayments = payments.reduce((sum, item) => sum + Number(item.amount || 0), 0)
+  const storedTotalPaid = Number(p?.total_paye || 0)
+  // On conserve toujours le total cumulé (qui inclut l'acompte saisi à l'inscription)
+  const totalPaid = Math.max(storedTotalPaid, sumOfRecordedPayments)
+  // Montant de l'acompte versé lors de l'inscription initiale (s'il n'est pas dans pelerin_payments)
+  const initialDeposit = Math.max(0, storedTotalPaid - sumOfRecordedPayments)
+
   const handleRecordPayment = async (e?: any) => {
     e?.preventDefault()
     if (!p?.id) return
 
-    const amount = Number(paymentForm.amount.replace(/\s/g, '').replace(/,/g, '').replace(/\./g, ''))
+    const amount = Number(paymentForm.amount.replace(/\D/g, ''))
     if (!amount || amount <= 0) {
       alert('Veuillez saisir un montant de paiement valide.')
       return
@@ -236,7 +244,8 @@ export default function DetailsPelerin() {
     setSavingPayment(true)
 
     try {
-      const nextTotalPaid = (p.total_paye || 0) + amount
+      // 🎯 Ajoute le nouveau versement au total déjà payé (acompte d'inscription inclus)
+      const nextTotalPaid = totalPaid + amount
       const insertedPayment = {
         id: crypto.randomUUID(),
         pelerin_id: p.id,
@@ -261,6 +270,7 @@ export default function DetailsPelerin() {
       )
       await db.execute('UPDATE pelerins SET total_paye = ? WHERE id = ?', [nextTotalPaid, p.id])
 
+      setPayments((prev) => [insertedPayment, ...prev])
       setPelerin({ ...p, total_paye: nextTotalPaid })
       setPaymentForm({ amount: '', paymentMode: 'ESPECES', paymentDate: new Date().toISOString().slice(0, 10), notes: '' })
       alert('✅ Paiement enregistré avec succès.')
@@ -382,11 +392,8 @@ export default function DetailsPelerin() {
   const photoIdentiteUrl = p.photo_url ? getPassportPublicUrl(p.photo_url) : null
 
   // --- LOGIQUE MÉTIER & CALCULS ---
-  const totalDue = p.prix_package || 0
-  const totalPaid = payments.length > 0
-    ? payments.reduce((sum, item) => sum + Number(item.amount || 0), 0)
-    : (p.total_paye || 0)
-  const resteAPayer = totalDue - totalPaid
+  const totalDue = Number(p.prix_package || 0)
+  const resteAPayer = Math.max(0, totalDue - totalPaid)
   const paiementTermine = totalDue > 0 && resteAPayer <= 0
 
   let age = null
@@ -901,10 +908,10 @@ export default function DetailsPelerin() {
               <div className="space-y-1.5">
                 <div className="flex justify-between text-[10px] font-black text-slate-400 uppercase">
                   <span>Taux d'encaissement</span>
-                  <span className="text-cyan-300">{totalDue > 0 ? Math.round((totalPaid / totalDue) * 100) : 0}%</span>
+                  <span className="text-cyan-300">{totalDue > 0 ? Math.min(100, Math.round((totalPaid / totalDue) * 100)) : 0}%</span>
                 </div>
                 <div className="w-full bg-white/10 h-2 rounded-full overflow-hidden p-[1px]">
-                  <div className="bg-gradient-to-r from-cyan-400 to-blue-500 h-full rounded-full transition-all duration-700" style={{ width: `${totalDue > 0 ? (totalPaid / totalDue) * 100 : 0}%` }}></div>
+                  <div className="bg-gradient-to-r from-cyan-400 to-blue-500 h-full rounded-full transition-all duration-700" style={{ width: `${totalDue > 0 ? Math.min(100, (totalPaid / totalDue) * 100) : 0}%` }}></div>
                 </div>
               </div>
 
@@ -974,13 +981,13 @@ export default function DetailsPelerin() {
               </form>
             </div>
 
-            {/* HISTORIQUE PAIEMENTS */}
+            {/* HISTORIQUE PAIEMENTS (INCLUT L'ACOMPTE D'INSCRIPTION) */}
             <div className="bg-white p-6 rounded-[2rem] shadow-xl shadow-slate-200/50 border border-slate-100 space-y-3">
               <h3 className="text-[10px] font-black text-slate-600 uppercase tracking-wider flex items-center gap-2">
-                <Clock size={14} className="text-slate-500" /> Historique ({payments.length})
+                <Clock size={14} className="text-slate-500" /> Historique ({payments.length + (initialDeposit > 0 ? 1 : 0)})
               </h3>
 
-              {payments.length === 0 ? (
+              {payments.length === 0 && initialDeposit <= 0 ? (
                 <p className="text-xs text-slate-400 italic">Aucun versement enregistré.</p>
               ) : (
                 <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
@@ -993,6 +1000,15 @@ export default function DetailsPelerin() {
                       <span className="text-[9px] font-black text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-md">Reçu</span>
                     </div>
                   ))}
+                  {initialDeposit > 0 && (
+                    <div className="p-2.5 rounded-xl border border-blue-100 bg-blue-50/40 text-xs flex justify-between items-center">
+                      <div>
+                        <p className="font-bold text-slate-800">{initialDeposit.toLocaleString('fr-FR')} CFA</p>
+                        <p className="text-[10px] text-slate-500">Acompte à l'inscription • {p.date_inscription ? new Date(p.date_inscription).toLocaleDateString('fr-FR') : '-'}</p>
+                      </div>
+                      <span className="text-[9px] font-black text-blue-600 bg-blue-100 px-2 py-0.5 rounded-md">Initial</span>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
