@@ -47,7 +47,7 @@ const formatAmount = (value: string | number) => {
 }
 
 // ─────────────────────────────────────────────────────────────
-// 🎯 MOTEUR DE CAPTURE PHOTO D'IDENTITÉ NUSUK (200×200, < 100 Ko)
+// 🎯 MOTEUR DE CAPTURE PHOTO D'IDENTITÉ NUSUK (480×680, < 100 Ko)
 // ─────────────────────────────────────────────────────────────
 
 // Gestion du modèle IA Face-API (chargement unique, même en appels simultanés)
@@ -94,6 +94,10 @@ function readFileAsDataUrl(file: File): Promise<string> {
   })
 }
 
+// 📐 Format officiel Nusuk recommandé : 480 × 680 px (portrait)
+const NUSUK_PHOTO_W = 480
+const NUSUK_PHOTO_H = 680
+const NUSUK_PHOTO_ASPECT = NUSUK_PHOTO_H / NUSUK_PHOTO_W
 const NUSUK_PHOTO_MAX_BYTES = 95 * 1024
 
 function canvasToJpegBlob(canvas: HTMLCanvasElement, quality: number): Promise<Blob> {
@@ -159,22 +163,25 @@ async function renderNusukPhoto(
   cropY: number,
   size: number,
   leftCut: number = -Infinity,
-  rightCut: number = Infinity
+  rightCut: number = Infinity,
+  topCut: number = -Infinity
 ): Promise<{ file: File; dataUrl: string }> {
   const canvas = document.createElement('canvas')
-  canvas.width = 200
-  canvas.height = 200
+  canvas.width = NUSUK_PHOTO_W
+  canvas.height = NUSUK_PHOTO_H
   const ctx = canvas.getContext('2d')
   if (!ctx) throw new Error('Erreur canvas')
 
   ctx.fillStyle = '#FFFFFF'
-  ctx.fillRect(0, 0, 200, 200)
+  ctx.fillRect(0, 0, NUSUK_PHOTO_W, NUSUK_PHOTO_H)
 
-  const ratio = 200 / size
+  // `size` = largeur du cadre source ; la hauteur suit le ratio 480:680
+  const cropH = size * NUSUK_PHOTO_ASPECT
+  const ratio = NUSUK_PHOTO_W / size
   const srcLeft = Math.max(cropX, 0, leftCut)
   const srcRight = Math.min(cropX + size, img.width, rightCut)
-  const srcTop = Math.max(cropY, 0)
-  const srcBottom = Math.min(cropY + size, img.height)
+  const srcTop = Math.max(cropY, 0, topCut)
+  const srcBottom = Math.min(cropY + cropH, img.height)
 
   if (srcRight > srcLeft && srcBottom > srcTop) {
     const srcW = Math.max(1, Math.round(srcRight - srcLeft))
@@ -197,12 +204,12 @@ async function renderNusukPhoto(
     ctx.drawImage(resized, dx, dy)
   }
 
-  sharpenCanvas(ctx, 200, 200, 0.45)
+  sharpenCanvas(ctx, NUSUK_PHOTO_W, NUSUK_PHOTO_H, 0.45)
 
   // Qualité maximale tout en restant sous la limite Nusuk
   let quality = 0.95
   let blob = await canvasToJpegBlob(canvas, quality)
-  while (blob.size > NUSUK_PHOTO_MAX_BYTES && quality > 0.6) {
+  while (blob.size > NUSUK_PHOTO_MAX_BYTES && quality > 0.5) {
     quality -= 0.05
     blob = await canvasToJpegBlob(canvas, quality)
   }
@@ -212,7 +219,7 @@ async function renderNusukPhoto(
   return { file, dataUrl }
 }
 
-// 🎯 DÉTECTION ET DÉCOUPE FACIALE : visage centré (~70% du carré), aucun texte à droite, pas de vide à gauche
+// 🎯 DÉTECTION ET DÉCOUPE FACIALE : cadre portrait 480×680, visage centré, aucun texte à droite, pas de vide à gauche
 async function autoDetectAndCropNusuk(imageSrc: string): Promise<{ 
   file: File; 
   dataUrl: string; 
@@ -234,6 +241,7 @@ async function autoDetectAndCropNusuk(imageSrc: string): Promise<{
       // Limites dures : tout ce qui dépasse sera rendu en blanc (jamais de texte ni de bord de page)
       let leftCut = -Infinity
       let rightCut = Infinity
+      let topCut = -Infinity
 
       try {
         await loadFaceModel()
@@ -268,23 +276,29 @@ async function autoDetectAndCropNusuk(imageSrc: string): Promise<{
           const faceCx = faceX + faceW / 2
 
           // 🛡️ Fenêtre horizontale symétrique autour du visage (rien au-delà : jamais de texte à droite)
-          leftCut = faceX - faceW * 0.42
-          rightCut = faceX + faceW * 1.42
+          leftCut = faceX - faceW * 0.50
+          rightCut = faceX + faceW * 1.50
           const windowW = rightCut - leftCut
 
-          // 📐 Le visage occupe ~70% de la hauteur du carré (tête bien dégagée), et le carré tient toujours dans la fenêtre
-          size = Math.round(Math.min(faceH / 0.70, windowW, dims.width, dims.height))
+          // 📐 Cadre portrait 480:680 (`size` = largeur) : même proportion horizontale qu'avant (tête bien dégagée),
+          // et le cadre tient toujours dans la fenêtre anti-texte et dans l'image
+          size = Math.round(Math.min(faceH / 0.68, windowW, dims.width, dims.height / NUSUK_PHOTO_ASPECT))
 
           // 🎯 Visage parfaitement centré horizontalement
           cropX = Math.round(faceCx - size / 2)
           cropX = Math.max(0, Math.min(dims.width - size, cropX))
 
-          // 🎯 Centrage vertical (légèrement plus de marge en haut pour les cheveux)
-          const leftover = size - faceH
-          let targetY = faceY - leftover * 0.58
-          if (targetY + size > dims.height) targetY = dims.height - size
+          // 🎯 Position verticale : juste la marge nécessaire pour les cheveux (≈ 0.38 × hauteur du visage),
+          // jamais plus haut → évite le texte imprimé au-dessus de la tête sur les passeports.
+          // Le reste de la hauteur du cadre est laissé en bas (cou / épaules).
+          const topMargin = faceH * 0.10   // juste l'espace des cheveux : plus court = moins de texte au-dessus de la tête
+          let targetY = faceY - topMargin
           if (targetY < 0) targetY = 0
           cropY = Math.round(targetY)
+
+          // 🛡️ Limite stricte au-dessus de la tête : tout ce qui est plus haut est rendu en blanc pur
+          // (le cadre étant plus haut vers le bas, les épaules/buste ressortent davantage)
+          topCut = faceY - faceH * 0.12
 
           faceFound = true
         }
@@ -295,26 +309,27 @@ async function autoDetectAndCropNusuk(imageSrc: string): Promise<{
       // Repli si l'IA n'a pas détecté le visage
       if (!faceFound) {
         if (img.width > img.height) {
-          size = Math.round(Math.min(img.height * 0.48, img.width * 0.25))
+          size = Math.round(Math.min((img.height * 0.62) / NUSUK_PHOTO_ASPECT, img.width * 0.25))
           cropX = Math.round(img.width * 0.05)
-          cropY = Math.round(img.height * 0.16)
+          cropY = Math.round(img.height * 0.14)
         } else {
-          size = Math.round(Math.min(img.width * 0.60, img.height * 0.60))
+          size = Math.round(Math.min(img.width * 0.90, (img.height * 0.90) / NUSUK_PHOTO_ASPECT))
           cropX = Math.round((img.width - size) / 2)
-          cropY = Math.round(Math.max(0, img.height * 0.12))
+          cropY = Math.round(Math.max(0, (img.height - size * NUSUK_PHOTO_ASPECT) / 2))
         }
       }
 
-      // Boîte renvoyée à l'éditeur manuel : toujours contenue dans l'image
+      // Boîte renvoyée à l'éditeur manuel : toujours contenue dans l'image (largeur = size, hauteur = size × 680/480)
       const safeX = Math.round(Math.max(0, Math.min(dims.width - size, cropX)))
+      const safeY = Math.round(Math.max(0, Math.min(dims.height - size * NUSUK_PHOTO_ASPECT, cropY)))
 
-      // 🎯 Rendu carré 200x200 px haute qualité : fond blanc, zone autorisée uniquement, netteté, < 100 Ko
+      // 🎯 Rendu portrait 480x680 px haute qualité : fond blanc, zone autorisée uniquement, netteté, < 100 Ko
       try {
-        const rendered = await renderNusukPhoto(img, cropX, cropY, size, leftCut, rightCut)
+        const rendered = await renderNusukPhoto(img, cropX, cropY, size, leftCut, rightCut, topCut)
         resolve({
           file: rendered.file,
           dataUrl: rendered.dataUrl,
-          cropBox: { x: safeX, y: cropY, size },
+          cropBox: { x: safeX, y: safeY, size },
           dims,
           detected: faceFound
         })
@@ -429,7 +444,7 @@ export default function ModifierPelerin() {
       } else if (formData.document_url) {
         const passportUrl = getPassportPublicUrl(formData.document_url)
         if (!passportUrl) {
-          throw new Error('Le passeport enregistré est introuvable ou inaccessible.')
+          throw new Error('Aucun passeport disponible pour extraire la photo.')
         }
         dataUrl = await fetchImageAsDataUrl(passportUrl)
       } else {
@@ -468,7 +483,7 @@ export default function ModifierPelerin() {
       try {
         const result = await autoDetectAndCropNusuk(dataUrl)
         applyAutoCrop(result)
-        setCaptureInfo({ text: "✅ Photo d'identité chargée et cadrée aux normes Nusuk (200×200px) !", type: 'success' })
+        setCaptureInfo({ text: "✅ Photo d'identité chargée et cadrée aux normes Nusuk (480×680px) !", type: 'success' })
       } catch {
         setPhotoFile(f)
         setPhotoPreview(dataUrl)
@@ -490,7 +505,7 @@ export default function ModifierPelerin() {
         setPhotoFile(rendered.file)
         setPhotoPreview(rendered.dataUrl)
         setCropModalOpen(false)
-        setCaptureInfo({ text: '✅ Photo du pèlerin ajustée aux normes Nusuk (200×200px) !', type: 'success' })
+        setCaptureInfo({ text: '✅ Photo du pèlerin ajustée aux normes Nusuk (480×680px) !', type: 'success' })
       } catch {
         setCaptureInfo({ text: '❌ Erreur lors du recadrage de la photo.', type: 'error' })
       }
@@ -517,11 +532,11 @@ export default function ModifierPelerin() {
       const deltaX = (e.clientX - dragStartRef.current.mouseX) * scaleX
       const deltaY = (e.clientY - dragStartRef.current.mouseY) * scaleX
       const nextX = Math.max(0, Math.min(cropImgDims.width - cropBox.size, dragStartRef.current.boxX + deltaX))
-      const nextY = Math.max(0, Math.min(cropImgDims.height - cropBox.size, dragStartRef.current.boxY + deltaY))
+      const nextY = Math.max(0, Math.min(cropImgDims.height - cropBox.size * NUSUK_PHOTO_ASPECT, dragStartRef.current.boxY + deltaY))
       setCropBox(prev => ({ ...prev, x: nextX, y: nextY }))
     } else if (isResizingRef.current) {
       const delta = (e.clientX - dragStartRef.current.mouseX) * scaleX
-      const nextSize = Math.max(80, Math.min(cropImgDims.width - cropBox.x, cropImgDims.height - cropBox.y, dragStartRef.current.boxSize + delta))
+      const nextSize = Math.max(80, Math.min(cropImgDims.width - cropBox.x, (cropImgDims.height - cropBox.y) / NUSUK_PHOTO_ASPECT, dragStartRef.current.boxSize + delta))
       setCropBox(prev => ({ ...prev, size: nextSize }))
     }
   }
@@ -539,11 +554,11 @@ export default function ModifierPelerin() {
     }
     const img = new Image()
     img.onload = () => {
-      const size = Math.round(Math.min(img.width, img.height) * 0.6)
+      const size = Math.round(Math.min(img.width * 0.9, (img.height * 0.9) / NUSUK_PHOTO_ASPECT))
       setCropImgDims({ width: img.width, height: img.height })
       setCropBox({
         x: Math.round((img.width - size) / 2),
-        y: Math.round(Math.max(0, img.height * 0.12)),
+        y: Math.round(Math.max(0, (img.height - size * NUSUK_PHOTO_ASPECT) / 2)),
         size
       })
       setCropModalOpen(true)
@@ -957,7 +972,7 @@ export default function ModifierPelerin() {
               {/* Photo d'identité Nusuk (moteur de capture intégré) */}
               <div>
                 <label className="block text-[10px] font-black text-gray-400 mb-1.5 uppercase tracking-wider flex items-center justify-between">
-                  <span>Photo d'identité Nusuk (200×200)</span>
+                  <span>Photo d'identité Nusuk (480×680)</span>
                   {photoPreview && (
                     <button
                       type="button"
@@ -975,7 +990,7 @@ export default function ModifierPelerin() {
                 </label>
                 <div className="p-3 bg-gray-50 border-2 border-gray-100 rounded-xl space-y-3">
                   <div className="flex items-center gap-3">
-                    <div className="w-16 h-16 rounded-xl bg-white border border-gray-200 flex items-center justify-center overflow-hidden shrink-0 relative">
+                    <div className="w-[4.25rem] h-24 rounded-xl bg-white border border-gray-200 flex items-center justify-center overflow-hidden shrink-0 relative">
                       {photoPreview ? (
                         <img src={photoPreview} alt="Aperçu identité" className="w-full h-full object-cover" />
                       ) : (
@@ -1027,7 +1042,7 @@ export default function ModifierPelerin() {
                   )}
 
                   <p className="text-[9px] text-gray-400 font-medium leading-tight">
-                    Format standard : 200×200 pixels JPEG &lt; 100 Ko • Visage isolé sans texte.
+                    Format standard : 480×680 pixels JPEG &lt; 100 Ko • Visage isolé sans texte.
                   </p>
                 </div>
               </div>
@@ -1252,7 +1267,7 @@ export default function ModifierPelerin() {
         </form>
       </div>
 
-      {/* ── 🎯 MODAL : RECADRAGE VISAGE NUSUK (200x200 px) ── */}
+      {/* ── 🎯 MODAL : RECADRAGE VISAGE NUSUK (480x680 px) ── */}
       {cropModalOpen && cropImageSrc && (
         <div 
           className="fixed inset-0 z-[9999] bg-slate-900/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-5 animate-in fade-in duration-150"
@@ -1263,7 +1278,7 @@ export default function ModifierPelerin() {
             <div className="p-4 bg-slate-900 text-white flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <Crop size={18} className="text-emerald-400" />
-                <h3 className="font-black text-sm uppercase">Cadrage Visage Nusuk (200×200 px)</h3>
+                <h3 className="font-black text-sm uppercase">Cadrage Visage Nusuk (480×680 px)</h3>
               </div>
               <button 
                 type="button"
@@ -1293,7 +1308,7 @@ export default function ModifierPelerin() {
                         left: `${scalePctX}%`,
                         top: `${scalePctY}%`,
                         width: `${scalePctW}%`,
-                        paddingBottom: `${scalePctW}%`,
+                        paddingBottom: `${scalePctW * NUSUK_PHOTO_ASPECT}%`,
                       }}
                       className="absolute border-2 border-emerald-400 bg-emerald-400/20 shadow-lg cursor-move rounded-xl touch-none group ring-2 ring-emerald-500/50"
                     >

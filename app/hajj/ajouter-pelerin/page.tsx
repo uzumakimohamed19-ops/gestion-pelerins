@@ -49,7 +49,65 @@ function getApiUrl(): string {
   return process.env.NEXT_PUBLIC_API_URL || ''
 }
 
-// 🎯 Gestion du modèle IA Face-API (chargement unique, même en appels simultanés)
+// 🎯 Traducteur automatique des erreurs techniques/anglaises en langage simple et naturel
+function humanizeError(err: unknown, fallback = "Une erreur inattendue s'est produite. Veuillez réessayer."): string {
+  if (!err) return fallback
+  const raw =
+    err instanceof Error
+      ? err.message
+      : typeof err === 'object' && err !== null && 'message' in err
+      ? String((err as { message: unknown }).message)
+      : String(err)
+
+  const lower = raw.toLowerCase()
+
+  if (
+    lower.includes('failed to fetch') ||
+    lower.includes('networkerror') ||
+    lower.includes('network request failed') ||
+    lower.includes('load failed') ||
+    lower.includes('err_internet_disconnected') ||
+    lower.includes('offline')
+  ) {
+    return "Impossible de se connecter à Internet. Vérifiez votre connexion et réessayez."
+  }
+
+  if (lower.includes('timeout') || lower.includes('timed out') || lower.includes('aborted')) {
+    return "L'opération a pris trop de temps. Vérifiez votre connexion Internet et réessayez."
+  }
+
+  if (lower.includes('duplicate key') || lower.includes('unique constraint') || lower.includes('already exists')) {
+    return "Ce pèlerin ou ce numéro de passeport est déjà enregistré."
+  }
+
+  if (lower.includes('jwt') || lower.includes('unauthorized') || lower.includes('not authenticated') || lower.includes('session')) {
+    return "Votre session a expiré. Veuillez vous reconnecter à votre compte."
+  }
+
+  if (lower.includes('permission denied') || lower.includes('row-level security') || lower.includes('rls')) {
+    return "Vous n'avez pas l'autorisation d'effectuer cette action."
+  }
+
+  if (lower.includes('payload too large') || lower.includes('entity too large') || lower.includes('file size')) {
+    return "Le fichier choisi est trop volumineux. Veuillez essayer avec une image plus légère."
+  }
+
+  if (lower.includes('canvas') || lower.includes('blob') || lower.includes('image')) {
+    return "Impossible de préparer cette image. Essayez avec une autre photo plus nette."
+  }
+
+  if (lower.includes('500') || lower.includes('502') || lower.includes('503') || lower.includes('504') || lower.includes('internal server error')) {
+    return "Le service est momentanément indisponible. Veuillez réessayer dans quelques instants."
+  }
+
+  if (/[éèêàùçîôû]/i.test(raw) && !lower.includes('supabase') && !lower.includes('error') && !lower.includes('exception')) {
+    return raw
+  }
+
+  return fallback
+}
+
+// 🎯 Gestion du modèle de détection du visage (chargement unique)
 let isFaceModelLoaded = false
 let faceModelPromise: Promise<void> | null = null
 async function loadFaceModel() {
@@ -95,7 +153,6 @@ function preparePassportImage(file: File): Promise<string> {
         const contrast = 35
         const factor = (259 * (contrast + 255)) / (255 * (259 - contrast))
 
-        // Table de correspondance : 256 calculs au lieu de millions
         const lut = new Uint8ClampedArray(256)
         for (let v = 0; v < 256; v++) {
           lut[v] = factor * (v - 128) + 128
@@ -113,7 +170,7 @@ function preparePassportImage(file: File): Promise<string> {
       img.onerror = () => resolve(reader.result as string)
       img.src = reader.result as string
     }
-    reader.onerror = reject
+    reader.onerror = () => reject(new Error("Impossible de lire le fichier sélectionné."))
     reader.readAsDataURL(file)
   })
 }
@@ -130,7 +187,7 @@ function base64ToFile(dataurl: string, filename: string): File {
   return new File([u8arr], filename, { type: mime })
 }
 
-// 🎯 Compression du passeport en gardant la dimension originale intacte (< 400 Ko pour Nusuk)
+// 🎯 Compression du passeport en gardant la dimension originale intacte (< 400 Ko garanti pour Nusuk)
 function compressAndFormatPassportNusuk(
   imageSrc: string, 
   cropRegion?: { x: number; y: number; width: number; height: number }
@@ -144,41 +201,56 @@ function compressAndFormatPassportNusuk(
       const sw = cropRegion ? cropRegion.width : img.width
       const sh = cropRegion ? cropRegion.height : img.height
 
-      const targetW = Math.round(sw)
-      const targetH = Math.round(sh)
+      let targetW = Math.round(sw)
+      let targetH = Math.round(sh)
 
       const canvas = document.createElement('canvas')
-      canvas.width = targetW
-      canvas.height = targetH
       const ctx = canvas.getContext('2d')
-      if (!ctx) return reject(new Error('Erreur canvas'))
+      if (!ctx) return reject(new Error("Impossible de préparer l'image du passeport."))
 
-      ctx.fillStyle = '#FFFFFF'
-      ctx.fillRect(0, 0, targetW, targetH)
-      ctx.drawImage(img, sx, sy, sw, sh, 0, 0, targetW, targetH)
+      const renderToCanvas = (w: number, h: number) => {
+        canvas.width = w
+        canvas.height = h
+        ctx.fillStyle = '#FFFFFF'
+        ctx.fillRect(0, 0, w, h)
+        ctx.drawImage(img, sx, sy, sw, sh, 0, 0, w, h)
+      }
 
-      let quality = 0.85
+      renderToCanvas(targetW, targetH)
+
       const generateBlob = (q: number) => {
         canvas.toBlob((blob) => {
-          if (!blob) return reject(new Error('Erreur blob'))
-          if (blob.size > 390 * 1024 && q > 0.45) {
-            generateBlob(q - 0.1)
-            return
+          if (!blob) return reject(new Error("Impossible de compresser l'image du passeport."))
+          if (blob.size > 390 * 1024) {
+            if (q > 0.45) {
+              generateBlob(Number((q - 0.1).toFixed(2)))
+              return
+            }
+            if (targetW > 1200) {
+              targetW = Math.round(targetW * 0.85)
+              targetH = Math.round(targetH * 0.85)
+              renderToCanvas(targetW, targetH)
+              generateBlob(0.75)
+              return
+            }
           }
           const file = new File([blob], `passport_nusuk_${Date.now()}.jpg`, { type: 'image/jpeg' })
-          const dataUrl = canvas.toDataURL('image/jpeg', q)
-          resolve({ file, dataUrl })
+          const reader = new FileReader()
+          reader.onloadend = () => {
+            resolve({ file, dataUrl: reader.result as string })
+          }
+          reader.readAsDataURL(blob)
         }, 'image/jpeg', q)
       }
 
-      generateBlob(quality)
+      generateBlob(0.85)
     }
-    img.onerror = reject
+    img.onerror = () => reject(new Error("Impossible de charger l'image du passeport."))
     img.src = imageSrc
   })
 }
 
-// 🎯 Découpage précis de la bande MRZ sélectionnée avant l'OCR
+// 🎯 Découpage précis de la bande MRZ sélectionnée avant l'OCR (inchangée)
 function extractMrzRegionBase64(
   imageSrc: string,
   region: { x: number; y: number; width: number; height: number }
@@ -191,7 +263,7 @@ function extractMrzRegionBase64(
       canvas.width = Math.max(10, Math.round(region.width))
       canvas.height = Math.max(10, Math.round(region.height))
       const ctx = canvas.getContext('2d')
-      if (!ctx) return reject(new Error('Erreur canvas'))
+      if (!ctx) return reject(new Error("Impossible de préparer la zone de lecture."))
 
       ctx.fillStyle = '#FFFFFF'
       ctx.fillRect(0, 0, canvas.width, canvas.height)
@@ -202,54 +274,48 @@ function extractMrzRegionBase64(
       )
       resolve(canvas.toDataURL('image/jpeg', 0.95))
     }
-    img.onerror = reject
+    img.onerror = () => reject(new Error("Impossible de lire l'image du passeport."))
     img.src = imageSrc
   })
 }
 
+// Photo déjà isolée (scanner pleine page) : plus grand rectangle 480:680 centré, rendu haute qualité Nusuk
 async function formatNusukSquare(imageSrc: string): Promise<{ file: File; dataUrl: string }> {
   return new Promise((resolve, reject) => {
     const img = new Image()
     img.crossOrigin = 'anonymous'
-    img.onload = () => {
-      const canvas = document.createElement('canvas')
-      canvas.width = 200
-      canvas.height = 200
-      const ctx = canvas.getContext('2d')
-      if (!ctx) return reject(new Error('Erreur canvas'))
-
-      const size = Math.min(img.width, img.height)
-      const x = (img.width - size) / 2
-      const y = (img.height - size) / 2
-
-      ctx.drawImage(img, x, y, size, size, 0, 0, 200, 200)
-
-      canvas.toBlob((blob) => {
-        if (!blob) return reject(new Error('Erreur blob'))
-        const file = new File([blob], `photo_nusuk_${Date.now()}.jpg`, { type: 'image/jpeg' })
-        const dataUrl = canvas.toDataURL('image/jpeg', 0.88)
-        resolve({ file, dataUrl })
-      }, 'image/jpeg', 0.88)
+    img.onload = async () => {
+      try {
+        const cropW = Math.min(img.width, img.height / NUSUK_PHOTO_ASPECT)
+        const cropH = cropW * NUSUK_PHOTO_ASPECT
+        const x = (img.width - cropW) / 2
+        const y = (img.height - cropH) / 2
+        resolve(await renderNusukPhoto(img, x, y, cropW))
+      } catch (err) {
+        reject(err)
+      }
     }
-    img.onerror = reject
+    img.onerror = () => reject(new Error("Impossible de charger la photo."))
     img.src = imageSrc
   })
 }
 
-// 🎯 Rendu haute qualité de la photo Nusuk (200x200) : réduction progressive + netteté, JPEG < 100 Ko
+// 🎯 Rendu haute qualité de la photo Nusuk (480x680) : réduction progressive + netteté, JPEG < 100 Ko
+const NUSUK_PHOTO_W = 480
+const NUSUK_PHOTO_H = 680
+const NUSUK_PHOTO_ASPECT = NUSUK_PHOTO_H / NUSUK_PHOTO_W
 const NUSUK_PHOTO_MAX_BYTES = 95 * 1024
 
 function canvasToJpegBlob(canvas: HTMLCanvasElement, quality: number): Promise<Blob> {
   return new Promise((resolve, reject) => {
     canvas.toBlob(
-      (blob) => (blob ? resolve(blob) : reject(new Error('Erreur blob'))),
+      (blob) => (blob ? resolve(blob) : reject(new Error("Impossible de créer la photo."))),
       'image/jpeg',
       quality
     )
   })
 }
 
-// Réduction par paliers (÷2 à chaque étape) : bien plus net qu'une réduction directe
 function resizeHighQuality(source: HTMLCanvasElement, dw: number, dh: number): HTMLCanvasElement {
   let cur = source
   while (cur.width / 2 >= dw && cur.height / 2 >= dh) {
@@ -275,7 +341,6 @@ function resizeHighQuality(source: HTMLCanvasElement, dw: number, dh: number): H
   return out
 }
 
-// Netteté légère (masque flou 3x3) : détails du visage plus lisibles sans bruit
 function sharpenCanvas(ctx: CanvasRenderingContext2D, w: number, h: number, amount: number) {
   const imgData = ctx.getImageData(0, 0, w, h)
   const s = imgData.data
@@ -302,33 +367,34 @@ async function renderNusukPhoto(
   cropY: number,
   size: number,
   leftCut: number = -Infinity,
-  rightCut: number = Infinity
+  rightCut: number = Infinity,
+  topCut: number = -Infinity
 ): Promise<{ file: File; dataUrl: string }> {
   const canvas = document.createElement('canvas')
-  canvas.width = 200
-  canvas.height = 200
+  canvas.width = NUSUK_PHOTO_W
+  canvas.height = NUSUK_PHOTO_H
   const ctx = canvas.getContext('2d')
-  if (!ctx) throw new Error('Erreur canvas')
+  if (!ctx) throw new Error("Impossible de préparer la photo.")
 
   ctx.fillStyle = '#FFFFFF'
-  ctx.fillRect(0, 0, 200, 200)
+  ctx.fillRect(0, 0, NUSUK_PHOTO_W, NUSUK_PHOTO_H)
 
-  const ratio = 200 / size
+  const cropH = size * NUSUK_PHOTO_ASPECT
+  const ratio = NUSUK_PHOTO_W / size
   const srcLeft = Math.max(cropX, 0, leftCut)
   const srcRight = Math.min(cropX + size, img.width, rightCut)
-  const srcTop = Math.max(cropY, 0)
-  const srcBottom = Math.min(cropY + size, img.height)
+  const srcTop = Math.max(cropY, 0, topCut)
+  const srcBottom = Math.min(cropY + cropH, img.height)
 
   if (srcRight > srcLeft && srcBottom > srcTop) {
     const srcW = Math.max(1, Math.round(srcRight - srcLeft))
     const srcH = Math.max(1, Math.round(srcBottom - srcTop))
 
-    // Zone utile extraite à la résolution d'origine, puis réduite par paliers
     const region = document.createElement('canvas')
     region.width = srcW
     region.height = srcH
     const rctx = region.getContext('2d')
-    if (!rctx) throw new Error('Erreur canvas')
+    if (!rctx) throw new Error("Impossible de recadrer la photo.")
     rctx.drawImage(img, Math.round(srcLeft), Math.round(srcTop), srcW, srcH, 0, 0, srcW, srcH)
 
     const dw = Math.max(1, Math.round(srcW * ratio))
@@ -340,13 +406,12 @@ async function renderNusukPhoto(
     ctx.drawImage(resized, dx, dy)
   }
 
-  sharpenCanvas(ctx, 200, 200, 0.45)
+  sharpenCanvas(ctx, NUSUK_PHOTO_W, NUSUK_PHOTO_H, 0.45)
 
-  // Qualité maximale tout en restant sous la limite Nusuk
   let quality = 0.95
   let blob = await canvasToJpegBlob(canvas, quality)
-  while (blob.size > NUSUK_PHOTO_MAX_BYTES && quality > 0.6) {
-    quality -= 0.05
+  while (blob.size > NUSUK_PHOTO_MAX_BYTES && quality > 0.5) {
+    quality = Number((quality - 0.05).toFixed(2))
     blob = await canvasToJpegBlob(canvas, quality)
   }
 
@@ -355,7 +420,7 @@ async function renderNusukPhoto(
   return { file, dataUrl }
 }
 
-// 🎯 DÉTECTION ET DÉCOUPE FACIALE : visage centré (~75% du carré), aucun texte à droite, pas de vide à gauche
+// 🎯 DÉTECTION ET DÉCOUPE DU VISAGE : cadre portrait 480×680, centré, ZÉRO texte en haut ni à droite
 async function autoDetectAndCropNusuk(imageSrc: string): Promise<{ 
   file: File; 
   dataUrl: string; 
@@ -374,14 +439,13 @@ async function autoDetectAndCropNusuk(imageSrc: string): Promise<{
       let size = 200
       let faceFound = false
 
-      // Limites dures : tout ce qui dépasse sera rendu en blanc (jamais de texte ni de bord de page)
       let leftCut = -Infinity
       let rightCut = Infinity
+      let topCut = -Infinity
 
       try {
         await loadFaceModel()
 
-        // Détection sur une version réduite (beaucoup plus rapide), coordonnées remises à l'échelle ensuite
         const maxSide = 1280
         const ds = Math.min(1, maxSide / Math.max(dims.width, dims.height))
         let detectInput: HTMLImageElement | HTMLCanvasElement = img
@@ -410,54 +474,57 @@ async function autoDetectAndCropNusuk(imageSrc: string): Promise<{
 
           const faceCx = faceX + faceW / 2
 
-          // 🛡️ Fenêtre horizontale symétrique autour du visage (rien au-delà : jamais de texte à droite)
-          leftCut = faceX - faceW * 0.42
-          rightCut = faceX + faceW * 1.42
+          // 🛡️ Fenêtre horizontale symétrique autour du visage (bloque le texte à droite)
+          leftCut = faceX - faceW * 0.50
+          rightCut = faceX + faceW * 1.50
           const windowW = rightCut - leftCut
 
-          // 📐 Le visage occupe ~70% de la hauteur du carré (tête bien dégagée), et le carré tient toujours dans la fenêtre
-          size = Math.round(Math.min(faceH / 0.70, windowW, dims.width, dims.height))
+          // 📐 Cadre portrait 480:680 bien centré autour du visage
+          size = Math.round(Math.min(faceH / 0.68, windowW, dims.width, dims.height / NUSUK_PHOTO_ASPECT))
 
-          // 🎯 Visage parfaitement centré horizontalement
+          // 🎯 Visage centré horizontalement
           cropX = Math.round(faceCx - size / 2)
           cropX = Math.max(0, Math.min(dims.width - size, cropX))
 
-          // 🎯 Centrage vertical (légèrement plus de marge en haut pour les cheveux)
-          const leftover = size - faceH
-          let targetY = faceY - leftover * 0.58
-          if (targetY + size > dims.height) targetY = dims.height - size
+          // 🛡️ PROTECTION ANTI-TEXTE EN HAUT :
+          // La boîte détectée inclut déjà le front. Une marge courte (0.10 × faceH) laisse
+          // juste l'espace pour les cheveux/coiffe sans jamais remonter sur l'en-tête du passeport.
+          const topMargin = faceH * 0.10   // juste l'espace des cheveux : plus court = moins de texte au-dessus de la tête
+          let targetY = faceY - topMargin
           if (targetY < 0) targetY = 0
           cropY = Math.round(targetY)
+
+          // 🛡️ Limite stricte au-dessus de la tête : tout ce qui est plus haut est rendu en blanc pur
+          // (le cadre étant plus haut vers le bas, les épaules/buste ressortent davantage)
+          topCut = faceY - faceH * 0.12
 
           faceFound = true
         }
       } catch (err) {
-        console.warn('Face-API : repli géométrique :', err)
+        console.warn('Détection du visage non disponible, cadrage par défaut utilisé :', err)
       }
 
-      // Repli si l'IA n'a pas détecté le visage
       if (!faceFound) {
         if (img.width > img.height) {
-          size = Math.round(Math.min(img.height * 0.48, img.width * 0.25))
+          size = Math.round(Math.min((img.height * 0.58) / NUSUK_PHOTO_ASPECT, img.width * 0.24))
           cropX = Math.round(img.width * 0.05)
-          cropY = Math.round(img.height * 0.16)
+          cropY = Math.round(img.height * 0.18) // Positionné plus bas pour éviter l'en-tête du passeport
         } else {
-          size = Math.round(Math.min(img.width * 0.60, img.height * 0.60))
+          size = Math.round(Math.min(img.width * 0.85, (img.height * 0.85) / NUSUK_PHOTO_ASPECT))
           cropX = Math.round((img.width - size) / 2)
-          cropY = Math.round(Math.max(0, img.height * 0.12))
+          cropY = Math.round(Math.max(0, (img.height - size * NUSUK_PHOTO_ASPECT) / 2))
         }
       }
 
-      // Boîte renvoyée à l'éditeur manuel : toujours contenue dans l'image
       const safeX = Math.round(Math.max(0, Math.min(dims.width - size, cropX)))
+      const safeY = Math.round(Math.max(0, Math.min(dims.height - size * NUSUK_PHOTO_ASPECT, cropY)))
 
-      // 🎯 Rendu carré 200x200 px haute qualité : fond blanc, zone autorisée uniquement, netteté, < 100 Ko
       try {
-        const rendered = await renderNusukPhoto(img, cropX, cropY, size, leftCut, rightCut)
+        const rendered = await renderNusukPhoto(img, cropX, cropY, size, leftCut, rightCut, topCut)
         resolve({
           file: rendered.file,
           dataUrl: rendered.dataUrl,
-          cropBox: { x: safeX, y: cropY, size },
+          cropBox: { x: safeX, y: safeY, size },
           dims,
           detected: faceFound
         })
@@ -466,7 +533,7 @@ async function autoDetectAndCropNusuk(imageSrc: string): Promise<{
       }
     }
 
-    img.onerror = () => reject(new Error("Erreur de chargement d'image"))
+    img.onerror = () => reject(new Error("Impossible de charger l'image sélectionnée."))
     img.src = imageSrc
   })
 }
@@ -490,32 +557,34 @@ function parseMrzRawLines(rawInput: string | string[]) {
     if (rawSex.startsWith('F')) sexe = 'FEMME'
     else if (rawSex.startsWith('M')) sexe = 'HOMME'
 
-    const cleanDate = (dStr: string) => {
+    const cleanDate = (dStr: string, isExpiry = false) => {
       if (!dStr) return ''
+      const currentYearShort = new Date().getFullYear() % 100
+      const resolveYear = (yy: number) => {
+        if (yy >= 100) return yy
+        if (isExpiry) return 2000 + yy
+        return yy > currentYearShort ? 1900 + yy : 2000 + yy
+      }
+
       const dmyMatch = dStr.match(/^(\d{1,2})-(\d{1,2})-(\d{2,4})$/)
       if (dmyMatch) {
         const dd = dmyMatch[1].padStart(2, '0')
         const mm = dmyMatch[2].padStart(2, '0')
-        let yy = parseInt(dmyMatch[3], 10)
-        if (yy < 100) {
-          const currentYearShort = new Date().getFullYear() % 100
-          yy = yy > currentYearShort ? 1900 + yy : 2000 + yy
-        }
+        const yy = resolveYear(parseInt(dmyMatch[3], 10))
         return `${yy}-${mm}-${dd}`
       }
       if (/^\d{4}-\d{2}-\d{2}$/.test(dStr)) return dStr
       const digits = dStr.replace(/\D/g, '')
       if (digits.length === 8) return `${digits.slice(0, 4)}-${digits.slice(4, 6)}-${digits.slice(6, 8)}`
       if (digits.length === 6) {
-        const yy = parseInt(digits.slice(0, 2), 10)
-        const fullY = yy > (new Date().getFullYear() % 100) ? 1900 + yy : 2000 + yy
+        const fullY = resolveYear(parseInt(digits.slice(0, 2), 10))
         return `${fullY}-${digits.slice(2, 4)}-${digits.slice(4, 6)}`
       }
       return ''
     }
 
-    const dateNaissance = cleanDate(getTag('DOB'))
-    const dateExpiration = cleanDate(getTag('EDT'))
+    const dateNaissance = cleanDate(getTag('DOB'), false)
+    const dateExpiration = cleanDate(getTag('EDT'), true)
 
     if (nom || numPasseport || prenom) {
       return { nom, prenom, numPasseport, sexe, dateNaissance, dateExpiration }
@@ -622,6 +691,46 @@ function parseMrzRawLines(rawInput: string | string[]) {
   return null
 }
 
+// Helper d'appel de lecture automatique compatible Web + Mobile
+async function postMrzOcr(imageBase64: string): Promise<any> {
+  const targetEndpoint = `${getApiUrl()}/api/scan-mrz`
+  if (Capacitor.isNativePlatform()) {
+    const nativeResponse = await CapacitorHttp.post({
+      url: targetEndpoint,
+      headers: { 'Content-Type': 'application/json' },
+      data: { imageBase64 },
+      connectTimeout: 30000,
+      readTimeout: 30000,
+    })
+    if (nativeResponse.status !== 200) {
+      throw new Error("Impossible de lire automatiquement ce passeport. Assurez-vous que l'image soit bien nette.")
+    }
+    return typeof nativeResponse.data === 'string' ? JSON.parse(nativeResponse.data) : nativeResponse.data
+  } else {
+    let res: Response
+    try {
+      res = await fetch(targetEndpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ imageBase64 }),
+      })
+    } catch {
+      throw new Error("Impossible de se connecter à Internet pour lire le passeport.")
+    }
+    const rawText = await res.text()
+    let data: any
+    try {
+      data = JSON.parse(rawText)
+    } catch {
+      throw new Error("La lecture automatique est momentanément indisponible. Vous pouvez remplir les champs manuellement.")
+    }
+    if (!res.ok) {
+      throw new Error("Les écritures du passeport ne sont pas assez lisibles. Essayez avec une photo plus nette ou remplissez les champs manuellement.")
+    }
+    return data
+  }
+}
+
 export default function AjouterPelerin() {
   const [nom, setNom] = useState('')
   const [prenom, setPrenom] = useState('')
@@ -648,6 +757,7 @@ export default function AjouterPelerin() {
   const [mrzBuffer, setMrzBuffer] = useState('')
   const physicalInputRef = useRef<HTMLInputElement>(null)
   const mrzTimeoutRef = useRef<NodeJS.Timeout | null>(null)
+  const resetTimeoutRef = useRef<NodeJS.Timeout | null>(null)
 
   const [isTwainScanning, setIsTwainScanning] = useState(false)
   const [isFullPageConnected, setIsFullPageConnected] = useState(false)
@@ -720,9 +830,16 @@ export default function AjouterPelerin() {
     fetchUserAgence()
   }, [])
 
-  // 🚀 Préchargement du modèle IA en arrière-plan : le premier scan n'attend plus
   useEffect(() => {
     loadFaceModel().catch(() => {})
+    return () => {
+      if (fullPageWsRef.current) {
+        fullPageWsRef.current.close()
+        fullPageWsRef.current = null
+      }
+      if (mrzTimeoutRef.current) clearTimeout(mrzTimeoutRef.current)
+      if (resetTimeoutRef.current) clearTimeout(resetTimeoutRef.current)
+    }
   }, [])
 
   useEffect(() => {
@@ -730,45 +847,51 @@ export default function AjouterPelerin() {
     if (localAgenceId) setAgenceId(localAgenceId)
   }, [localProfiles])
 
+  const isPassportExpiringSoon = (() => {
+    if (!dateExpiration) return false
+    const exp = new Date(dateExpiration)
+    if (isNaN(exp.getTime())) return false
+    const sixMonthsFromNow = new Date()
+    sixMonthsFromNow.setMonth(sixMonthsFromNow.getMonth() + 6)
+    return exp < sixMonthsFromNow
+  })()
+
   const processScannedPassportImage = async (fullDataUrl: string) => {
     setCropImageSrc(fullDataUrl)
 
-    const formatted = await compressAndFormatPassportNusuk(fullDataUrl)
-    setFileToUpload(formatted.file)
+    const [formattedRes, autoCropRes, ocrRes] = await Promise.allSettled([
+      compressAndFormatPassportNusuk(fullDataUrl),
+      autoDetectAndCropNusuk(fullDataUrl),
+      postMrzOcr(fullDataUrl),
+    ])
 
-    try {
-      const autoCrop = await autoDetectAndCropNusuk(fullDataUrl)
-      setPhotoFile(autoCrop.file)
-      setPhotoPreview(autoCrop.dataUrl)
-      setCropBox(autoCrop.cropBox)
-      setCropImgDims(autoCrop.dims)
-    } catch {}
+    if (formattedRes.status === 'fulfilled') {
+      setFileToUpload(formattedRes.value.file)
+    }
 
-    const targetEndpoint = `${getApiUrl()}/api/scan-mrz`
-    try {
-      const ocrRes = await fetch(targetEndpoint, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ imageBase64: fullDataUrl })
-      })
+    if (autoCropRes.status === 'fulfilled') {
+      setPhotoFile(autoCropRes.value.file)
+      setPhotoPreview(autoCropRes.value.dataUrl)
+      setCropBox(autoCropRes.value.cropBox)
+      setCropImgDims(autoCropRes.value.dims)
+    }
 
-      if (ocrRes.ok) {
-        const ocrData = await ocrRes.json()
-        if (ocrData.nom) setNom(ocrData.nom)
-        if (ocrData.prenom) setPrenom(ocrData.prenom)
-        if (ocrData.numPasseport) setPasseport(ocrData.numPasseport)
-        if (ocrData.sexe) setSexe(ocrData.sexe)
-        if (ocrData.dateNaissance) setDateNaissance(ocrData.dateNaissance)
-        if (ocrData.dateExpiration) setDateExpiration(ocrData.dateExpiration)
-      }
-    } catch (e) {
-      console.warn("Échec OCR en arrière-plan :", e)
+    if (ocrRes.status === 'fulfilled' && ocrRes.value) {
+      const ocrData = ocrRes.value
+      if (ocrData.nom) setNom(ocrData.nom)
+      if (ocrData.prenom) setPrenom(ocrData.prenom)
+      if (ocrData.numPasseport) setPasseport(ocrData.numPasseport)
+      if (ocrData.sexe) setSexe(ocrData.sexe)
+      if (ocrData.dateNaissance) setDateNaissance(ocrData.dateNaissance)
+      if (ocrData.dateExpiration) setDateExpiration(ocrData.dateExpiration)
+    } else if (ocrRes.status === 'rejected') {
+      console.warn("Échec de la lecture automatique :", ocrRes.reason)
     }
   }
 
   const triggerTwainScan = async () => {
     setIsTwainScanning(true)
-    setMessage({ text: '⚡ Numérisation en cours sur le scanner USB...', type: 'info' })
+    setMessage({ text: '⏳ Numérisation en cours sur le scanner...', type: 'info' })
 
     if (isRunningInTauri()) {
       try {
@@ -779,13 +902,13 @@ export default function AjouterPelerin() {
           if (rawResult) {
             const dataUrl = rawResult.startsWith('data:') ? rawResult : `data:image/jpeg;base64,${rawResult}`
             await processScannedPassportImage(dataUrl)
-            setMessage({ text: '✅ Document numérisé via Tauri, visage extrait et champs remplis !', type: 'success' })
+            setMessage({ text: '✅ Passeport numérisé, photo extraite et informations remplies !', type: 'success' })
             setIsTwainScanning(false)
             return
           }
         }
       } catch (tauriErr) {
-        console.warn("Bascule vers la passerelle locale :", tauriErr)
+        console.warn("Bascule vers le scanner local :", tauriErr)
       }
     }
 
@@ -799,14 +922,14 @@ export default function AjouterPelerin() {
       })
 
       if (!res || !res.ok) {
-        throw new Error("Impossible de communiquer avec le service de numérisation local.")
+        throw new Error("Aucun scanner détecté. Vérifiez que votre scanner est bien branché et allumé.")
       }
 
       const data = await res.json()
       const rawImageBase64 = data.imageBase64 || data.image || data.data
 
       if (!rawImageBase64) {
-        throw new Error("Aucune image renvoyée par le scanner.")
+        throw new Error("Le scanner n'a renvoyé aucune image. Vérifiez que le passeport est bien posé sur la vitre.")
       }
 
       const fullDataUrl = rawImageBase64.startsWith('data:') 
@@ -814,13 +937,53 @@ export default function AjouterPelerin() {
         : `data:image/jpeg;base64,${rawImageBase64}`
 
       await processScannedPassportImage(fullDataUrl)
-      setMessage({ text: '✅ Document numérisé, visage extrait et champs pré-remplis !', type: 'success' })
+      setMessage({ text: '✅ Passeport numérisé, photo extraite et informations remplies !', type: 'success' })
     } catch (err: unknown) {
       console.error(err)
-      const errMsg = err instanceof Error ? err.message : String(err)
-      setMessage({ text: `⚠️ ${errMsg}`, type: 'error' })
+      setMessage({ text: `⚠️ ${humanizeError(err, "Impossible de communiquer avec le scanner.")}`, type: 'error' })
     } finally {
       setIsTwainScanning(false)
+    }
+  }
+
+  const applyFullPageScanResult = async (res: any) => {
+    if (res.nom) setNom(res.nom)
+    if (res.prenom) setPrenom(res.prenom)
+    if (res.numPasseport) setPasseport(res.numPasseport)
+    if (res.sexe) setSexe(res.sexe)
+    if (res.dateNaissance) setDateNaissance(res.dateNaissance)
+    if (res.dateExpiration) setDateExpiration(res.dateExpiration)
+
+    if (res.photoBase64) {
+      const rawDataUrl = res.photoBase64.startsWith('data:') 
+        ? res.photoBase64 
+        : `data:image/jpeg;base64,${res.photoBase64}`
+      const nusuk = await formatNusukSquare(rawDataUrl)
+      setPhotoFile(nusuk.file)
+      setPhotoPreview(nusuk.dataUrl)
+    }
+
+    if (res.pageFullBase64) {
+      const fullDataUrl = res.pageFullBase64.startsWith('data:') 
+        ? res.pageFullBase64 
+        : `data:image/jpeg;base64,${res.pageFullBase64}`
+      setCropImageSrc(fullDataUrl)
+      try {
+        const formatted = await compressAndFormatPassportNusuk(fullDataUrl)
+        setFileToUpload(formatted.file)
+      } catch {
+        const fullFile = base64ToFile(fullDataUrl, `scan_complet_${res.numPasseport || Date.now()}.jpg`)
+        setFileToUpload(fullFile)
+      }
+      if (!res.photoBase64) {
+        try {
+          const autoCrop = await autoDetectAndCropNusuk(fullDataUrl)
+          setPhotoFile(autoCrop.file)
+          setPhotoPreview(autoCrop.dataUrl)
+          setCropBox(autoCrop.cropBox)
+          setCropImgDims(autoCrop.dims)
+        } catch {}
+      }
     }
   }
 
@@ -829,7 +992,7 @@ export default function AjouterPelerin() {
       if (fullPageWsRef.current) fullPageWsRef.current.close()
       setIsFullPageListening(false)
       setIsFullPageConnected(false)
-      setMessage({ text: 'Scanner pleine page arrêté.', type: 'info' })
+      setMessage({ text: 'Le scanner automatique est désactivé.', type: 'info' })
       return
     }
 
@@ -838,44 +1001,21 @@ export default function AjouterPelerin() {
         // @ts-expect-error Tauri API globale
         const tauriInvoke = window.__TAURI__?.invoke || window.__TAURI_INTERNALS__?.invoke
         if (typeof tauriInvoke === 'function') {
-          setMessage({ text: '⚡ Détection via Tauri : posez le passeport...', type: 'info' })
+          setMessage({ text: '⏳ Posez le passeport sur le scanner...', type: 'info' })
           const res: any = await tauriInvoke('scan_full_page')
           if (res) {
-            if (res.nom) setNom(res.nom)
-            if (res.prenom) setPrenom(res.prenom)
-            if (res.numPasseport) setPasseport(res.numPasseport)
-            if (res.sexe) setSexe(res.sexe)
-            if (res.dateNaissance) setDateNaissance(res.dateNaissance)
-            if (res.dateExpiration) setDateExpiration(res.dateExpiration)
-
-            if (res.photoBase64) {
-              const rawDataUrl = res.photoBase64.startsWith('data:') 
-                ? res.photoBase64 
-                : `data:image/jpeg;base64,${res.photoBase64}`
-              const nusuk = await formatNusukSquare(rawDataUrl)
-              setPhotoFile(nusuk.file)
-              setPhotoPreview(nusuk.dataUrl)
-            }
-
-            if (res.pageFullBase64) {
-              const fullDataUrl = res.pageFullBase64.startsWith('data:') 
-                ? res.pageFullBase64 
-                : `data:image/jpeg;base64,${res.pageFullBase64}`
-              const fullFile = base64ToFile(fullDataUrl, `scan_complet_${res.numPasseport || Date.now()}.jpg`)
-              setFileToUpload(fullFile)
-            }
-
-            setMessage({ text: '✅ Passeport et photo capturés directement via Tauri !', type: 'success' })
+            await applyFullPageScanResult(res)
+            setMessage({ text: '✅ Passeport et photo récupérés avec succès !', type: 'success' })
             return
           }
         }
       } catch (e) {
-        console.warn("Invoke plein page Tauri non disponible, passage en WebSocket standard :", e)
+        console.warn("Bascule vers le mode standard :", e)
       }
     }
 
     const wsUrl = 'ws://127.0.0.1:9090'
-    setMessage({ text: 'Connexion au scanner pleine page...', type: 'info' })
+    setMessage({ text: 'Connexion au scanner en cours...', type: 'info' })
 
     try {
       const ws = new WebSocket(wsUrl)
@@ -884,37 +1024,14 @@ export default function AjouterPelerin() {
       ws.onopen = () => {
         setIsFullPageConnected(true)
         setIsFullPageListening(true)
-        setMessage({ text: '🟢 SCANNER PLEINE PAGE PRÊT : Déposez le passeport sur la vitre.', type: 'success' })
+        setMessage({ text: '🟢 Scanner prêt : posez le passeport sur la vitre.', type: 'success' })
       }
 
       ws.onmessage = async (event) => {
         try {
           const res = JSON.parse(event.data)
-          if (res.nom) setNom(res.nom)
-          if (res.prenom) setPrenom(res.prenom)
-          if (res.numPasseport) setPasseport(res.numPasseport)
-          if (res.sexe) setSexe(res.sexe)
-          if (res.dateNaissance) setDateNaissance(res.dateNaissance)
-          if (res.dateExpiration) setDateExpiration(res.dateExpiration)
-
-          if (res.photoBase64) {
-            const rawDataUrl = res.photoBase64.startsWith('data:') 
-              ? res.photoBase64 
-              : `data:image/jpeg;base64,${res.photoBase64}`
-            const nusuk = await formatNusukSquare(rawDataUrl)
-            setPhotoFile(nusuk.file)
-            setPhotoPreview(nusuk.dataUrl)
-          }
-
-          if (res.pageFullBase64) {
-            const fullDataUrl = res.pageFullBase64.startsWith('data:') 
-              ? res.pageFullBase64 
-              : `data:image/jpeg;base64,${res.pageFullBase64}`
-            const fullFile = base64ToFile(fullDataUrl, `scan_complet_${res.numPasseport || Date.now()}.jpg`)
-            setFileToUpload(fullFile)
-          }
-
-          setMessage({ text: '✅ Passeport et photo capturés depuis le scanner pleine page !', type: 'success' })
+          await applyFullPageScanResult(res)
+          setMessage({ text: '✅ Passeport et photo récupérés avec succès !', type: 'success' })
         } catch (e) {
           console.error(e)
         }
@@ -923,7 +1040,7 @@ export default function AjouterPelerin() {
       ws.onerror = () => {
         setIsFullPageConnected(false)
         setIsFullPageListening(false)
-        setMessage({ text: '⚠️ Pilote du scanner introuvable sur 127.0.0.1:9090.', type: 'error' })
+        setMessage({ text: '⚠️ Le scanner automatique ne répond pas. Vérifiez qu’il est bien branché et allumé.', type: 'error' })
       }
 
       ws.onclose = () => {
@@ -968,7 +1085,7 @@ export default function AjouterPelerin() {
       const isIncomplete = !parsed.nom || !parsed.numPasseport || !parsed.dateNaissance
       if (isIncomplete) {
         setMessage({ 
-          text: "⚠️ Données injectées ! Vérifiez et corrigez les éventuels champs manquants si nécessaire.", 
+          text: "⚠️ Certaines informations ont été remplies. Veuillez vérifier et compléter les champs manquants.", 
           type: 'info' 
         })
       } else {
@@ -1002,9 +1119,9 @@ export default function AjouterPelerin() {
     }
   }
 
-  // 🎯 QUAND L'UTILISATEUR SÉLECTIONNE/UPLOAD SON FICHIER PASSEPORT -> DÉTECTION FACIALE ÉQUILIBRÉE ET SERRÉE
   const handlePassportFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFile = e.target.files?.[0]
+    e.target.value = ''
     if (!selectedFile) return
 
     if (selectedFile.type.startsWith('image/')) {
@@ -1013,28 +1130,30 @@ export default function AjouterPelerin() {
         const dataUrl = reader.result as string
         setCropImageSrc(dataUrl)
 
-        // 1. Sauvegarde et compression originale pour Nusuk (< 400 Ko)
-        try {
-          const formatted = await compressAndFormatPassportNusuk(dataUrl)
-          setFileToUpload(formatted.file)
-        } catch {
+        const [formattedRes, faceRes] = await Promise.allSettled([
+          compressAndFormatPassportNusuk(dataUrl),
+          autoDetectAndCropNusuk(dataUrl),
+        ])
+
+        if (formattedRes.status === 'fulfilled') {
+          setFileToUpload(formattedRes.value.file)
+        } else {
           setFileToUpload(selectedFile)
         }
 
-        // 2. 🎯 DÉTECTION FACIALE NATURELLE REVISITÉE SANS VIDE À GAUCHE NI TEXTE À DROITE
-        try {
-          const result = await autoDetectAndCropNusuk(dataUrl)
+        if (faceRes.status === 'fulfilled') {
+          const result = faceRes.value
           setPhotoFile(result.file)
           setPhotoPreview(result.dataUrl)
           setCropBox(result.cropBox)
           setCropImgDims(result.dims)
 
           if (result.detected) {
-            setMessage({ text: "✅ Visage cadré avec précision au format officiel Nusuk !", type: 'success' })
+            setMessage({ text: "✅ Passeport ajouté et photo d'identité préparée automatiquement !", type: 'success' })
           } else {
-            setMessage({ text: "✅ Document passeport chargé ! Ajustez le cadrage si besoin.", type: 'success' })
+            setMessage({ text: "✅ Passeport ajouté ! Vous pouvez ajuster la photo si besoin.", type: 'success' })
           }
-        } catch {
+        } else {
           setCropModalOpen(true)
         }
       }
@@ -1046,6 +1165,7 @@ export default function AjouterPelerin() {
 
   const handlePhotoFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
+    e.target.value = ''
     if (!file) return
 
     const reader = new FileReader()
@@ -1059,7 +1179,7 @@ export default function AjouterPelerin() {
         setPhotoPreview(autoCrop.dataUrl)
         setCropBox(autoCrop.cropBox)
         setCropImgDims(autoCrop.dims)
-        setMessage({ text: "✅ Photo d'identité chargée et cadrée aux normes Nusuk (200×200px) !", type: 'success' })
+        setMessage({ text: "✅ Photo d'identité ajoutée et préparée avec succès !", type: 'success' })
       } catch {
         setCropModalOpen(true)
       }
@@ -1089,9 +1209,9 @@ export default function AjouterPelerin() {
       const formatted = await compressAndFormatPassportNusuk(cropImageSrc, passportCropBox)
       setFileToUpload(formatted.file)
       setPassportCropModalOpen(false)
-      setMessage({ text: "✅ Passeport recadré et compressé avec succès pour Nusuk (< 400 Ko) !", type: 'success' })
+      setMessage({ text: "✅ Passeport recadré avec succès !", type: 'success' })
     } catch {
-      setMessage({ text: "Erreur lors du recadrage du passeport.", type: 'error' })
+      setMessage({ text: "⚠️ Impossible de recadrer le passeport. Veuillez réessayer.", type: 'error' })
     }
   }
 
@@ -1105,9 +1225,9 @@ export default function AjouterPelerin() {
         setPhotoFile(rendered.file)
         setPhotoPreview(rendered.dataUrl)
         setCropModalOpen(false)
-        setMessage({ text: "✅ Photo du pèlerin ajustée aux normes Nusuk (200×200px) !", type: 'success' })
+        setMessage({ text: "✅ Photo du pèlerin ajustée avec succès !", type: 'success' })
       } catch {
-        setMessage({ text: "Erreur lors du recadrage de la photo.", type: 'error' })
+        setMessage({ text: "⚠️ Impossible de recadrer la photo. Veuillez réessayer.", type: 'error' })
       }
     }
     img.src = cropImageSrc
@@ -1132,11 +1252,11 @@ export default function AjouterPelerin() {
       const deltaX = (e.clientX - dragStartRef.current.mouseX) * scaleX
       const deltaY = (e.clientY - dragStartRef.current.mouseY) * scaleX
       const nextX = Math.max(0, Math.min(cropImgDims.width - cropBox.size, dragStartRef.current.boxX + deltaX))
-      const nextY = Math.max(0, Math.min(cropImgDims.height - cropBox.size, dragStartRef.current.boxY + deltaY))
+      const nextY = Math.max(0, Math.min(cropImgDims.height - cropBox.size * NUSUK_PHOTO_ASPECT, dragStartRef.current.boxY + deltaY))
       setCropBox(prev => ({ ...prev, x: nextX, y: nextY }))
     } else if (isResizingRef.current) {
       const delta = (e.clientX - dragStartRef.current.mouseX) * scaleX
-      const nextSize = Math.max(80, Math.min(cropImgDims.width - cropBox.x, cropImgDims.height - cropBox.y, dragStartRef.current.boxSize + delta))
+      const nextSize = Math.max(80, Math.min(cropImgDims.width - cropBox.x, (cropImgDims.height - cropBox.y) / NUSUK_PHOTO_ASPECT, dragStartRef.current.boxSize + delta))
       setCropBox(prev => ({ ...prev, size: nextSize }))
     }
   }
@@ -1214,10 +1334,11 @@ export default function AjouterPelerin() {
 
   const handleAutoFill = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const scanFile = e.target.files?.[0]
+    e.target.value = ''
     if (!scanFile) return
 
     pendingScanFileRef.current = scanFile
-    setMessage({ text: "Chargement de l'aperçu du passeport...", type: 'info' })
+    setMessage({ text: "⏳ Préparation de l'aperçu du passeport...", type: 'info' })
 
     try {
       const optimizedImageUrl = await preparePassportImage(scanFile)
@@ -1245,7 +1366,7 @@ export default function AjouterPelerin() {
       img.src = optimizedImageUrl
     } catch (err: unknown) {
       console.error(err)
-      setMessage({ text: "Erreur lors du chargement de l'image.", type: 'error' })
+      setMessage({ text: `⚠️ ${humanizeError(err, "Impossible d'ouvrir cette image.")}`, type: 'error' })
     }
   }
 
@@ -1253,12 +1374,11 @@ export default function AjouterPelerin() {
     if (!mrzPreviewImageSrc) return
     setMrzPreviewModalOpen(false)
     setIsScanning(true)
-    setMessage({ text: "⚡ SCAN OCR DE LA ZONE MRZ EN COURS...", type: 'info' })
+    setMessage({ text: "⏳ Lecture automatique du passeport en cours...", type: 'info' })
 
     const fullImageUrl = mrzPreviewImageSrc
     setCropImageSrc(fullImageUrl)
 
-    // 🚀 Lancées tout de suite, elles tournent pendant l'attente réseau de l'OCR
     const filePromise: Promise<File | null> = compressAndFormatPassportNusuk(fullImageUrl)
       .then((f) => f.file)
       .catch(() => pendingScanFileRef.current)
@@ -1266,50 +1386,8 @@ export default function AjouterPelerin() {
 
     try {
       const mrzOnlyBase64 = await extractMrzRegionBase64(fullImageUrl, mrzCropBox)
+      const data = await postMrzOcr(mrzOnlyBase64)
 
-      const baseUrl = getApiUrl()
-      const targetEndpoint = `${baseUrl}/api/scan-mrz`
-
-      let data: any
-
-      if (Capacitor.isNativePlatform()) {
-        const nativeResponse = await CapacitorHttp.post({
-          url: targetEndpoint,
-          headers: { 'Content-Type': 'application/json' },
-          data: { imageBase64: mrzOnlyBase64 },
-          connectTimeout: 30000,
-          readTimeout: 30000,
-        })
-
-        if (nativeResponse.status !== 200) {
-          const errData = typeof nativeResponse.data === 'object' ? nativeResponse.data : {}
-          throw new Error(errData?.error || `Erreur serveur (${nativeResponse.status})`)
-        }
-
-        data = typeof nativeResponse.data === 'string' ? JSON.parse(nativeResponse.data) : nativeResponse.data
-      } else {
-        let res: Response
-        try {
-          res = await fetch(targetEndpoint, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ imageBase64: mrzOnlyBase64 }),
-          })
-        } catch {
-          throw new Error("Impossible de joindre le serveur de scan.")
-        }
-
-        const rawText = await res.text()
-        try {
-          data = JSON.parse(rawText)
-        } catch {
-          throw new Error(`Réponse inattendue du serveur (${res.status}).`)
-        }
-
-        if (!res.ok) throw new Error(data.error || 'Échec de la lecture du passeport.')
-      }
-
-      // Les champs s'affichent dès que l'OCR répond
       if (data.nom) setNom(data.nom)
       if (data.prenom) setPrenom(data.prenom)
       if (data.numPasseport) setPasseport(data.numPasseport)
@@ -1317,7 +1395,6 @@ export default function AjouterPelerin() {
       if (data.dateNaissance) setDateNaissance(data.dateNaissance)
       if (data.dateExpiration) setDateExpiration(data.dateExpiration)
 
-      // Fichier Nusuk + visage : généralement déjà prêts
       const [nusukFile, autoCrop] = await Promise.all([filePromise, facePromise])
 
       if (nusukFile) setFileToUpload(nusukFile)
@@ -1327,15 +1404,14 @@ export default function AjouterPelerin() {
         setPhotoPreview(autoCrop.dataUrl)
         setCropBox(autoCrop.cropBox)
         setCropImgDims(autoCrop.dims)
-        setMessage({ text: "✅ Passeport lu et photo du visage extraite sans aucun texte !", type: 'success' })
+        setMessage({ text: "✅ Passeport lu et photo extraite avec succès !", type: 'success' })
       } else {
         setMessage({ text: "✅ Passeport lu avec succès !", type: 'success' })
       }
 
     } catch (err: unknown) {
       console.error(err)
-      const errMsg = err instanceof Error ? err.message : String(err)
-      setMessage({ text: `❌ ERREUR LORS DU SCAN : ${errMsg}`, type: 'error' })
+      setMessage({ text: `⚠️ ${humanizeError(err, "Impossible de lire automatiquement le passeport.")}`, type: 'error' })
     } finally {
       setIsScanning(false)
     }
@@ -1345,22 +1421,23 @@ export default function AjouterPelerin() {
     e.preventDefault()
     if (loading) return
     if (!agenceId) {
-      setMessage({ text: profileReady ? "❌ ERREUR : AUCUNE AGENCE LIÉE À VOTRE COMPTE." : "⏳ CHARGEMENT DU PROFIL EN COURS...", type: 'error' })
+      setMessage({
+        text: profileReady
+          ? "⚠️ Votre compte n'est rattaché à aucune agence. Veuillez contacter l'administrateur."
+          : "⏳ Chargement de votre espace en cours, veuillez patienter...",
+        type: 'error'
+      })
       return
     }
     setLoading(true)
     try {
-      let fileUrl = ''
-      if (fileToUpload) {
-        const uploaded = await uploadPassportFile(fileToUpload)
-        fileUrl = uploaded.path
-      }
+      const [uploadedDoc, uploadedPhoto] = await Promise.all([
+        fileToUpload ? uploadPassportFile(fileToUpload) : Promise.resolve(null),
+        photoFile ? uploadPassportFile(photoFile) : Promise.resolve(null),
+      ])
 
-      let photoUrl = ''
-      if (photoFile) {
-        const uploadedPhoto = await uploadPassportFile(photoFile)
-        photoUrl = uploadedPhoto.path
-      }
+      const fileUrl = uploadedDoc?.path || ''
+      const photoUrl = uploadedPhoto?.path || ''
 
       const { error } = await supabase.from('pelerins').insert({
         id: crypto.randomUUID(),
@@ -1386,13 +1463,12 @@ export default function AjouterPelerin() {
       })
       if (error) throw error
 
-      setMessage({ text: "✅ PÈLERIN ENREGISTRÉ SUR SUPABASE.", type: 'success' })
-      setTimeout(resetForm, 2000)
+      setMessage({ text: "✅ Le dossier du pèlerin a été enregistré avec succès !", type: 'success' })
+      if (resetTimeoutRef.current) clearTimeout(resetTimeoutRef.current)
+      resetTimeoutRef.current = setTimeout(resetForm, 2000)
     } catch (err: unknown) {
       console.error(err)
-      const errObj = err as { message?: string; details?: string }
-      const errMsg = errObj?.message || errObj?.details || 'Erreur inconnue'
-      setMessage({ text: `❌ ERREUR : ${errMsg}`, type: 'error' })
+      setMessage({ text: `⚠️ ${humanizeError(err, "Impossible d'enregistrer le dossier. Vérifiez votre connexion et réessayez.")}`, type: 'error' })
     } finally {
       setLoading(false)
     }
@@ -1426,7 +1502,7 @@ export default function AjouterPelerin() {
                   <label className="flex flex-col items-center justify-center p-3 bg-white rounded-2xl border border-blue-100 cursor-pointer hover:border-blue-300 active:scale-95 transition shadow-xs text-center">
                     <ScanLine className="text-blue-600 mb-1" size={18} />
                     <span className="text-[9px] font-black text-blue-900 uppercase leading-tight">
-                      {isScanning ? "Analyse..." : "Scan Photo / OCR"}
+                      {isScanning ? "Lecture..." : "Scan Photo / Lecture Auto"}
                     </span>
                     <input type="file" className="hidden" accept="image/*" onChange={handleAutoFill} disabled={isScanning} />
                   </label>
@@ -1438,7 +1514,7 @@ export default function AjouterPelerin() {
                     className="flex flex-col items-center justify-center p-3 rounded-2xl border bg-blue-600 hover:bg-blue-700 text-white border-blue-600 transition cursor-pointer active:scale-95 text-center shadow-xs disabled:opacity-50"
                   >
                     {isTwainScanning ? <Loader2 size={18} className="animate-spin mb-1" /> : <Printer size={18} className="mb-1" />}
-                    <span className="text-[9px] font-black uppercase leading-tight">Numériser (TWAIN)</span>
+                    <span className="text-[9px] font-black uppercase leading-tight">Numériser</span>
                     <span className="text-[7.5px] opacity-80">Scanner à plat / USB</span>
                   </button>
 
@@ -1470,9 +1546,9 @@ export default function AjouterPelerin() {
                   >
                     <Keyboard size={18} className={showPhysicalScannerInput ? "text-emerald-400 mb-1" : "text-blue-600 mb-1"} />
                     <span className="text-[9px] font-black uppercase leading-tight">
-                      Douchette MRZ
+                      Douchette
                     </span>
-                    <span className="text-[7.5px] opacity-75">Clavier</span>
+                    <span className="text-[7.5px] opacity-75">Lecteur USB</span>
                   </button>
                 </div>
 
@@ -1481,7 +1557,7 @@ export default function AjouterPelerin() {
                     <div className="flex items-center justify-between text-[10px] font-black text-emerald-800 uppercase">
                       <span className="flex items-center gap-1">
                         <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping inline-block mr-1" />
-                        Prêt pour douchette physique
+                        Prêt pour la douchette
                       </span>
                       <button 
                         type="button" 
@@ -1504,11 +1580,11 @@ export default function AjouterPelerin() {
                 )}
               </div>
 
-              {/* SECTION PHOTO D'IDENTITÉ AVEC DÉTECTION FACIALE IA AUTOMATIQUE */}
+              {/* SECTION PHOTO D'IDENTITÉ */}
               <div className="p-4 bg-gray-50 rounded-2xl border border-gray-100 space-y-3">
                 <div className="flex items-center justify-between">
                   <span className="text-[10px] font-black text-gray-700 uppercase flex items-center gap-1.5">
-                    <Camera size={14} className="text-blue-600" /> Photo d'identité Nusuk (200×200)
+                    <Camera size={14} className="text-blue-600" /> Photo d'identité Nusuk (480×680)
                   </span>
                   {photoPreview && (
                     <button
@@ -1522,7 +1598,7 @@ export default function AjouterPelerin() {
                 </div>
 
                 <div className="flex items-center gap-3">
-                  <div className="w-20 h-20 rounded-2xl border-2 border-dashed border-gray-200 bg-white flex items-center justify-center overflow-hidden shrink-0 shadow-inner relative">
+                  <div className="w-20 h-28 rounded-2xl border-2 border-dashed border-gray-200 bg-white flex items-center justify-center overflow-hidden shrink-0 shadow-inner relative">
                     {photoPreview ? (
                       <img src={photoPreview} alt="Aperçu Nusuk" className="w-full h-full object-cover" />
                     ) : (
@@ -1543,12 +1619,12 @@ export default function AjouterPelerin() {
                         className="w-full py-2 px-2.5 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 rounded-xl text-center text-[10px] font-black uppercase flex items-center justify-center gap-1.5 transition cursor-pointer"
                       >
                         <Crop size={13} />
-                        <span>Ajuster Photo ID</span>
+                        <span>Ajuster la photo</span>
                       </button>
                     )}
 
                     <label className="block w-full py-2 px-2.5 bg-white border border-gray-200 hover:border-blue-300 rounded-xl text-center text-[10px] font-bold text-gray-700 cursor-pointer transition shadow-2xs">
-                      {photoFile ? "Remplacer la photo" : "Importer une photo"}
+                      {photoFile ? "Remplacer la photo" : "Choisir une photo"}
                       <input 
                         type="file" 
                         className="hidden" 
@@ -1560,7 +1636,7 @@ export default function AjouterPelerin() {
                 </div>
 
                 <p className="text-[9px] text-gray-400 font-medium leading-tight">
-                  Format standard : 200×200 pixels JPEG &lt; 100 Ko • Visage isolé sans texte.
+                  Format officiel : 480×680 pixels (&lt; 100 Ko) • Visage isolé automatiquement.
                 </p>
               </div>
 
@@ -1568,11 +1644,11 @@ export default function AjouterPelerin() {
               <div className="p-4 bg-gray-50 rounded-2xl border border-gray-100 space-y-2.5">
                 <div className="flex items-center justify-between">
                   <span className="text-[10px] font-black text-gray-700 uppercase flex items-center gap-1.5">
-                    <FileCheck size={14} className="text-blue-600" /> Document Passeport (Nusuk &lt; 400 Ko)
+                    <FileCheck size={14} className="text-blue-600" /> Copie du Passeport (Nusuk &lt; 400 Ko)
                   </span>
                   {fileToUpload && (
                     <span className="text-[9px] font-black text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded">
-                      {(fileToUpload.size / 1024).toFixed(0)} Ko (Conforme)
+                      {(fileToUpload.size / 1024).toFixed(0)} Ko (Prêt)
                     </span>
                   )}
                 </div>
@@ -1581,10 +1657,10 @@ export default function AjouterPelerin() {
                   <Upload size={16} className="text-blue-600 mr-2.5 shrink-0" />
                   <div className="min-w-0 flex-1">
                     <p className="text-xs font-bold text-gray-700 truncate">
-                      {fileToUpload ? fileToUpload.name : "Joindre le fichier du passeport"}
+                      {fileToUpload ? fileToUpload.name : "Joindre la photo du passeport"}
                     </p>
                     <p className="text-[9px] text-gray-400">
-                      Extraction faciale automatique vers la photo d'identité • Compression Nusuk (&lt; 400 Ko)
+                      Préparation automatique de la photo d'identité et de la taille du fichier
                     </p>
                   </div>
                   <input type="file" className="hidden" accept="image/*,.pdf" onChange={handlePassportFileChange} />
@@ -1597,15 +1673,15 @@ export default function AjouterPelerin() {
                     className="w-full py-2 px-3 bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 rounded-xl text-center text-[10px] font-black uppercase flex items-center justify-center gap-1.5 transition cursor-pointer shadow-2xs"
                   >
                     <Crop size={13} className="text-blue-600" />
-                    <span>Redimensionner / Recadrer manuellement</span>
+                    <span>Recadrer le passeport manuellement</span>
                   </button>
                 )}
               </div>
 
               <div className="bg-gray-50 p-4 rounded-2xl border border-gray-100 flex items-center justify-between px-4">
-                <p className="text-[9px] font-black text-gray-400 uppercase tracking-tighter italic">2. Formulaire Client</p>
+                <p className="text-[9px] font-black text-gray-400 uppercase tracking-tighter italic">2. Formulaire Pèlerin</p>
                 <button type="button" onClick={resetForm} className="text-[9px] font-black text-red-500 hover:text-red-700 flex items-center gap-1 uppercase bg-white px-3 py-1.5 rounded-xl border border-gray-200/60 shadow-sm transition-all active:scale-95 cursor-pointer">
-                  <RotateCcw size={10} /> Réinitialiser
+                  <RotateCcw size={10} /> Vider le formulaire
                 </button>
               </div>
             </div>
@@ -1691,7 +1767,7 @@ export default function AjouterPelerin() {
                   <label className="text-[10px] font-black text-gray-400 uppercase ml-4 mb-1 block">N° Passeport (Optionnel)</label>
                   <input 
                     type="text" value={passeport} onChange={(e) => setPasseport(e.target.value)}
-                    className="w-full px-5 py-4 rounded-2xl border-2 border-gray-100 bg-gray-50 text-gray-900 font-bold focus:border-blue-600 outline-none"
+                    className="w-full px-5 py-4 rounded-2xl border-2 border-gray-100 bg-gray-50 text-gray-900 font-bold focus:border-blue-600 outline-none uppercase"
                     placeholder="A000000"
                   />
                 </div>
@@ -1728,8 +1804,15 @@ export default function AjouterPelerin() {
                   <label className="text-[10px] font-black text-gray-400 uppercase ml-4 mb-1 block">Exp. Passeport (Optionnel)</label>
                   <input 
                     type="date" value={dateExpiration} onChange={(e) => setDateExpiration(e.target.value)}
-                    className="w-full px-4 py-4 rounded-2xl border-2 border-gray-100 bg-gray-50 text-gray-900 font-bold text-sm outline-none"
+                    className={`w-full px-4 py-4 rounded-2xl border-2 bg-gray-50 text-gray-900 font-bold text-sm outline-none ${
+                      isPassportExpiringSoon ? 'border-amber-500 bg-amber-50/40' : 'border-gray-100'
+                    }`}
                   />
+                  {isPassportExpiringSoon && (
+                    <p className="text-[9px] font-black text-amber-600 mt-1 ml-2 uppercase">
+                      ⚠️ Attention : expire dans moins de 6 mois
+                    </p>
+                  )}
                 </div>
               </div>
 
@@ -1790,11 +1873,11 @@ export default function AjouterPelerin() {
                 className={`w-full py-5 rounded-2xl text-white font-black text-lg shadow-lg active:scale-95 transition-all flex items-center justify-center gap-3 ${loading || !agenceId || !profileReady ? 'bg-gray-400 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700 shadow-blue-600/20'}`}
               >
                 {loading ? <Loader2 className="animate-spin" /> : <Save size={20} />}
-                {loading ? "ENREGISTREMENT..." : !profileReady ? "CHARGEMENT DU PROFIL..." : "VALIDER LE DOSSIER"}
+                {loading ? "ENREGISTREMENT EN COURS..." : !profileReady ? "CHARGEMENT..." : "ENREGISTRER LE DOSSIER"}
               </button>
 
               {message.text && (
-                <div className={`p-4 rounded-2xl text-center font-bold text-[10px] uppercase tracking-wider shadow-sm border ${message.type === 'success' ? 'bg-green-100 text-green-700 border-green-200' : message.type === 'info' ? 'bg-blue-100 text-blue-700 border-blue-200' : 'bg-red-100 text-red-700 border-red-200'}`}>
+                <div className={`p-4 rounded-2xl text-center font-bold text-xs tracking-wide shadow-sm border ${message.type === 'success' ? 'bg-green-100 text-green-800 border-green-200' : message.type === 'info' ? 'bg-blue-100 text-blue-800 border-blue-200' : 'bg-red-100 text-red-800 border-red-200'}`}>
                   {message.text}
                 </div>
               )}
@@ -1805,7 +1888,7 @@ export default function AjouterPelerin() {
         </div>
       </div>
 
-      {/* ── MODAL APERÇU ET CADRAGE MRZ AVANT OCR ── */}
+      {/* ── MODAL APERÇU ET CADRAGE AVANT LECTURE AUTOMATIQUE ── */}
       {mrzPreviewModalOpen && mrzPreviewImageSrc && (
         <div 
           className="fixed inset-0 z-[9999] bg-slate-900/85 backdrop-blur-sm flex items-center justify-center p-3 sm:p-5 animate-in fade-in duration-150"
@@ -1816,7 +1899,7 @@ export default function AjouterPelerin() {
             <div className="p-4 bg-slate-900 text-white flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <ScanLine size={18} className="text-amber-400" />
-                <h3 className="font-black text-sm uppercase">Aperçu & Cadrage de la zone MRZ</h3>
+                <h3 className="font-black text-sm uppercase">Aperçu & Zone de lecture du passeport</h3>
               </div>
               <button 
                 type="button"
@@ -1828,7 +1911,7 @@ export default function AjouterPelerin() {
             </div>
 
             <p className="px-4 py-2 bg-amber-50 text-[11px] text-amber-800 font-medium border-b border-amber-200">
-              Vérifiez l'aperçu. Déplacez ou redimensionnez le <strong>cadre jaune</strong> pour entourer exactement les deux lignes MRZ au bas du passeport.
+              Vérifiez que le <strong>cadre jaune</strong> entoure bien les deux lignes de codes tout en bas du passeport, puis cliquez sur <strong>Lire le passeport</strong>.
             </p>
 
             <div className="p-4 overflow-auto flex-1 flex items-center justify-center bg-slate-950/90 select-none">
@@ -1880,14 +1963,14 @@ export default function AjouterPelerin() {
                 className="flex items-center gap-1.5 px-5 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-black text-xs transition shadow-sm cursor-pointer"
               >
                 <ScanLine size={16} />
-                <span>Lancer le scan OCR</span>
+                <span>Lire le passeport</span>
               </button>
             </div>
           </div>
         </div>
       )}
 
-      {/* ── 🎯 MODAL 1 : RECADRAGE VISAGE NUSUK (200x200 px) ── */}
+      {/* ── 🎯 MODAL 1 : RECADRAGE VISAGE NUSUK (480x680 px) ── */}
       {cropModalOpen && cropImageSrc && (
         <div 
           className="fixed inset-0 z-[9999] bg-slate-900/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-5 animate-in fade-in duration-150"
@@ -1895,10 +1978,10 @@ export default function AjouterPelerin() {
           onPointerUp={handlePointerUpContainer}
         >
           <div className="bg-white rounded-3xl shadow-2xl max-w-xl w-full overflow-hidden border border-slate-200 flex flex-col max-h-[95vh]">
-            <div className="p-4 bg-slate-955 text-white flex items-center justify-between">
+            <div className="p-4 bg-slate-900 text-white flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <Crop size={18} className="text-emerald-400" />
-                <h3 className="font-black text-sm uppercase">Cadrage Visage Nusuk (200×200 px)</h3>
+                <h3 className="font-black text-sm uppercase">Ajuster la photo d'identité</h3>
               </div>
               <button 
                 type="button"
@@ -1910,7 +1993,7 @@ export default function AjouterPelerin() {
             </div>
 
             <p className="px-4 py-2 bg-slate-100 text-[11px] text-slate-600 font-medium">
-              Glissez le <strong>cadre vert</strong> sur le visage ou utilisez la <strong>poignée</strong> pour zoomer/recadrer.
+              Déplacez le <strong>cadre vert</strong> sur le visage ou utilisez le point en bas à droite pour agrandir ou réduire.
             </p>
 
             <div className="p-4 overflow-auto flex-1 flex items-center justify-center bg-slate-950/90 select-none">
@@ -1928,7 +2011,7 @@ export default function AjouterPelerin() {
                         left: `${scalePctX}%`,
                         top: `${scalePctY}%`,
                         width: `${scalePctW}%`,
-                        paddingBottom: `${scalePctW}%`,
+                        paddingBottom: `${scalePctW * NUSUK_PHOTO_ASPECT}%`,
                       }}
                       className="absolute border-2 border-emerald-400 bg-emerald-400/20 shadow-lg cursor-move rounded-xl touch-none group ring-2 ring-emerald-500/50"
                     >
@@ -1961,14 +2044,14 @@ export default function AjouterPelerin() {
                 className="flex items-center gap-1.5 px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs transition shadow-sm cursor-pointer"
               >
                 <Check size={16} />
-                <span>Valider la photo Nusuk</span>
+                <span>Valider la photo</span>
               </button>
             </div>
           </div>
         </div>
       )}
 
-      {/* ── 🎯 MODAL 2 : RECADRAGE PASSEPORT COMPLET NUSUK (< 400 Ko) ── */}
+      {/* ── 🎯 MODAL 2 : RECADRAGE PASSEPORT COMPLET ── */}
       {passportCropModalOpen && cropImageSrc && (
         <div 
           className="fixed inset-0 z-[9999] bg-slate-900/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-5 animate-in fade-in duration-150"
@@ -1979,7 +2062,7 @@ export default function AjouterPelerin() {
             <div className="p-4 bg-slate-900 text-white flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <FileCheck size={18} className="text-blue-400" />
-                <h3 className="font-black text-sm uppercase">Recadrage Passeport Complet Nusuk (&lt; 400 Ko)</h3>
+                <h3 className="font-black text-sm uppercase">Recadrer la page du passeport</h3>
               </div>
               <button 
                 type="button"
@@ -1991,7 +2074,7 @@ export default function AjouterPelerin() {
             </div>
 
             <p className="px-4 py-2 bg-slate-100 text-[11px] text-slate-600 font-medium">
-              Ajustez le <strong>cadre bleu</strong> pour englober la page complète du passeport (avec les zones MRZ). Le fichier sera automatiquement compressé pour Nusuk tout en préservant la résolution.
+              Ajustez le <strong>cadre bleu</strong> pour entourer toute la page du passeport.
             </p>
 
             <div className="p-4 overflow-auto flex-1 flex items-center justify-center bg-slate-950/90 select-none">
@@ -2043,7 +2126,7 @@ export default function AjouterPelerin() {
                 className="flex items-center gap-1.5 px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-black text-xs transition shadow-sm cursor-pointer"
               >
                 <Check size={16} />
-                <span>Valider le passeport Nusuk</span>
+                <span>Valider le passeport</span>
               </button>
             </div>
           </div>
