@@ -461,10 +461,15 @@ async function autoDetectAndCropNusuk(imageSrc: string): Promise<{
         }
         const inv = detectInput === img ? 1 : 1 / ds
 
-        const detection = await faceapi.detectSingleFace(
+        const detections = await faceapi.detectAllFaces(
           detectInput,
-          new faceapi.SsdMobilenetv1Options({ minConfidence: 0.35 })
+          new faceapi.SsdMobilenetv1Options({ minConfidence: 0.35, maxResults: 6 })
         )
+
+        // 🎯 Le vrai visage = le plus grand : on ignore l'image fantôme / la petite photo à droite du passeport
+        const detection = detections.length
+          ? detections.reduce((best, d) => (d.box.width * d.box.height > best.box.width * best.box.height ? d : best))
+          : null
 
         if (detection) {
           const faceX = detection.box.x * inv
@@ -480,7 +485,17 @@ async function autoDetectAndCropNusuk(imageSrc: string): Promise<{
           const windowW = rightCut - leftCut
 
           // 📐 Cadre portrait 480:680 bien centré autour du visage
-          size = Math.round(Math.min(faceH / 0.68, windowW, dims.width, dims.height / NUSUK_PHOTO_ASPECT))
+          // 📐 Géométrie réelle du passeport : la grande photo (35×45 mm) fait ≈ 24,5 % de la largeur de la page.
+          // On cadre exactement la hauteur de cette photo → ni ligne MRZ en bas, ni texte en haut, ni vide.
+          const layoutPhotoW = dims.width * 0.245
+          const faceVsLayout = faceW / layoutPhotoW
+          const layoutOk = faceVsLayout >= 0.36 && faceVsLayout <= 0.85
+          // Image qui n'est pas une page de passeport pleine largeur (photo prise de loin) : on déduit la photo du visage
+          const photoW = layoutOk ? layoutPhotoW : faceW / 0.57
+          const photoH = photoW * (45 / 35)   // hauteur complète de la photo (tête entière + épaules)
+          // Le visage doit rester entre 55 % et 80 % de la hauteur du cadre
+          const frameH = Math.max(faceH / 0.80, Math.min(photoH, faceH / 0.55))
+          size = Math.round(Math.min(frameH / NUSUK_PHOTO_ASPECT, windowW, dims.width, dims.height / NUSUK_PHOTO_ASPECT))
 
           // 🎯 Visage centré horizontalement
           cropX = Math.round(faceCx - size / 2)
@@ -489,14 +504,14 @@ async function autoDetectAndCropNusuk(imageSrc: string): Promise<{
           // 🛡️ PROTECTION ANTI-TEXTE EN HAUT :
           // La boîte détectée inclut déjà le front. Une marge courte (0.10 × faceH) laisse
           // juste l'espace pour les cheveux/coiffe sans jamais remonter sur l'en-tête du passeport.
-          const topMargin = faceH * 0.10   // juste l'espace des cheveux : plus court = moins de texte au-dessus de la tête
+          const topMargin = faceH * 0.16   // marge haute : crâne / cheveux / coiffe entièrement dans le cadre
           let targetY = faceY - topMargin
           if (targetY < 0) targetY = 0
           cropY = Math.round(targetY)
 
           // 🛡️ Limite stricte au-dessus de la tête : tout ce qui est plus haut est rendu en blanc pur
           // (le cadre étant plus haut vers le bas, les épaules/buste ressortent davantage)
-          topCut = faceY - faceH * 0.12
+          topCut = faceY - faceH * 0.24   // le texte "PASSPORT" est plus haut (≥ 0.29 × faceH) : jamais coupé
 
           faceFound = true
         }
