@@ -5,7 +5,7 @@ import { useSearchParams, useRouter } from 'next/navigation'
 import { usePowerSync, useQuery } from '@powersync/react'
 import { requireSupabaseRows, supabase, getUser } from '@/lib/supabase'
 import { 
-  User, CreditCard, ArrowLeft, Pencil, Printer, Save, Syringe, 
+  User, CreditCard, ArrowLeft, Pencil, Printer, Receipt, Save, Syringe, 
   BookOpen, Hotel, Plane, Loader2, ShieldCheck, Tag, Building, 
   AlertTriangle, MessageCircle, Clock, TrendingUp, UserPlus, FileCheck, PlaneTakeoff,
   UserCheck, UserRound, Globe, CheckCircle2, Eye, FileText, Camera, Download, X
@@ -156,6 +156,35 @@ const ToggleSwitch = ({ checked, activeColor = "bg-blue-500" }: { checked: boole
   </div>
 );
 
+type AgenceInfo = {
+  id?: string
+  nom_agence: string
+  telephone_agence: string
+  adresse_agence: string
+  slogan?: string | null
+  message_recu?: string | null
+  logo_url?: string | null
+}
+
+type ReceiptPayment = {
+  id: string
+  amount: number
+  payment_mode: string
+  payment_date: string
+}
+
+async function fetchLogoAsBase64(url: string): Promise<string> {
+  const response = await fetch(url)
+  if (!response.ok) throw new Error('Impossible de récupérer le logo de l’agence.')
+  const blob = await response.blob()
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onloadend = () => resolve(reader.result as string)
+    reader.onerror = reject
+    reader.readAsDataURL(blob)
+  })
+}
+
 export default function DetailsPelerin() {
   const id = useSearchParams().get('id')
   const router = useRouter()
@@ -187,6 +216,14 @@ export default function DetailsPelerin() {
     [id ?? ''],
   )
 
+  const { data: queriedAgence } = useQuery<any>(
+    `SELECT a.id, a.nom_agence, a.telephone_agence, a.adresse_agence, a.logo_base64, a.message_recu 
+     FROM agences a
+     JOIN pelerins p ON p.agence_id = a.id
+     WHERE p.id = ?`,
+    [id ?? ''],
+  )
+
   const [p, setPelerin] = useState<any | null>(null)
   const [loading, setLoading] = useState(true)
   const [updating, setUpdating] = useState(false)
@@ -202,6 +239,25 @@ export default function DetailsPelerin() {
     paymentDate: new Date().toISOString().slice(0, 10),
     notes: ''
   })
+  const [showReceiptModal, setShowReceiptModal] = useState(false)
+  const [lastReceipt, setLastReceipt] = useState<{
+    ref: string
+    amount: number
+    total: number
+    remaining: number
+    mode: string
+    date: string
+    kind: 'single' | 'total'
+    payments: ReceiptPayment[]
+  } | null>(null)
+  const [agenceInfo, setAgenceInfo] = useState<AgenceInfo>({
+    nom_agence: 'Agence Hajj',
+    telephone_agence: '',
+    adresse_agence: '',
+    slogan: null,
+    message_recu: 'Les billets et prestations émis sont soumis aux conditions générales de vente. Merci de votre confiance !',
+    logo_url: null,
+  })
 
   const formatAmountInput = (value: string) => {
     const digits = value.replace(/\D/g, '')
@@ -214,9 +270,9 @@ export default function DetailsPelerin() {
   const { setHideNavbar } = useUI()
 
   useEffect(() => {
-    setHideNavbar(!!showScanModal || !!showPdfExportModal)
+    setHideNavbar(!!showScanModal || !!showPdfExportModal || !!showReceiptModal)
     return () => setHideNavbar(false)
-  }, [showScanModal, showPdfExportModal, setHideNavbar])
+  }, [showScanModal, showPdfExportModal, showReceiptModal, setHideNavbar])
 
   const handleChange = (field: string, value: any) => {
     if (!p) return
@@ -270,10 +326,20 @@ export default function DetailsPelerin() {
       )
       await db.execute('UPDATE pelerins SET total_paye = ? WHERE id = ?', [nextTotalPaid, p.id])
 
-      setPayments((prev) => [insertedPayment, ...prev])
+      setPayments((prev) => [insertedPayment, ...prev.filter((payment) => payment.id !== insertedPayment.id)])
       setPelerin({ ...p, total_paye: nextTotalPaid })
+      setLastReceipt({
+        ref: `PAY-${Date.now().toString().slice(-8)}`,
+        amount,
+        total: nextTotalPaid,
+        remaining: Math.max(0, totalDue - nextTotalPaid),
+        mode: paymentForm.paymentMode,
+        date: new Date().toLocaleDateString('fr-FR', { day: '2-digit', month: 'long', year: 'numeric' }),
+        kind: 'single',
+        payments: [insertedPayment],
+      })
       setPaymentForm({ amount: '', paymentMode: 'ESPECES', paymentDate: new Date().toISOString().slice(0, 10), notes: '' })
-      alert('✅ Paiement enregistré avec succès.')
+      setShowReceiptModal(true)
     } catch (error: any) {
       console.error('Erreur enregistrement paiement', error)
       alert(error.message || 'Impossible d’enregistrer le paiement.')
@@ -361,7 +427,10 @@ export default function DetailsPelerin() {
           agences: current.agence_nom_agence ? { nom_agence: current.agence_nom_agence } : undefined
         })
       }
-      setPayments(queriedPayments || [])
+      const uniquePayments = Array.from(
+        new Map((queriedPayments || []).map((payment: any) => [payment.id, payment])).values(),
+      )
+      setPayments(uniquePayments)
       try {
         const { data: userData } = await getUser()
         if (userData?.user?.id) {
@@ -372,6 +441,70 @@ export default function DetailsPelerin() {
     }
     getPelerin()
   }, [id, pelerinLoading, queriedPelerin, queriedPayments])
+
+  useEffect(() => {
+    const currentAgence = queriedAgence?.[0]
+    if (!p || (!currentAgence && !(p.agences?.nom_agence || p.agence_ou_personne_associee))) return
+
+    let cancelled = false
+    const agenceId = currentAgence?.id || p.agence_id
+    let resolvedLogo: string | null = currentAgence?.logo_base64 || null
+    let cachedMessage: string | null = null
+
+    try {
+      if (!resolvedLogo && agenceId) {
+        const cachedLogo = localStorage.getItem(`agency_receipt_logo_${agenceId}`)
+        if (cachedLogo?.startsWith('data:image')) resolvedLogo = cachedLogo
+      }
+      if (agenceId) cachedMessage = localStorage.getItem(`agency_receipt_config_${agenceId}`)
+    } catch {}
+
+    let parsedMessage: string | null = null
+    let parsedSlogan: string | null = null
+
+    if (cachedMessage) {
+      try {
+        const parsed = JSON.parse(cachedMessage)
+        parsedMessage = parsed?.message_recu || null
+        parsedSlogan = parsed?.slogan || null
+      } catch {
+        parsedMessage = null
+        parsedSlogan = null
+      }
+    }
+
+    setAgenceInfo({
+      id: currentAgence?.id || p.agence_id || undefined,
+      nom_agence: currentAgence?.nom_agence || p.agences?.nom_agence || 'Agence Hajj',
+      telephone_agence: currentAgence?.telephone_agence || '',
+      adresse_agence: currentAgence?.adresse_agence || '',
+      slogan: parsedSlogan,
+      message_recu: parsedMessage || currentAgence?.message_recu || 'Les billets et prestations émis sont soumis aux conditions générales de vente. Merci de votre confiance !',
+      logo_url: resolvedLogo || null,
+    })
+
+    if (!resolvedLogo && agenceId) {
+      const { data: storageData } = supabase.storage
+        .from('agency-assets')
+        .getPublicUrl(`logos/${agenceId}.png`)
+
+      if (storageData?.publicUrl) {
+        fetchLogoAsBase64(storageData.publicUrl)
+          .then((base64) => {
+            if (cancelled) return
+            try {
+              localStorage.setItem(`agency_receipt_logo_${agenceId}`, base64)
+            } catch {}
+            setAgenceInfo((previous) => previous.id === agenceId ? { ...previous, logo_url: base64 } : previous)
+          })
+          .catch(() => {})
+      }
+    }
+
+    return () => {
+      cancelled = true
+    }
+  }, [queriedAgence, p])
 
   if (loading) return (
     <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center font-black text-blue-600 gap-4">
@@ -460,6 +593,203 @@ export default function DetailsPelerin() {
   const genreNettoye = (p.sexe || p.genre || '').toLowerCase()
   const estFemme = genreNettoye.startsWith('f')
   const estVieux = age !== null && age > 50
+
+  const handleGenerateTotalReceipt = () => {
+    const allPayments: ReceiptPayment[] = payments.map((payment) => ({
+      id: String(payment.id),
+      amount: Number(payment.amount || 0),
+      payment_mode: payment.payment_mode || 'AUTRE',
+      payment_date: payment.payment_date || '',
+    }))
+
+    if (initialDeposit > 0) {
+      allPayments.push({
+        id: 'initial-deposit',
+        amount: initialDeposit,
+        payment_mode: 'Acompte initial',
+        payment_date: p.date_inscription || '',
+      })
+    }
+
+    allPayments.sort((first, second) => first.payment_date.localeCompare(second.payment_date))
+
+    if (allPayments.length === 0) return
+
+    setLastReceipt({
+      ref: `TOTAL-${Date.now().toString().slice(-8)}`,
+      amount: totalPaid,
+      total: totalPaid,
+      remaining: Math.max(0, totalDue - totalPaid),
+      mode: 'Récapitulatif',
+      date: new Date().toLocaleDateString('fr-FR', { day: '2-digit', month: 'long', year: 'numeric' }),
+      kind: 'total',
+      payments: allPayments,
+    })
+    setShowReceiptModal(true)
+  }
+
+  function buildPelerinRecuHTML(): string {
+    const modePaiementLabel: Record<string, string> = {
+      ESPECES: 'Espèces (Caisse)',
+      ORANGE_MONEY: 'Orange Money',
+      MOOV_MONEY: 'Moov Money',
+      WAVE: 'Wave',
+      VIREMENT: 'Virement / Chèque',
+      CARTE: 'Carte bancaire',
+      AUTRE: 'Autre',
+    }
+
+    const amount = lastReceipt?.amount ?? (Number(paymentForm.amount.replace(/\D/g, '')) || 0)
+    const date = lastReceipt?.date || new Date().toLocaleDateString('fr-FR', { day: '2-digit', month: 'long', year: 'numeric' })
+    const ref = lastReceipt?.ref || `PAY-${Date.now().toString().slice(-8)}`
+    const isTotalReceipt = lastReceipt?.kind === 'total'
+    const totalVerse = totalPaid
+    const remaining = Math.max(0, totalDue - totalVerse)
+
+    return `<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Reçu ${ref}</title>
+<style>
+  * { box-sizing: border-box; }
+  body { font-family: Arial, sans-serif; background: #fff; color: #0f172a; margin: 0; padding: 0; }
+  .box { max-width: 520px; margin: 0 auto; padding: 18px 18px 12px; }
+  .header { text-align: center; padding-bottom: 14px; border-bottom: 1px solid #0f172a; margin-bottom: 14px; }
+  .logo { max-height: 58px; max-width: 165px; object-fit: contain; display: inline-block; margin-bottom: 10px; }
+  .title { font-size: 18px; font-weight: 900; letter-spacing: 0.5px; text-transform: uppercase; }
+  .sub { font-size: 11px; color: #475569; margin-top: 4px; line-height: 1.4; }
+  .badge { display: inline-block; margin-top: 10px; background: #0f172a; color: #fff; font-size: 10px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; padding: 4px 12px; border-radius: 6px; }
+  .meta { display: flex; justify-content: space-between; font-size: 11px; color: #64748b; margin-bottom: 12px; }
+  table { width: 100%; border-collapse: collapse; }
+  td { padding: 6px 0; border-bottom: 1px solid #e2e8f0; font-size: 12px; }
+  .label { color: #64748b; width: 48%; }
+  .value { text-align: right; font-weight: 700; color: #0f172a; }
+  .summary { margin-top: 16px; background: #f8fafc; border-radius: 8px; padding: 14px; border: 1px solid #e2e8f0; }
+  .total-line { display: flex; justify-content: space-between; align-items: center; }
+  .amount { font-size: 22px; font-weight: 800; }
+  .footer { margin-top: 18px; text-align: center; font-size: 10px; color: #64748b; line-height: 1.5; }
+  @media print { @page { margin: 0.7cm; size: auto; } body { background: #fff; } .box { width: 100%; padding: 0; } }
+</style>
+</head>
+<body>
+  <div class="box">
+    <div class="header">
+      ${agenceInfo.logo_url ? `<img src="${agenceInfo.logo_url}" alt="Logo agence" class="logo" />` : ''}
+      <div class="title">${agenceInfo.nom_agence || 'Agence Hajj'}</div>
+      ${agenceInfo.slogan ? `<div style="font-size:11px;font-weight:600;color:#475569;margin-top:2px">${agenceInfo.slogan}</div>` : ''}
+      <div class="sub">${agenceInfo.adresse_agence || ''}${agenceInfo.telephone_agence ? ` • ${agenceInfo.telephone_agence}` : ''}</div>
+      <div class="badge">${isTotalReceipt ? 'Reçu récapitulatif des paiements' : 'Reçu de paiement'}</div>
+    </div>
+
+    <div class="meta">
+      <span>Réf: <strong>${ref}</strong></span>
+      <span>${date}</span>
+    </div>
+
+    <table>
+      <tr><td colspan="2" style="padding: 10px 0 6px; font-size: 9px; font-weight: 700; color: #94a3b8; letter-spacing: 1px; text-transform: uppercase; border-bottom:1px solid #e2e8f0;">Pèlerin</td></tr>
+      <tr><td class="label">Nom</td><td class="value">${`${p.prenom || ''} ${p.nom_complet || p.nom || ''}`.trim() || 'Pèlerin'}</td></tr>
+      <tr><td class="label">Passeport</td><td class="value">${p.num_passeport || '-'}</td></tr>
+      <tr><td class="label">Référence</td><td class="value">${p.reference || '-'}</td></tr>
+
+      <tr><td colspan="2" style="padding: 10px 0 6px; font-size: 9px; font-weight: 700; color: #94a3b8; letter-spacing: 1px; text-transform: uppercase; border-bottom:1px solid #e2e8f0;">${isTotalReceipt ? 'Détail de tous les paiements' : 'Paiement'}</td></tr>
+      <tr><td class="label">Service</td><td class="value">${p.nom_package || 'Package Hajj'}</td></tr>
+      ${isTotalReceipt
+        ? (lastReceipt?.payments || []).map((payment, index) => `<tr><td class="label">Versement ${index + 1}<br/><span style="font-size:10px">${payment.payment_date ? new Date(payment.payment_date).toLocaleDateString('fr-FR') : '-'} · ${modePaiementLabel[payment.payment_mode] || payment.payment_mode}</span></td><td class="value">${payment.amount.toLocaleString('fr-FR')} CFA</td></tr>`).join('')
+        : `<tr><td class="label">Mode</td><td class="value">${modePaiementLabel[lastReceipt?.mode || paymentForm.paymentMode] || lastReceipt?.mode || paymentForm.paymentMode}</td></tr>
+           <tr><td class="label">Montant reçu</td><td class="value">${amount.toLocaleString('fr-FR')} CFA</td></tr>`}
+      <tr><td class="label">Total payé</td><td class="value">${totalVerse.toLocaleString('fr-FR')} CFA</td></tr>
+      <tr><td class="label">Reste à payer</td><td class="value">${remaining.toLocaleString('fr-FR')} CFA</td></tr>
+    </table>
+
+    <div class="summary">
+      <div class="total-line">
+        <span style="font-size:12px;font-weight:700;text-transform:uppercase; color:#0f172a">${isTotalReceipt ? 'Total des paiements' : 'Montant reçu'}</span>
+        <span class="amount">${amount.toLocaleString('fr-FR')} CFA</span>
+      </div>
+    </div>
+
+    <div class="footer">
+      ${agenceInfo.message_recu || 'Les billets et prestations émis sont soumis aux conditions générales de vente. Merci de votre confiance !'}
+    </div>
+  </div>
+</body>
+</html>`
+  }
+
+  const handlePrintReceipt = () => {
+    const iframe = document.createElement('iframe')
+    iframe.style.position = 'fixed'
+    iframe.style.right = '0'
+    iframe.style.bottom = '0'
+    iframe.style.width = '0'
+    iframe.style.height = '0'
+    iframe.style.border = '0'
+    document.body.appendChild(iframe)
+
+    const doc = iframe.contentWindow?.document
+    if (!doc) return
+    doc.open()
+    doc.write(buildPelerinRecuHTML())
+    doc.close()
+    setTimeout(() => {
+      iframe.contentWindow?.focus()
+      iframe.contentWindow?.print()
+      setTimeout(() => document.body.removeChild(iframe), 1200)
+    }, 350)
+  }
+
+  const handleShareReceiptWhatsApp = async () => {
+    const amount = lastReceipt?.amount ?? (Number(paymentForm.amount.replace(/\D/g, '')) || 0)
+    const ref = lastReceipt?.ref || `PAY-${Date.now().toString().slice(-8)}`
+    const date = lastReceipt?.date || new Date().toLocaleDateString('fr-FR', { day: '2-digit', month: 'long', year: 'numeric' })
+    const isTotalReceipt = lastReceipt?.kind === 'total'
+    const messageText = `🧾 *${isTotalReceipt ? 'REÇU RÉCAPITULATIF' : 'REÇU DE PAIEMENT'} — ${agenceInfo.nom_agence}*\n📋 Réf: ${ref} | 📅 ${date}\n👤 Pèlerin: ${`${p.prenom || ''} ${p.nom_complet || p.nom || ''}`.trim() || 'Pèlerin'}\n💰 ${isTotalReceipt ? 'Total payé' : 'Montant reçu'}: ${amount.toLocaleString('fr-FR')} CFA${isTotalReceipt ? `\n🧾 Nombre de versements: ${lastReceipt?.payments.length || 0}` : ''}\n✅ Merci pour votre confiance !`
+
+    const rawDigits = (p.telephone_pelerin || '').replace(/\D/g, '')
+    const waNumber = rawDigits.length === 8 ? `223${rawDigits}` : rawDigits
+
+    const html2canvas = (await import('html2canvas')).default
+    const iframe = document.createElement('iframe')
+    iframe.style.cssText = 'position:fixed;top:-9999px;left:-9999px;width:500px;height:auto;border:none;visibility:hidden'
+    document.body.appendChild(iframe)
+
+    const iDoc = iframe.contentDocument || iframe.contentWindow?.document
+    if (!iDoc) return
+    iDoc.open(); iDoc.write(buildPelerinRecuHTML()); iDoc.close()
+    await new Promise(r => setTimeout(r, 600))
+
+    const canvas = await html2canvas(iDoc.body, { scale: 2, useCORS: true, backgroundColor: '#ffffff', width: 500 })
+    document.body.removeChild(iframe)
+
+    canvas.toBlob(async (blob) => {
+      if (!blob) return
+      const file = new File([blob], `recu-${ref}.png`, { type: 'image/png' })
+
+      if (navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
+        try {
+          await navigator.share({ files: [file], title: `Reçu ${ref}`, text: messageText })
+          return
+        } catch {
+          // ignore and fallback
+        }
+      }
+
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `recu-${ref}.png`
+      a.click()
+      URL.revokeObjectURL(url)
+
+      setTimeout(() => {
+        const targetUrl = waNumber ? `https://wa.me/${waNumber}?text=${encodeURIComponent(messageText)}` : `https://wa.me/?text=${encodeURIComponent(messageText)}`
+        window.open(targetUrl, '_blank')
+      }, 400)
+    }, 'image/png', 0.95)
+  }
 
   // 📄 EXPORT PDF HAUTE DÉFINITION CONÇU POUR LE PÈLERIN
   const exporterFichePelerinPDF = async () => {
@@ -1011,6 +1341,15 @@ export default function DetailsPelerin() {
                   )}
                 </div>
               )}
+              {(payments.length > 0 || initialDeposit > 0) && (
+                <button
+                  type="button"
+                  onClick={handleGenerateTotalReceipt}
+                  className="w-full flex items-center justify-center gap-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 py-2.5 text-xs font-black uppercase tracking-wide text-white transition"
+                >
+                  <Receipt size={15} /> Générer le reçu total
+                </button>
+              )}
             </div>
 
             {/* AGENCE */}
@@ -1027,6 +1366,43 @@ export default function DetailsPelerin() {
       </div>
 
       {/* 📄 4. MODAL D'EXPORT PDF DU DOSSIER COMPLET (AVEC OPTION FINANCES) */}
+      {showReceiptModal && lastReceipt && (
+        <div className="fixed inset-0 z-[9999] bg-black/70 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
+          <div className="bg-white rounded-[1.5rem] border border-slate-200 w-full max-w-xl overflow-hidden shadow-2xl my-auto max-h-[95vh]">
+            <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100 bg-slate-50">
+              <div>
+                <h3 className="font-black text-slate-900 text-xs uppercase tracking-wider">
+                  {lastReceipt.kind === 'total' ? 'Reçu récapitulatif des paiements' : 'Reçu de paiement'}
+                </h3>
+                <p className="text-[10px] text-slate-400">Réf: {lastReceipt.ref}</p>
+              </div>
+              <button onClick={() => setShowReceiptModal(false)} className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600"> <X size={16} /> </button>
+            </div>
+            <div className="p-3 bg-slate-50/60 overflow-y-auto">
+              <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+                <iframe srcDoc={buildPelerinRecuHTML()} title="Aperçu du reçu" className="w-full border-none" style={{ minHeight: '500px', height: '560px', display: 'block' }} />
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-2 p-3 border-t border-slate-100 bg-white">
+              <button onClick={handleShareReceiptWhatsApp} className="flex items-center justify-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs py-3 rounded-xl">
+                <MessageCircle size={15} /> WhatsApp
+              </button>
+              <button onClick={handlePrintReceipt} className="flex items-center justify-center gap-1.5 bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs py-3 rounded-xl">
+                <Printer size={15} /> Imprimer
+              </button>
+            </div>
+            <div className="px-3 pb-3 bg-white">
+              <button
+                onClick={() => setShowReceiptModal(false)}
+                className="w-full bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs py-3 rounded-xl"
+              >
+                Terminer
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {showPdfExportModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-fadeIn">
           <div className="bg-white rounded-[2rem] shadow-2xl border border-slate-100 max-w-md w-full overflow-hidden p-6 space-y-4">
