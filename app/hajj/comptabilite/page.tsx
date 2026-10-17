@@ -1340,19 +1340,19 @@ export default function ComptabiliteHajj() {
 
   /* ───────────────────────────── Rendu ───────────────────────────── */
   return (
-    <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 py-4 md:py-8 pb-24 text-slate-800">
+    <div className="w-full min-w-0 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 md:py-8 pb-24 overflow-x-hidden text-slate-800">
 
       {/* HEADER RESPONSIVE (Sélecteur d'année masqué sur mobile) */}
-      <div className="flex items-center justify-between gap-3 mb-4 md:mb-6">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4 md:mb-6">
         <div className="min-w-0">
-          <h1 className="text-xl sm:text-2xl md:text-3xl font-black text-slate-900 tracking-tight leading-tight truncate">
+          <h1 className="text-xl sm:text-2xl md:text-3xl font-black text-slate-900 tracking-tight leading-tight">
             Comptabilité & Dépenses
           </h1>
-          <p className="text-xs sm:text-sm text-slate-500 font-medium mt-0.5 truncate">
+          <p className="text-xs sm:text-sm text-slate-500 font-medium mt-0.5">
             Suivi des encaissements, gestion des charges et solde net.
           </p>
         </div>
-        <div className="flex items-center gap-2 shrink-0">
+        <div className="flex w-full sm:w-auto items-center justify-end gap-2 shrink-0">
           <div className="hidden md:block">
             <YearSelector />
           </div>
@@ -1362,7 +1362,7 @@ export default function ComptabiliteHajj() {
               setTab('depenses')
               openNew()
             }}
-            className="inline-flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 active:scale-95 text-white text-xs font-black shadow-sm transition-all cursor-pointer shrink-0"
+            className="inline-flex w-full sm:w-auto justify-center items-center gap-1.5 px-3.5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 active:scale-95 text-white text-xs font-black shadow-sm transition-all cursor-pointer shrink-0"
           >
             <Plus size={16} /> <span>Nouvelle dépense</span>
           </button>
