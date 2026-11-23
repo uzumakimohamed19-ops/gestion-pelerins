@@ -12,6 +12,18 @@ import {
 } from 'lucide-react'
 import Link from 'next/link'
 import { YearSelector } from '@/components/YearSelector'
+import { HajjCurrencyTabs } from '@/components/HajjCurrencySelector'
+import {
+  HAJJ_CURRENCIES,
+  HAJJ_CURRENCY_MAP,
+  countByCurrency,
+  formatHajjMoney,
+  getHajjCurrencySymbol,
+  groupTotalsByCurrency,
+  normalizeHajjCurrency,
+  type HajjCurrency,
+  type HajjCurrencyFilter,
+} from '@/lib/hajjCurrency'
 import { get, set } from 'idb-keyval'
 
 type Pelerin = {
@@ -24,6 +36,7 @@ type Pelerin = {
   sur_plateforme_gouv?: boolean
   sur_plateforme_nusuk?: boolean
   total_paye?: number
+  devise: HajjCurrency
   campagne?: string | number | null
 }
 
@@ -141,7 +154,11 @@ function generateAndPrintPDF(
     weekday: 'long', day: 'numeric', month: 'long', year: 'numeric'
   })
 
-  const totalPaye = items.reduce((acc, p) => acc + (p.total_paye || 0), 0)
+  const totalsByCurrency = groupTotalsByCurrency(items, p => p.total_paye || 0)
+  const activeCurrencies = HAJJ_CURRENCIES.filter(c => items.some(p => p.devise === c.code))
+  const totalPayeResume = activeCurrencies.length > 0
+    ? activeCurrencies.map(c => formatHajjMoney(totalsByCurrency[c.code], c.code)).join(' • ')
+    : '0 FCFA'
   const payeCount = items.filter(p => (p.total_paye ?? 0) > 0).length
   const docsCount = items.filter(p => p.document_url).length
   const gouvCount = items.filter(p => p.sur_plateforme_gouv).length
@@ -163,7 +180,7 @@ function generateAndPrintPDF(
       : `<span style="color:#94a3b8;">—</span>`
 
     const financeCell = includeFinance
-      ? `<td style="padding:10px 12px;text-align:right;font-weight:700;color:${(p.total_paye ?? 0) > 0 ? '#047857' : '#b45309'};">${(p.total_paye ?? 0) > 0 ? (p.total_paye ?? 0).toLocaleString('fr-FR') + ' CFA' : '—'}</td>
+      ? `<td style="padding:10px 12px;text-align:right;font-weight:700;color:${(p.total_paye ?? 0) > 0 ? '#047857' : '#b45309'};">${(p.total_paye ?? 0) > 0 ? formatHajjMoney(p.total_paye, p.devise) : '—'}</td>
          <td style="padding:10px 12px;text-align:center;">${statusPaiement}</td>`
       : ''
 
@@ -186,7 +203,7 @@ function generateAndPrintPDF(
   const thStyle = `padding:10px 12px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;color:#475569;background:#f1f5f9;border-bottom:2px solid #e2e8f0;`
 
   const financeHeaders = includeFinance
-    ? `<th style="${thStyle}text-align:right;">Montant (CFA)</th>
+    ? `<th style="${thStyle}text-align:right;">Montant</th>
        <th style="${thStyle}text-align:center;">Statut</th>`
     : ''
 
@@ -256,7 +273,7 @@ function generateAndPrintPDF(
         <div style="display:flex;align-items:center;gap:8px;margin-left:auto;">
           <div style="width:8px;height:8px;border-radius:50%;background:#059669;"></div>
           <span style="font-size:11px;color:#64748b;font-weight:600;">Total encaissé :</span>
-          <span style="font-size:12px;font-weight:800;color:#047857;">${totalPaye.toLocaleString('fr-FR')} CFA</span>
+          <span style="font-size:12px;font-weight:800;color:#047857;">${totalPayeResume}</span>
         </div>` : ''}
       </div>
 
@@ -437,6 +454,7 @@ export default function Dashboard() {
     eligiblesNusuk: 0
   })
   const [recettes, setRecettes] = useState(0)
+  const [selectedDevise, setSelectedDevise] = useState<HajjCurrencyFilter>('ALL')
   const [loading, setLoading] = useState(true)
   const [allData, setAllData] = useState<Pelerin[]>([])
   const [agences, setAgences] = useState<string[]>([])
@@ -468,13 +486,29 @@ export default function Dashboard() {
   const powerSyncPelerins = useMemo<Pelerin[]>(() => (rawPelerins ?? []).map((p: any) => ({
     ...p,
     total_paye: Number(p.total_paye || 0),
+    devise: normalizeHajjCurrency(p.devise),
     sur_plateforme_gouv: Boolean(p.sur_plateforme_gouv),
     sur_plateforme_nusuk: Boolean(p.sur_plateforme_nusuk),
     agences: p.agence_nom_agence ? { nom_agence: p.agence_nom_agence } : undefined,
   })), [rawPelerins])
 
+  const yearPelerins = useMemo(
+    () => selectedYear === 'all' ? powerSyncPelerins : powerSyncPelerins.filter(p => p.campagne?.toString() === String(selectedYear)),
+    [powerSyncPelerins, selectedYear]
+  )
+  const deviseCounts = useMemo(() => countByCurrency(yearPelerins), [yearPelerins])
+  const recettesByCurrency = useMemo(() => groupTotalsByCurrency(allData, p => p.total_paye || 0), [allData])
+  const activeCurrenciesInView = useMemo(
+    () => HAJJ_CURRENCIES.filter(c => allData.some(p => p.devise === c.code)),
+    [allData]
+  )
+  const singleActiveCurrency: HajjCurrency | null = selectedDevise !== 'ALL'
+    ? selectedDevise
+    : (activeCurrenciesInView.length === 1 ? activeCurrenciesInView[0].code : null)
+
   function processStats(data: Pelerin[]) {
-    const filteredData = selectedYear === 'all' ? data : data.filter(p => p.campagne?.toString() === String(selectedYear))
+    const yearFiltered = selectedYear === 'all' ? data : data.filter(p => p.campagne?.toString() === String(selectedYear))
+    const filteredData = selectedDevise === 'ALL' ? yearFiltered : yearFiltered.filter(p => p.devise === selectedDevise)
     const total = filteredData.length
     const avec = filteredData.filter(p => p.document_url).length
     const totalGouv = filteredData.filter(p => p.sur_plateforme_gouv).length
@@ -500,15 +534,15 @@ export default function Dashboard() {
     const listAgences = [...new Set(filteredData.map(p => p.agences?.nom_agence).filter((x): x is string => Boolean(x)))].sort()
     setAgences(listAgences)
 
-    if (filteredData[0]?.agences?.nom_agence) {
-      setNomAgence(filteredData[0].agences.nom_agence)
+    if (yearFiltered[0]?.agences?.nom_agence) {
+      setNomAgence(yearFiltered[0].agences.nom_agence)
     }
   }
 
   useEffect(() => {
     setLoading(powerSyncLoading)
     if (!powerSyncLoading) processStats(powerSyncPelerins)
-  }, [powerSyncLoading, powerSyncPelerins, selectedYear])
+  }, [powerSyncLoading, powerSyncPelerins, selectedYear, selectedDevise])
 
   const alerts = useMemo(() => {
     if (!allData.length) return []
@@ -557,7 +591,9 @@ export default function Dashboard() {
       'En Attente':         { items: allData.filter(p => (p.total_paye ?? 0) === 0), title: 'En attente de paiement' },
       'Éligibles Nusuk':    { items: allData.filter(p => p.sur_plateforme_gouv && p.document_url), title: 'Pèlerins éligibles à l\'inscription Nusuk' },
     }
-    const state = map[label] || { items: allData, title: label }
+    const state = label.startsWith('Encaissé')
+      ? map['Encaissé Global']
+      : (map[label] || { items: allData, title: label })
     setModal({ ...state, card })
     setSearchQuery(''); setAgenceFilter('all'); setActiveTab('all'); setNusukPaymentFilter('all')
   }
@@ -612,7 +648,7 @@ export default function Dashboard() {
         'Nom Complet': p.nom_complet || '',
         'Téléphone': p.telephone_pelerin || '',
         'Agence Associée': p.agences?.nom_agence || 'Non spécifiée',
-        ...(canViewAmounts ? { 'Montant Payé (CFA)': p.total_paye || 0 } : {}),
+        ...(canViewAmounts ? { 'Devise': p.devise, 'Montant Payé': p.total_paye || 0 } : {}),
         'Dossier Fourni': p.document_url ? 'Oui' : 'Non',
         'Inscrit Gouv': p.sur_plateforme_gouv ? 'Oui' : 'Non',
         'Inscrit Nusuk': p.sur_plateforme_nusuk ? 'Oui' : 'Non'
@@ -622,9 +658,10 @@ export default function Dashboard() {
       const workbook = XLSX.utils.book_new()
       XLSX.utils.book_append_sheet(workbook, worksheet, 'Pèlerins')
       worksheet['!cols'] = canViewAmounts
-        ? [{ wch: 18 }, { wch: 25 }, { wch: 16 }, { wch: 22 }, { wch: 20 }, { wch: 15 }, { wch: 15 }, { wch: 15 }]
+        ? [{ wch: 18 }, { wch: 25 }, { wch: 16 }, { wch: 22 }, { wch: 10 }, { wch: 18 }, { wch: 15 }, { wch: 15 }, { wch: 15 }]
         : [{ wch: 18 }, { wch: 25 }, { wch: 16 }, { wch: 22 }, { wch: 15 }, { wch: 15 }, { wch: 15 }]
-      XLSX.writeFile(workbook, `${filename.replace(/\s/g, '_')}_${new Date().toISOString().split('T')[0]}.xlsx`)
+      const suffixDevise = selectedDevise === 'ALL' ? 'ToutesDevises' : selectedDevise
+      XLSX.writeFile(workbook, `${filename.replace(/\s/g, '_')}_${suffixDevise}_${new Date().toISOString().split('T')[0]}.xlsx`)
     } catch (err) {
       console.error("Erreur durant l'export Excel:", err)
     }
@@ -677,9 +714,21 @@ export default function Dashboard() {
       progress: stats.tauxNusuk, progressColor: 'bg-blue-600'
     },
     {
-      label: 'Encaissé Global', value: `${financialVisible ? recettes.toLocaleString('fr-FR') : '••••••'} CFA`, icon: Wallet,
+      label: singleActiveCurrency ? `Encaissé (${getHajjCurrencySymbol(singleActiveCurrency)})` : 'Encaissé Global',
+      value: !financialVisible
+        ? '••••••'
+        : singleActiveCurrency
+          ? formatHajjMoney(recettesByCurrency[singleActiveCurrency], singleActiveCurrency)
+          : activeCurrenciesInView.length > 0
+            ? activeCurrenciesInView.map(c => formatHajjMoney(recettesByCurrency[c.code], c.code, { compact: true })).join(' · ')
+            : '0 FCFA',
+      icon: Wallet,
       light: 'bg-emerald-50', textColor: 'text-emerald-600', borderColor: 'border-emerald-100',
-      bgMobile: 'bg-emerald-50/90 border-emerald-100 text-emerald-900', subtext: `Moy: ${financialVisible ? stats.montantMoyen.toLocaleString('fr-FR') : '••••••'}`, tag: 'Finance'
+      bgMobile: 'bg-emerald-50/90 border-emerald-100 text-emerald-900',
+      subtext: singleActiveCurrency
+        ? `Moy: ${financialVisible ? formatHajjMoney(stats.montantMoyen, singleActiveCurrency, { compact: true }) : '••••••'}`
+        : 'Totaux séparés par devise',
+      tag: singleActiveCurrency ? singleActiveCurrency : 'Multi-devises'
     },
     {
       label: 'Versements Reçus', value: stats.avecPaiement, icon: TrendingUp,
@@ -745,26 +794,45 @@ export default function Dashboard() {
             </Link>
           </div>
 
-          <div className="flex justify-between items-end mt-7 relative z-10">
-            <div>
-              <p className="text-xs text-blue-100 font-semibold tracking-wide uppercase opacity-90">Encaissé Global</p>
-              <div className="flex items-center gap-2 mt-0.5">
-                <div className="flex items-baseline gap-1">
-                  <span className="text-3xl font-black tracking-tight tabular-nums">
-                    {loading ? '---' : (financialVisible ? recettes.toLocaleString('fr-FR') : '•••••••')}
-                  </span>
-                  <span className="text-sm font-bold text-blue-200">CFA</span>
-                </div>
+          <div className="flex justify-between items-end mt-7 relative z-10 gap-3">
+            <div className="min-w-0">
+              <p className="text-xs text-blue-100 font-semibold tracking-wide uppercase opacity-90">
+                {singleActiveCurrency ? `Encaissé (${HAJJ_CURRENCY_MAP[singleActiveCurrency].label})` : 'Encaissé par devise'}
+              </p>
+              <div className="flex items-start gap-2 mt-1">
+                {loading ? (
+                  <span className="text-3xl font-black tracking-tight tabular-nums">---</span>
+                ) : !financialVisible ? (
+                  <span className="text-3xl font-black tracking-tight tabular-nums">•••••••</span>
+                ) : singleActiveCurrency ? (
+                  <div className="flex items-baseline gap-1.5">
+                    <span className="text-3xl font-black tracking-tight tabular-nums">
+                      {recettesByCurrency[singleActiveCurrency].toLocaleString('fr-FR')}
+                    </span>
+                    <span className="text-sm font-bold text-blue-200">{getHajjCurrencySymbol(singleActiveCurrency)}</span>
+                  </div>
+                ) : (
+                  <div className="space-y-0.5">
+                    {(activeCurrenciesInView.length > 0 ? activeCurrenciesInView : [HAJJ_CURRENCY_MAP.FCFA]).map((cur, idx) => (
+                      <div key={cur.code} className="flex items-baseline gap-1.5">
+                        <span className={`${idx === 0 ? 'text-2xl' : 'text-base text-blue-100'} font-black tracking-tight tabular-nums`}>
+                          {recettesByCurrency[cur.code].toLocaleString('fr-FR')}
+                        </span>
+                        <span className="text-xs font-bold text-blue-200">{cur.symbol}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
                 <button
                   onClick={() => canViewAmounts && setShowAmount(!showAmount)}
-                  className="p-1 rounded-lg bg-white/10 border border-white/10 active:scale-90 transition-transform flex items-center justify-center"
+                  className="p-1 rounded-lg bg-white/10 border border-white/10 active:scale-90 transition-transform flex items-center justify-center mt-1 shrink-0"
                 >
                   {financialVisible ? <EyeOff size={14} className="text-blue-100" /> : <Eye size={14} className="text-blue-100" />}
                 </button>
               </div>
             </div>
 
-            <div className="text-right">
+            <div className="text-right shrink-0">
               <p className="text-[10px] text-blue-200 font-bold uppercase tracking-wider">Date du jour</p>
               <p className="text-xs font-black text-white capitalize mt-0.5">{dateDuJour}</p>
             </div>
@@ -772,8 +840,17 @@ export default function Dashboard() {
         </div>
 
         <div className="px-4 mt-6 space-y-6">
-          <div className="px-1">
+          <div className="px-1 space-y-2.5">
             <YearSelector />
+            <HajjCurrencyTabs
+              value={selectedDevise}
+              onChange={setSelectedDevise}
+              includeAll
+              counts={deviseCounts}
+              totalCount={yearPelerins.length}
+              size="sm"
+              className="w-full justify-between"
+            />
           </div>
 
           <div className="space-y-2">
@@ -942,11 +1019,25 @@ export default function Dashboard() {
                 <div className="flex items-center gap-2.5 bg-white/15 border border-white/20 rounded-2xl px-4 py-2.5">
                   <Wallet size={15} className="text-emerald-300 shrink-0" />
                   <div>
-                    <p className="text-[9px] text-blue-100 font-bold uppercase tracking-wider">Encaissé</p>
-                    <p className="text-sm font-black text-white tabular-nums leading-none">
-                      {financialVisible ? recettes.toLocaleString('fr-FR') : '••••••'}
-                      <span className="text-[10px] font-bold text-blue-200 ml-1">CFA</span>
+                    <p className="text-[9px] text-blue-100 font-bold uppercase tracking-wider">
+                      {singleActiveCurrency ? `Encaissé (${singleActiveCurrency})` : 'Encaissé par devise'}
                     </p>
+                    {!financialVisible ? (
+                      <p className="text-sm font-black text-white tabular-nums leading-none">••••••</p>
+                    ) : singleActiveCurrency ? (
+                      <p className="text-sm font-black text-white tabular-nums leading-none">
+                        {recettesByCurrency[singleActiveCurrency].toLocaleString('fr-FR')}
+                        <span className="text-[10px] font-bold text-blue-200 ml-1">{getHajjCurrencySymbol(singleActiveCurrency)}</span>
+                      </p>
+                    ) : (
+                      <div className="flex items-center gap-2.5 flex-wrap">
+                        {(activeCurrenciesInView.length > 0 ? activeCurrenciesInView : [HAJJ_CURRENCY_MAP.FCFA]).map((cur) => (
+                          <span key={cur.code} className="text-xs font-black text-white tabular-nums leading-none">
+                            {formatHajjMoney(recettesByCurrency[cur.code], cur.code, { compact: true })}
+                          </span>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 </div>
               )}
@@ -977,7 +1068,23 @@ export default function Dashboard() {
         </header>
 
         {/* CORPS PRINCIPAL */}
-        <main className="flex-1 max-w-[1600px] mx-auto w-full px-6 lg:px-10 pt-7 pb-12">
+        <main className="flex-1 max-w-[1600px] mx-auto w-full px-6 lg:px-10 pt-5 pb-12">
+          {/* BARRE DE SÉLECTION DE DEVISE DESKTOP */}
+          <div className="mb-5 flex items-center justify-between gap-3 flex-wrap">
+            <HajjCurrencyTabs
+              value={selectedDevise}
+              onChange={setSelectedDevise}
+              includeAll
+              counts={deviseCounts}
+              totalCount={yearPelerins.length}
+            />
+            <p className="text-xs font-bold text-slate-400">
+              {selectedDevise === 'ALL'
+                ? 'Vue globale — totaux financiers séparés par devise sans mélange'
+                : `Filtré uniquement sur les pèlerins en ${HAJJ_CURRENCY_MAP[selectedDevise].label}`}
+            </p>
+          </div>
+
           <div className="flex flex-col lg:flex-row gap-6 items-start w-full">
 
             {/* COLONNE CENTRALE */}
@@ -1050,8 +1157,8 @@ export default function Dashboard() {
                         </div>
                         <div className="shrink-0">
                           {(p.total_paye ?? 0) > 0 ? (
-                            <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2.5 py-1 rounded-xl shadow-xs">
-                              {financialVisible ? `${(p.total_paye ?? 0).toLocaleString('fr-FR')} CFA` : '••••••'}
+                            <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2.5 py-1 rounded-xl shadow-xs tabular-nums">
+                              {financialVisible ? formatHajjMoney(p.total_paye, p.devise) : '••••••'}
                             </span>
                           ) : (
                             <span className="text-[10px] font-semibold text-amber-700 bg-amber-50 border border-amber-200 px-2.5 py-1 rounded-xl shadow-xs">
@@ -1128,8 +1235,8 @@ export default function Dashboard() {
                         </div>
                         <div className="text-right shrink-0">
                           {(p.total_paye ?? 0) > 0 ? (
-                            <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2.5 py-1 rounded-xl shadow-xs">
-                              {financialVisible ? `${(p.total_paye ?? 0).toLocaleString('fr-FR')} CFA` : '••••••'}
+                            <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2.5 py-1 rounded-xl shadow-xs tabular-nums">
+                              {financialVisible ? formatHajjMoney(p.total_paye, p.devise) : '••••••'}
                             </span>
                           ) : (
                             <span className="text-[10px] font-semibold text-amber-700 bg-amber-50 border border-amber-200 px-2.5 py-1 rounded-xl shadow-xs">
@@ -1308,8 +1415,8 @@ export default function Dashboard() {
                       <p className="text-xs text-slate-400">{p.telephone_pelerin || 'Pas de numéro'}</p>
                     </div>
                     <div className="shrink-0 text-right">
-                      <span className={`text-xs font-black px-2.5 py-1 rounded-md ${(p.total_paye ?? 0) > 0 ? 'text-emerald-700 bg-emerald-50' : 'text-amber-700 bg-amber-50'}`}>
-                        {financialVisible && (p.total_paye ?? 0) > 0 ? `${(p.total_paye ?? 0).toLocaleString('fr-FR')} CFA` : financialVisible ? 'Impayé' : '••••••'}
+                      <span className={`text-xs font-black px-2.5 py-1 rounded-md tabular-nums ${(p.total_paye ?? 0) > 0 ? 'text-emerald-700 bg-emerald-50' : 'text-amber-700 bg-amber-50'}`}>
+                        {financialVisible && (p.total_paye ?? 0) > 0 ? formatHajjMoney(p.total_paye, p.devise) : financialVisible ? 'Impayé' : '••••••'}
                       </span>
                     </div>
                   </li>

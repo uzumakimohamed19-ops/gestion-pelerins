@@ -15,7 +15,18 @@ import jsPDF from 'jspdf'
 import autoTable from 'jspdf-autotable'
 
 import { useUI } from '@/lib/UIContext'
+import { useWorkProfile } from '@/lib/ProfileContext'
 import { getPassportPublicUrl, uploadPassportFile } from '@/lib/hajjPassport'
+import { formatAuthorInline, formatProfileRoleLabel, getProfileRoleBadgeClass } from '@/lib/profileAuthor'
+import {
+  HAJJ_CURRENCIES,
+  HAJJ_CURRENCY_MAP,
+  formatHajjMoney,
+  formatHajjMoneyPdf,
+  getHajjCurrencySymbol,
+  normalizeHajjCurrency,
+  type HajjCurrency,
+} from '@/lib/hajjCurrency'
 
 // ─── AVATARS PÈLERINS AFRICAINS DYNAMIQUES (SVG) ─────────────────────────────
 
@@ -171,6 +182,8 @@ type ReceiptPayment = {
   amount: number
   payment_mode: string
   payment_date: string
+  recorded_by_name?: string | null
+  recorded_by_role?: string | null
 }
 
 async function fetchLogoAsBase64(url: string): Promise<string> {
@@ -189,6 +202,7 @@ export default function DetailsPelerin() {
   const id = useSearchParams().get('id')
   const router = useRouter()
   const db = usePowerSync()
+  const { profile: workProfile } = useWorkProfile()
 
   // 🎯 REQUÊTE JOINTURE AUTOMATIQUE : Pèlerin + Agence + Hôtels et Chambres Mecque & Médine
   const { data: queriedPelerin, isLoading: pelerinLoading } = useQuery<any>(
@@ -248,6 +262,8 @@ export default function DetailsPelerin() {
     mode: string
     date: string
     kind: 'single' | 'total'
+    recordedByName?: string | null
+    recordedByRole?: string | null
     payments: ReceiptPayment[]
   } | null>(null)
   const [agenceInfo, setAgenceInfo] = useState<AgenceInfo>({
@@ -267,7 +283,40 @@ export default function DetailsPelerin() {
 
   const [payments, setPayments] = useState<any[]>([])
   const [savingPayment, setSavingPayment] = useState(false)
+  const [updatingDevise, setUpdatingDevise] = useState(false)
   const { setHideNavbar } = useUI()
+
+  const pelerinDevise: HajjCurrency = normalizeHajjCurrency(p?.devise)
+  const deviseSymbol = getHajjCurrencySymbol(pelerinDevise)
+
+  const handleChangeDevise = async (nextDevise: HajjCurrency) => {
+    if (!p?.id || nextDevise === pelerinDevise || updatingDevise) return
+    setUpdatingDevise(true)
+    try {
+      const { data, error } = await supabase
+        .from('pelerins')
+        .update({ devise: nextDevise })
+        .eq('id', p.id)
+        .select('id')
+      requireSupabaseRows(data, error, 'mise à jour de la devise')
+
+      await supabase
+        .from('pelerin_payments')
+        .update({ devise: nextDevise })
+        .eq('pelerin_id', p.id)
+
+      await db.execute('UPDATE pelerins SET devise = ? WHERE id = ?', [nextDevise, p.id]).catch(() => {})
+      await db.execute('UPDATE pelerin_payments SET devise = ? WHERE pelerin_id = ?', [nextDevise, p.id]).catch(() => {})
+
+      setPelerin({ ...p, devise: nextDevise })
+      setPayments((prev) => prev.map((item) => ({ ...item, devise: nextDevise })))
+    } catch (error: any) {
+      console.error('Erreur changement devise', error)
+      alert(error?.message || 'Impossible de modifier la devise du pèlerin.')
+    } finally {
+      setUpdatingDevise(false)
+    }
+  }
 
   useEffect(() => {
     setHideNavbar(!!showScanModal || !!showPdfExportModal || !!showReceiptModal)
@@ -302,13 +351,18 @@ export default function DetailsPelerin() {
     try {
       // 🎯 Ajoute le nouveau versement au total déjà payé (acompte d'inscription inclus)
       const nextTotalPaid = totalPaid + amount
+      const recordedByName = workProfile?.name?.trim() || null
+      const recordedByRole = workProfile?.profile_type || null
       const insertedPayment = {
         id: crypto.randomUUID(),
         pelerin_id: p.id,
         amount,
+        devise: pelerinDevise,
         payment_date: paymentForm.paymentDate || new Date().toISOString().slice(0, 10),
         payment_mode: paymentForm.paymentMode,
         notes: paymentForm.notes.trim() || null,
+        recorded_by_name: recordedByName,
+        recorded_by_role: recordedByRole,
         created_at: new Date().toISOString(),
       }
       const { error: paymentError } = await supabase.from('pelerin_payments').insert(insertedPayment)
@@ -321,8 +375,8 @@ export default function DetailsPelerin() {
       requireSupabaseRows(updatedRows, updateError, 'mise à jour du total payé')
 
       await db.execute(
-        'INSERT OR REPLACE INTO pelerin_payments (id, pelerin_id, amount, payment_date, payment_mode, notes, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
-        [insertedPayment.id, insertedPayment.pelerin_id, insertedPayment.amount, insertedPayment.payment_date, insertedPayment.payment_mode, insertedPayment.notes, insertedPayment.created_at],
+        'INSERT OR REPLACE INTO pelerin_payments (id, pelerin_id, amount, devise, payment_date, payment_mode, notes, recorded_by_name, recorded_by_role, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        [insertedPayment.id, insertedPayment.pelerin_id, insertedPayment.amount, insertedPayment.devise, insertedPayment.payment_date, insertedPayment.payment_mode, insertedPayment.notes, insertedPayment.recorded_by_name, insertedPayment.recorded_by_role, insertedPayment.created_at],
       )
       await db.execute('UPDATE pelerins SET total_paye = ? WHERE id = ?', [nextTotalPaid, p.id])
 
@@ -336,6 +390,8 @@ export default function DetailsPelerin() {
         mode: paymentForm.paymentMode,
         date: new Date().toLocaleDateString('fr-FR', { day: '2-digit', month: 'long', year: 'numeric' }),
         kind: 'single',
+        recordedByName,
+        recordedByRole,
         payments: [insertedPayment],
       })
       setPaymentForm({ amount: '', paymentMode: 'ESPECES', paymentDate: new Date().toISOString().slice(0, 10), notes: '' })
@@ -587,7 +643,7 @@ export default function DetailsPelerin() {
   const etapesReussies = etapesCalcul.filter(Boolean).length
   const pourcentageProgression = Math.round((etapesReussies / etapesCalcul.length) * 100)
 
-  const messageWhatsApp = `Bonjour, voici un point sur le suivi de votre dossier Hajj. Statut : ${statutDynamique}. Reste à payer : ${resteAPayer.toLocaleString()} CFA.`
+  const messageWhatsApp = `Bonjour, voici un point sur le suivi de votre dossier Hajj. Statut : ${statutDynamique}. Reste à payer : ${formatHajjMoney(resteAPayer, pelerinDevise)}.`
   const urlWhatsApp = p.telephone_pelerin ? `https://wa.me/${p.telephone_pelerin.replace(/\s+/g, '')}?text=${encodeURIComponent(messageWhatsApp)}` : '#'
 
   const genreNettoye = (p.sexe || p.genre || '').toLowerCase()
@@ -600,6 +656,8 @@ export default function DetailsPelerin() {
       amount: Number(payment.amount || 0),
       payment_mode: payment.payment_mode || 'AUTRE',
       payment_date: payment.payment_date || '',
+      recorded_by_name: payment.recorded_by_name || null,
+      recorded_by_role: payment.recorded_by_role || null,
     }))
 
     if (initialDeposit > 0) {
@@ -608,6 +666,8 @@ export default function DetailsPelerin() {
         amount: initialDeposit,
         payment_mode: 'Acompte initial',
         payment_date: p.date_inscription || '',
+        recorded_by_name: p.created_by_name || null,
+        recorded_by_role: p.created_by_role || null,
       })
     }
 
@@ -623,6 +683,8 @@ export default function DetailsPelerin() {
       mode: 'Récapitulatif',
       date: new Date().toLocaleDateString('fr-FR', { day: '2-digit', month: 'long', year: 'numeric' }),
       kind: 'total',
+      recordedByName: workProfile?.name?.trim() || null,
+      recordedByRole: workProfile?.profile_type || null,
       payments: allPayments,
     })
     setShowReceiptModal(true)
@@ -697,17 +759,24 @@ export default function DetailsPelerin() {
       <tr><td colspan="2" style="padding: 10px 0 6px; font-size: 9px; font-weight: 700; color: #94a3b8; letter-spacing: 1px; text-transform: uppercase; border-bottom:1px solid #e2e8f0;">${isTotalReceipt ? 'Détail de tous les paiements' : 'Paiement'}</td></tr>
       <tr><td class="label">Service</td><td class="value">${p.nom_package || 'Package Hajj'}</td></tr>
       ${isTotalReceipt
-        ? (lastReceipt?.payments || []).map((payment, index) => `<tr><td class="label">Versement ${index + 1}<br/><span style="font-size:10px">${payment.payment_date ? new Date(payment.payment_date).toLocaleDateString('fr-FR') : '-'} · ${modePaiementLabel[payment.payment_mode] || payment.payment_mode}</span></td><td class="value">${payment.amount.toLocaleString('fr-FR')} CFA</td></tr>`).join('')
+        ? (lastReceipt?.payments || []).map((payment, index) => {
+            const byText = formatAuthorInline(payment.recorded_by_name, payment.recorded_by_role)
+            return `<tr><td class="label">Versement ${index + 1}<br/><span style="font-size:10px">${payment.payment_date ? new Date(payment.payment_date).toLocaleDateString('fr-FR') : '-'} · ${modePaiementLabel[payment.payment_mode] || payment.payment_mode}${byText ? `<br/>Par ${byText}` : ''}</span></td><td class="value">${formatHajjMoney(payment.amount, pelerinDevise)}</td></tr>`
+          }).join('')
         : `<tr><td class="label">Mode</td><td class="value">${modePaiementLabel[lastReceipt?.mode || paymentForm.paymentMode] || lastReceipt?.mode || paymentForm.paymentMode}</td></tr>
-           <tr><td class="label">Montant reçu</td><td class="value">${amount.toLocaleString('fr-FR')} CFA</td></tr>`}
-      <tr><td class="label">Total payé</td><td class="value">${totalVerse.toLocaleString('fr-FR')} CFA</td></tr>
-      <tr><td class="label">Reste à payer</td><td class="value">${remaining.toLocaleString('fr-FR')} CFA</td></tr>
+           ${formatAuthorInline(lastReceipt?.recordedByName || workProfile?.name, lastReceipt?.recordedByRole || workProfile?.profile_type) ? `<tr><td class="label">Encaissé par</td><td class="value">${formatAuthorInline(lastReceipt?.recordedByName || workProfile?.name, lastReceipt?.recordedByRole || workProfile?.profile_type)}</td></tr>` : ''}
+           <tr><td class="label">Montant reçu</td><td class="value">${formatHajjMoney(amount, pelerinDevise)}</td></tr>`}
+      ${isTotalReceipt && formatAuthorInline(lastReceipt?.recordedByName || workProfile?.name, lastReceipt?.recordedByRole || workProfile?.profile_type)
+        ? `<tr><td class="label">Édité par</td><td class="value">${formatAuthorInline(lastReceipt?.recordedByName || workProfile?.name, lastReceipt?.recordedByRole || workProfile?.profile_type)}</td></tr>`
+        : ''}
+      <tr><td class="label">Total payé</td><td class="value">${formatHajjMoney(totalVerse, pelerinDevise)}</td></tr>
+      <tr><td class="label">Reste à payer</td><td class="value">${formatHajjMoney(remaining, pelerinDevise)}</td></tr>
     </table>
 
     <div class="summary">
       <div class="total-line">
         <span style="font-size:12px;font-weight:700;text-transform:uppercase; color:#0f172a">${isTotalReceipt ? 'Total des paiements' : 'Montant reçu'}</span>
-        <span class="amount">${amount.toLocaleString('fr-FR')} CFA</span>
+        <span class="amount">${formatHajjMoney(amount, pelerinDevise)}</span>
       </div>
     </div>
 
@@ -746,7 +815,8 @@ export default function DetailsPelerin() {
     const ref = lastReceipt?.ref || `PAY-${Date.now().toString().slice(-8)}`
     const date = lastReceipt?.date || new Date().toLocaleDateString('fr-FR', { day: '2-digit', month: 'long', year: 'numeric' })
     const isTotalReceipt = lastReceipt?.kind === 'total'
-    const messageText = `🧾 *${isTotalReceipt ? 'REÇU RÉCAPITULATIF' : 'REÇU DE PAIEMENT'} — ${agenceInfo.nom_agence}*\n📋 Réf: ${ref} | 📅 ${date}\n👤 Pèlerin: ${`${p.prenom || ''} ${p.nom_complet || p.nom || ''}`.trim() || 'Pèlerin'}\n💰 ${isTotalReceipt ? 'Total payé' : 'Montant reçu'}: ${amount.toLocaleString('fr-FR')} CFA${isTotalReceipt ? `\n🧾 Nombre de versements: ${lastReceipt?.payments.length || 0}` : ''}\n✅ Merci pour votre confiance !`
+    const authorLine = formatAuthorInline(lastReceipt?.recordedByName || workProfile?.name, lastReceipt?.recordedByRole || workProfile?.profile_type)
+    const messageText = `🧾 *${isTotalReceipt ? 'REÇU RÉCAPITULATIF' : 'REÇU DE PAIEMENT'} — ${agenceInfo.nom_agence}*\n📋 Réf: ${ref} | 📅 ${date}\n👤 Pèlerin: ${`${p.prenom || ''} ${p.nom_complet || p.nom || ''}`.trim() || 'Pèlerin'}\n💰 ${isTotalReceipt ? 'Total payé' : 'Montant reçu'}: ${formatHajjMoney(amount, pelerinDevise)}${authorLine ? `\n✍️ ${isTotalReceipt ? 'Édité par' : 'Encaissé par'}: ${authorLine}` : ''}${isTotalReceipt ? `\n🧾 Nombre de versements: ${lastReceipt?.payments.length || 0}` : ''}\n✅ Merci pour votre confiance !`
 
     const rawDigits = (p.telephone_pelerin || '').replace(/\D/g, '')
     const waNumber = rawDigits.length === 8 ? `223${rawDigits}` : rawDigits
@@ -887,9 +957,9 @@ export default function DetailsPelerin() {
           body: [
             [
               p.nom_package || 'Forfait Standard',
-              `${totalDue.toLocaleString('fr-FR')} CFA`,
-              `${totalPaid.toLocaleString('fr-FR')} CFA`,
-              `${resteAPayer.toLocaleString('fr-FR')} CFA`,
+              formatHajjMoneyPdf(totalDue, pelerinDevise),
+              formatHajjMoneyPdf(totalPaid, pelerinDevise),
+              formatHajjMoneyPdf(resteAPayer, pelerinDevise),
             ]
           ],
           theme: 'grid',
@@ -990,6 +1060,9 @@ export default function DetailsPelerin() {
                   <p className="flex items-center gap-1 bg-slate-50 px-2.5 py-1 rounded-md border border-slate-100">
                     <Building size={12} className="text-slate-400" /> Offre : <span className="text-slate-700 font-black">{p.nom_package || 'Sur Mesure'}</span>
                   </p>
+                  <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-md border text-[11px] font-black uppercase ${HAJJ_CURRENCY_MAP[pelerinDevise].badgeClass}`}>
+                    Devise : {HAJJ_CURRENCY_MAP[pelerinDevise].shortLabel}
+                  </span>
                 </div>
             </div>
             
@@ -1227,11 +1300,31 @@ export default function DetailsPelerin() {
             {/* COMPTABILITÉ */}
             <div className="bg-gradient-to-br from-slate-900 via-indigo-950 to-slate-900 text-white p-6 rounded-[2rem] shadow-xl space-y-6">
               <div>
-                <h3 className="text-[10px] font-black text-cyan-400 uppercase tracking-wider flex items-center gap-2">
-                  <CreditCard size={14} /> Balance Comptable
-                </h3>
-                <p className="text-3xl font-black text-transparent bg-clip-text bg-gradient-to-r from-cyan-300 to-blue-300 tracking-tight mt-1.5">
-                  {resteAPayer.toLocaleString()} <span className="text-xs text-white/50 uppercase">cfa</span>
+                <div className="flex items-center justify-between gap-2">
+                  <h3 className="text-[10px] font-black text-cyan-400 uppercase tracking-wider flex items-center gap-2">
+                    <CreditCard size={14} /> Balance Comptable
+                  </h3>
+                  <div className="inline-flex items-center gap-1 bg-white/10 p-1 rounded-xl border border-white/15">
+                    {HAJJ_CURRENCIES.map((cur) => (
+                      <button
+                        key={cur.code}
+                        type="button"
+                        disabled={updatingDevise}
+                        onClick={() => handleChangeDevise(cur.code)}
+                        className={`px-2 py-0.5 rounded-lg text-[10px] font-black uppercase transition cursor-pointer disabled:opacity-50 ${
+                          pelerinDevise === cur.code
+                            ? 'bg-white text-slate-900 shadow-xs'
+                            : 'text-slate-300 hover:bg-white/10'
+                        }`}
+                        title={`Passer ce pèlerin en ${cur.label}`}
+                      >
+                        {cur.code === 'FCFA' ? 'CFA' : cur.symbol}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <p className="text-3xl font-black text-transparent bg-clip-text bg-gradient-to-r from-cyan-300 to-blue-300 tracking-tight mt-1.5 tabular-nums">
+                  {resteAPayer.toLocaleString('fr-FR')} <span className="text-xs text-white/60 uppercase">{deviseSymbol}</span>
                 </p>
               </div>
 
@@ -1248,11 +1341,11 @@ export default function DetailsPelerin() {
               <div className="grid grid-cols-2 gap-2 text-xs border-t border-white/10 pt-4">
                 <div>
                   <span className="block text-[9px] text-slate-400 uppercase">Frais Fixés</span>
-                  <span className="font-bold text-slate-200">{totalDue.toLocaleString()} F</span>
+                  <span className="font-bold text-slate-200 tabular-nums">{formatHajjMoney(totalDue, pelerinDevise, { compact: true })}</span>
                 </div>
                 <div>
                   <span className="block text-[9px] text-emerald-400 uppercase">Acomptes Versés</span>
-                  <span className="font-bold text-emerald-400">{totalPaid.toLocaleString()} F</span>
+                  <span className="font-bold text-emerald-400 tabular-nums">{formatHajjMoney(totalPaid, pelerinDevise, { compact: true })}</span>
                 </div>
               </div>
             </div>
@@ -1260,18 +1353,18 @@ export default function DetailsPelerin() {
             {/* ENREGISTRER UN PAIEMENT */}
             <div className="bg-white p-6 rounded-[2rem] shadow-xl shadow-slate-200/50 border border-slate-100 space-y-4">
               <h3 className="text-[10px] font-black text-slate-600 uppercase tracking-wider flex items-center gap-2">
-                <CreditCard size={14} className="text-indigo-600" /> Enregistrer un versement
+                <CreditCard size={14} className="text-indigo-600" /> Enregistrer un versement ({deviseSymbol})
               </h3>
 
               <form onSubmit={handleRecordPayment} className="space-y-3">
                 <div>
-                  <label className="mb-1 block text-[10px] font-black uppercase text-slate-500">Montant (CFA)</label>
+                  <label className="mb-1 block text-[10px] font-black uppercase text-slate-500">Montant ({deviseSymbol})</label>
                   <input
                     type="text"
                     inputMode="numeric"
                     value={paymentForm.amount}
                     onChange={(e) => setPaymentForm({ ...paymentForm, amount: formatAmountInput(e.target.value) })}
-                    placeholder="Ex : 500 000"
+                    placeholder={pelerinDevise === 'FCFA' ? 'Ex : 500 000' : 'Ex : 1 500'}
                     className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold outline-none focus:border-indigo-500"
                   />
                 </div>
@@ -1320,23 +1413,46 @@ export default function DetailsPelerin() {
               {payments.length === 0 && initialDeposit <= 0 ? (
                 <p className="text-xs text-slate-400 italic">Aucun versement enregistré.</p>
               ) : (
-                <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
-                  {payments.map((item) => (
-                    <div key={item.id} className="p-2.5 rounded-xl border border-slate-100 bg-slate-50 text-xs flex justify-between items-center">
-                      <div>
-                        <p className="font-bold text-slate-800">{Number(item.amount || 0).toLocaleString('fr-FR')} CFA</p>
-                        <p className="text-[10px] text-slate-400">{item.payment_mode} • {item.payment_date || '-'}</p>
+                <div className="space-y-2 max-h-60 overflow-y-auto pr-1">
+                  {payments.map((item) => {
+                    const roleLabel = formatProfileRoleLabel(item.recorded_by_role)
+                    return (
+                      <div key={item.id} className="p-2.5 rounded-xl border border-slate-100 bg-slate-50 text-xs flex justify-between items-start gap-2">
+                        <div className="min-w-0">
+                          <p className="font-bold text-slate-800 tabular-nums">{formatHajjMoney(Number(item.amount || 0), pelerinDevise)}</p>
+                          <p className="text-[10px] text-slate-400">{item.payment_mode} • {item.payment_date || '-'}</p>
+                          {item.recorded_by_name && (
+                            <p className="text-[10px] text-slate-600 font-semibold mt-1 flex items-center gap-1.5 flex-wrap">
+                              <span>Par <strong className="text-slate-800">{item.recorded_by_name}</strong></span>
+                              {roleLabel && (
+                                <span className={`px-1.5 py-0.2 rounded border text-[9px] font-black uppercase ${getProfileRoleBadgeClass(item.recorded_by_role)}`}>
+                                  {roleLabel}
+                                </span>
+                              )}
+                            </p>
+                          )}
+                        </div>
+                        <span className="text-[9px] font-black text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-md shrink-0">Reçu</span>
                       </div>
-                      <span className="text-[9px] font-black text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-md">Reçu</span>
-                    </div>
-                  ))}
+                    )
+                  })}
                   {initialDeposit > 0 && (
-                    <div className="p-2.5 rounded-xl border border-blue-100 bg-blue-50/40 text-xs flex justify-between items-center">
-                      <div>
-                        <p className="font-bold text-slate-800">{initialDeposit.toLocaleString('fr-FR')} CFA</p>
+                    <div className="p-2.5 rounded-xl border border-blue-100 bg-blue-50/40 text-xs flex justify-between items-start gap-2">
+                      <div className="min-w-0">
+                        <p className="font-bold text-slate-800 tabular-nums">{formatHajjMoney(initialDeposit, pelerinDevise)}</p>
                         <p className="text-[10px] text-slate-500">Acompte à l'inscription • {p.date_inscription ? new Date(p.date_inscription).toLocaleDateString('fr-FR') : '-'}</p>
+                        {p.created_by_name && (
+                          <p className="text-[10px] text-slate-600 font-semibold mt-1 flex items-center gap-1.5 flex-wrap">
+                            <span>Par <strong className="text-slate-800">{p.created_by_name}</strong></span>
+                            {formatProfileRoleLabel(p.created_by_role) && (
+                              <span className={`px-1.5 py-0.2 rounded border text-[9px] font-black uppercase ${getProfileRoleBadgeClass(p.created_by_role)}`}>
+                                {formatProfileRoleLabel(p.created_by_role)}
+                              </span>
+                            )}
+                          </p>
+                        )}
                       </div>
-                      <span className="text-[9px] font-black text-blue-600 bg-blue-100 px-2 py-0.5 rounded-md">Initial</span>
+                      <span className="text-[9px] font-black text-blue-600 bg-blue-100 px-2 py-0.5 rounded-md shrink-0">Initial</span>
                     </div>
                   )}
                 </div>
@@ -1362,6 +1478,39 @@ export default function DetailsPelerin() {
 
           </div>
 
+        </div>
+
+        {/* ── PIED DE FICHE : TRAÇABILITÉ D'ENREGISTREMENT DU PÈLERIN ── */}
+        <div className="bg-white p-5 rounded-3xl shadow-sm border border-slate-200/80 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="w-10 h-10 rounded-2xl bg-slate-100 border border-slate-200 flex items-center justify-center text-slate-600 shrink-0">
+              <UserCheck size={18} />
+            </div>
+            <div className="min-w-0">
+              <p className="text-[10px] font-black text-slate-400 uppercase tracking-wider">
+                Dossier enregistré par
+              </p>
+              <div className="flex items-center gap-2 flex-wrap mt-0.5">
+                <p className="text-sm font-black text-slate-900 truncate">
+                  {p.created_by_name || 'Non renseigné (dossier antérieur)'}
+                </p>
+                {p.created_by_name && formatProfileRoleLabel(p.created_by_role) && (
+                  <span className={`px-2 py-0.5 rounded-md border text-[10px] font-black uppercase ${getProfileRoleBadgeClass(p.created_by_role)}`}>
+                    {formatProfileRoleLabel(p.created_by_role)}
+                  </span>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {p.created_at && (
+            <div className="text-left sm:text-right shrink-0">
+              <p className="text-[10px] font-black text-slate-400 uppercase tracking-wider">Date de création</p>
+              <p className="text-xs font-bold text-slate-600 mt-0.5">
+                {new Date(p.created_at).toLocaleDateString('fr-FR', { day: '2-digit', month: 'long', year: 'numeric' })}
+              </p>
+            </div>
+          )}
         </div>
       </div>
 

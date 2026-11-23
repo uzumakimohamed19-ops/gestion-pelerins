@@ -89,6 +89,7 @@ export const pelerins = new Table({
     column.text('nom_package'),
     column.real('prix_package'),
     column.real('total_paye'),
+    column.text('devise'),
     column.integer('vacciné'),
     column.integer('visite_medicale'),
     column.integer('formation_suivie'),
@@ -110,12 +111,15 @@ export const pelerins = new Table({
     column.integer('statut_gouv'),
     column.text('gouv_postule_at'),
     column.text('hajj_session_id'),
+    column.text('created_by_name'),
+    column.text('created_by_role'),
     column.text('created_at')
   ],
   indexes: {
     agence: ['agence_id'],
     session: ['hajj_session_id'],
     passeport: ['num_passeport'],
+    devise: ['devise'],
     chambre_mecque: ['chambre_mecque_id'],
     chambre_medine: ['chambre_medine_id']
   }
@@ -127,13 +131,17 @@ export const pelerin_payments = new Table({
   columns: [
     column.text('pelerin_id'),
     column.real('amount'),
+    column.text('devise'),
     column.text('payment_date'),
     column.text('payment_mode'),
     column.text('notes'),
+    column.text('recorded_by_name'),
+    column.text('recorded_by_role'),
     column.text('created_at')
   ],
   indexes: {
-    pelerin: ['pelerin_id']
+    pelerin: ['pelerin_id'],
+    devise: ['devise']
   }
 });
 
@@ -228,8 +236,14 @@ export const depenses_hajj = new Table({
     column.text('cible_valeur'),
     column.text('libelle'),
     column.real('montant'),
+    column.text('devise'),
+    column.text('recorded_by_name'),
+    column.text('recorded_by_role'),
     column.text('created_at')
-  ]
+  ],
+  indexes: {
+    devise: ['devise']
+  }
 });
 
 // 9. Dépenses supprimées (Audit)

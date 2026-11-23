@@ -9,6 +9,8 @@ import {
   Crop, Check, X, Move, Keyboard, Radio, FileCheck, Printer
 } from 'lucide-react'
 import { uploadPassportFile } from '@/lib/hajjPassport'
+import { HAJJ_CURRENCIES, formatHajjMoney, getHajjCurrencySymbol, type HajjCurrency } from '@/lib/hajjCurrency'
+import { useWorkProfile } from '@/lib/ProfileContext'
 import { Capacitor, CapacitorHttp } from '@capacitor/core'
 import * as faceapi from '@vladmandic/face-api'
 
@@ -747,6 +749,7 @@ async function postMrzOcr(imageBase64: string): Promise<any> {
 }
 
 export default function AjouterPelerin() {
+  const { profile: workProfile } = useWorkProfile()
   const [nom, setNom] = useState('')
   const [prenom, setPrenom] = useState('')
   const [reference, setReference] = useState('')
@@ -762,6 +765,7 @@ export default function AjouterPelerin() {
   const [totalInput, setTotalInput] = useState('')
   const [paye, setPaye] = useState(0)
   const [payeInput, setPayeInput] = useState('')
+  const [devise, setDevise] = useState<HajjCurrency>('FCFA')
   const [nomPackage, setNomPackage] = useState('')
   const [notes, setNotes] = useState('')
 
@@ -1468,12 +1472,15 @@ export default function AjouterPelerin() {
         campagne: campagne || null,
         prix_package: total,
         total_paye: paye,
+        devise,
         nom_package: nomPackage.trim() || null,
         document_url: fileUrl || null,
         photo_url: photoUrl || null,
         notes: notes.trim() || null,
         agence_id: agenceId,
         agence_ou_personne_associee: associe.trim() || null,
+        created_by_name: workProfile?.name?.trim() || null,
+        created_by_role: workProfile?.profile_type || null,
         created_at: new Date().toISOString(),
       })
       if (error) throw error
@@ -1831,28 +1838,57 @@ export default function AjouterPelerin() {
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
-                <div className="bg-gray-900 p-4 rounded-2xl shadow-inner">
-                  <label className="text-[9px] font-black text-gray-400 uppercase mb-1 block">Prix Total (Obligatoire)</label>
-                  <input 
-                    type="text" inputMode="numeric" pattern="[0-9\s]*" value={totalInput}
-                    onChange={(e) => {
-                      setTotalInput(formatAmount(e.target.value))
-                      setTotal(parseAmount(e.target.value))
-                    }}
-                    className="w-full bg-transparent text-white font-black text-lg outline-none" required 
-                  />
+              <div className="space-y-3">
+                <div>
+                  <label className="text-[10px] font-black text-gray-400 uppercase ml-4 mb-1.5 block">Devise de paiement</label>
+                  <div className="grid grid-cols-3 gap-2">
+                    {HAJJ_CURRENCIES.map((cur) => {
+                      const active = devise === cur.code
+                      return (
+                        <button
+                          key={cur.code}
+                          type="button"
+                          onClick={() => setDevise(cur.code)}
+                          className={`py-3 px-3 rounded-2xl border-2 font-black text-xs uppercase tracking-wider transition-all cursor-pointer active:scale-95 ${
+                            active
+                              ? cur.pillActiveClass
+                              : 'bg-gray-50 border-gray-100 text-gray-600 hover:border-gray-300'
+                          }`}
+                        >
+                          {cur.label}
+                        </button>
+                      )
+                    })}
+                  </div>
                 </div>
-                <div className="bg-green-600 p-4 rounded-2xl shadow-inner">
-                  <label className="text-[9px] font-black text-green-200 uppercase mb-1 block">Acompte (Optionnel)</label>
-                  <input 
-                    type="text" inputMode="numeric" pattern="[0-9\s]*" value={payeInput}
-                    onChange={(e) => {
-                      setPayeInput(formatAmount(e.target.value))
-                      setPaye(parseAmount(e.target.value))
-                    }}
-                    className="w-full bg-transparent text-white font-black text-lg outline-none" 
-                  />
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="bg-gray-900 p-4 rounded-2xl shadow-inner">
+                    <label className="text-[9px] font-black text-gray-400 uppercase mb-1 block">
+                      Prix Total ({getHajjCurrencySymbol(devise)}) *
+                    </label>
+                    <input 
+                      type="text" inputMode="numeric" pattern="[0-9\s]*" value={totalInput}
+                      onChange={(e) => {
+                        setTotalInput(formatAmount(e.target.value))
+                        setTotal(parseAmount(e.target.value))
+                      }}
+                      className="w-full bg-transparent text-white font-black text-lg outline-none" required 
+                    />
+                  </div>
+                  <div className="bg-green-600 p-4 rounded-2xl shadow-inner">
+                    <label className="text-[9px] font-black text-green-200 uppercase mb-1 block">
+                      Acompte ({getHajjCurrencySymbol(devise)})
+                    </label>
+                    <input 
+                      type="text" inputMode="numeric" pattern="[0-9\s]*" value={payeInput}
+                      onChange={(e) => {
+                        setPayeInput(formatAmount(e.target.value))
+                        setPaye(parseAmount(e.target.value))
+                      }}
+                      className="w-full bg-transparent text-white font-black text-lg outline-none" 
+                    />
+                  </div>
                 </div>
               </div>
 
@@ -1880,7 +1916,7 @@ export default function AjouterPelerin() {
 
               <div className="flex justify-between items-center px-5 py-4 bg-gray-100 rounded-2xl border border-gray-200/50 shadow-sm">
                  <span className="text-[10px] font-black uppercase text-gray-500 tracking-wider">Reste à payer :</span>
-                 <span className="font-black text-lg text-gray-900">{(total - paye).toLocaleString()} CFA</span>
+                 <span className="font-black text-lg text-gray-900 tabular-nums">{formatHajjMoney(total - paye, devise)}</span>
               </div>
 
               <button 

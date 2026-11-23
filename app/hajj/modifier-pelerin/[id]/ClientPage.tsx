@@ -8,6 +8,8 @@ import {
   ScanLine, Crop, Check, X, Move
 } from 'lucide-react'
 import { uploadPassportFile, getPassportPublicUrl } from '@/lib/hajjPassport'
+import { HAJJ_CURRENCIES, getHajjCurrencySymbol, normalizeHajjCurrency, type HajjCurrency } from '@/lib/hajjCurrency'
+import { usePowerSync } from '@powersync/react'
 import Link from 'next/link'
 import * as faceapi from '@vladmandic/face-api'
 
@@ -361,6 +363,7 @@ async function autoDetectAndCropNusuk(imageSrc: string): Promise<{
 export default function ModifierPelerin() {
   const id = useSearchParams().get('id')
   const router = useRouter()
+  const db = usePowerSync()
   
   // États de contrôle de l'application
   const [loading, setLoading] = useState(true)
@@ -403,6 +406,7 @@ export default function ModifierPelerin() {
     nom_package: '',
     prix_package: 0,
     total_paye: 0,
+    devise: 'FCFA' as HajjCurrency,
     vacciné: false,
     visite_medicale: false,
     formation_suivie: false,
@@ -425,7 +429,7 @@ export default function ModifierPelerin() {
   })
 
   const isGouvLocked = Boolean(formData.sur_plateforme_gouv)
-  const isFieldLockedForGouv = (field: string) => isGouvLocked && !['nom_package', 'prix_package', 'total_paye', 'notes'].includes(field)
+  const isFieldLockedForGouv = (field: string) => isGouvLocked && !['nom_package', 'prix_package', 'total_paye', 'devise', 'notes'].includes(field)
 
   // Un passeport est exploitable s'il vient d'être joint (image) ou s'il est déjà enregistré
   const canCaptureFromPassport = Boolean((file && file.type.startsWith('image/')) || (!file && formData.document_url))
@@ -663,6 +667,7 @@ export default function ModifierPelerin() {
             nom_package: data.nom_package || '',
             prix_package: prixPackage,
             total_paye: totalPaye,
+            devise: normalizeHajjCurrency(data.devise),
             vacciné: !!data.vacciné,
             visite_medicale: !!data.visite_medicale,
             formation_suivie: !!data.formation_suivie,
@@ -744,6 +749,7 @@ export default function ModifierPelerin() {
             nom_package: cleanValue(formData.nom_package),
             prix_package: formData.prix_package,
             total_paye: formData.total_paye,
+            devise: formData.devise,
             document_url: finalDocUrl,
             photo_url: finalPhotoUrl || null,
             notes: cleanValue(formData.notes),
@@ -763,6 +769,7 @@ export default function ModifierPelerin() {
             nom_package: cleanValue(formData.nom_package),
             prix_package: formData.prix_package,
             total_paye: formData.total_paye,
+            devise: formData.devise,
             vacciné: formData.vacciné,
             visite_medicale: formData.visite_medicale,
             formation_suivie: formData.formation_suivie,
@@ -791,6 +798,22 @@ export default function ModifierPelerin() {
         .eq('id', id)
 
       if (updateError) throw updateError
+
+      // Synchronise la devise sur tous les versements historiques de ce pèlerin
+      if (id) {
+        await supabase
+          .from('pelerin_payments')
+          .update({ devise: formData.devise })
+          .eq('pelerin_id', id)
+        await db.execute(
+          'UPDATE pelerins SET devise = ?, prix_package = ?, total_paye = ?, nom_package = ? WHERE id = ?',
+          [formData.devise, formData.prix_package, formData.total_paye, cleanValue(formData.nom_package), id]
+        ).catch(() => {})
+        await db.execute(
+          'UPDATE pelerin_payments SET devise = ? WHERE pelerin_id = ?',
+          [formData.devise, id]
+        ).catch(() => {})
+      }
 
       router.push(`/hajj/pelerin?id=${id}`)
       router.refresh()
@@ -1067,6 +1090,33 @@ export default function ModifierPelerin() {
             <h3 className="text-xs font-black text-emerald-600 uppercase tracking-widest flex items-center gap-2">
               <CreditCard size={16} /> 3. Tarification & Agence
             </h3>
+
+            <div>
+              <label className="block text-[10px] font-black text-gray-400 mb-1.5 uppercase tracking-wider">Devise du dossier pèlerin</label>
+              <div className="grid grid-cols-3 gap-2 max-w-md">
+                {HAJJ_CURRENCIES.map((cur) => {
+                  const active = formData.devise === cur.code
+                  return (
+                    <button
+                      key={cur.code}
+                      type="button"
+                      onClick={() => handleInputChange('devise', cur.code)}
+                      className={`py-2.5 px-3 rounded-xl border-2 font-black text-xs uppercase tracking-wider transition-all cursor-pointer active:scale-95 ${
+                        active
+                          ? cur.pillActiveClass
+                          : 'bg-gray-50 border-gray-100 text-gray-600 hover:border-gray-300'
+                      }`}
+                    >
+                      {cur.label}
+                    </button>
+                  )
+                })}
+              </div>
+              <p className="text-[10px] text-slate-400 font-medium mt-1.5">
+                Changer la devise bascule automatiquement tous les montants et versements de ce pèlerin dans la comptabilité correspondante.
+              </p>
+            </div>
+
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
               <div className="md:col-span-2 lg:col-span-2">
                 <label className="block text-[10px] font-black text-gray-400 mb-1.5 uppercase tracking-wider">Nom du Package / Offre</label>
@@ -1077,7 +1127,7 @@ export default function ModifierPelerin() {
               </div>
 
               <div>
-                <label className="block text-[10px] font-black text-gray-400 mb-1.5 uppercase tracking-wider">Prix Package (CFA)</label>
+                <label className="block text-[10px] font-black text-gray-400 mb-1.5 uppercase tracking-wider">Prix Package ({getHajjCurrencySymbol(formData.devise)})</label>
                 <input 
                   type="text"
                   inputMode="numeric"
@@ -1092,7 +1142,7 @@ export default function ModifierPelerin() {
               </div>
 
               <div>
-                <label className="block text-[10px] font-black text-gray-400 mb-1.5 uppercase tracking-wider">Total Payé / Acomptes (CFA)</label>
+                <label className="block text-[10px] font-black text-gray-400 mb-1.5 uppercase tracking-wider">Total Payé / Acomptes ({getHajjCurrencySymbol(formData.devise)})</label>
                 <input 
                   type="text"
                   inputMode="numeric"

@@ -3,6 +3,7 @@ import { useEffect, useLayoutEffect, useState, useRef, useMemo, useCallback } fr
 import { useQuery, usePowerSync } from '@powersync/react'
 import { requireSupabaseRows, supabase, getUser } from '@/lib/supabase'
 import { useYear } from '@/lib/YearContext'
+import { useWorkProfile } from '@/lib/ProfileContext'
 import { YearSelector } from '@/components/YearSelector'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
@@ -17,6 +18,19 @@ import ExcelJS from 'exceljs'
 import { saveAs } from 'file-saver'
 import JSZip from 'jszip'
 import { getPassportPublicUrl } from '@/lib/hajjPassport'
+import { HajjCurrencyTabs } from '@/components/HajjCurrencySelector'
+import {
+  HAJJ_CURRENCIES,
+  HAJJ_CURRENCY_MAP,
+  countByCurrency,
+  formatHajjMoney,
+  formatHajjMoneyPdf,
+  getHajjCurrencySymbol,
+  groupTotalsByCurrency,
+  normalizeHajjCurrency,
+  type HajjCurrency,
+  type HajjCurrencyFilter,
+} from '@/lib/hajjCurrency'
 
 interface Pelerin {
   id: string
@@ -34,6 +48,7 @@ interface Pelerin {
   agence_ou_personne_associee?: string
   total_paye: number
   prix_package: number
+  devise: HajjCurrency
   sur_plateforme_gouv: boolean
   sur_plateforme_nusuk: boolean
   hajj_session_id?: string | null
@@ -105,8 +120,8 @@ const exporterPDF = async (
   const dateGeneration = new Date().toLocaleDateString('fr-FR', { day: '2-digit', month: 'long', year: 'numeric' })
   doc.text(`RÉPERTOIRE OFFICIEL DES PÈLERINS  •  Édité le ${dateGeneration}  •  Total : ${pelerins.length} inscrits`, 14, 18)
 
-  const totalPackage = pelerins.reduce((s, p) => s + (p.prix_package || 0), 0)
-  const totalPaye = pelerins.reduce((s, p) => s + (p.total_paye || 0), 0)
+  const payeByCurrency = groupTotalsByCurrency(pelerins, p => p.total_paye || 0)
+  const activeCurrencies = HAJJ_CURRENCIES.filter(c => pelerins.some(p => p.devise === c.code))
   const nbComplets = pelerins.filter(p => getPaiementStatut(p) === 'complet').length
   const nbGouv = pelerins.filter(p => p.sur_plateforme_gouv).length
   const nbNusuk = pelerins.filter(p => p.sur_plateforme_nusuk).length
@@ -119,11 +134,14 @@ const exporterPDF = async (
   doc.setFontSize(8)
   doc.setTextColor(30, 41, 59)
   doc.text(`Inscrits : ${pelerins.length}`, 20, 40)
-  doc.text(`Soldés : ${nbComplets}`, 70, 40)
-  doc.text(`Plateforme Gouv : ${nbGouv}`, 115, 40)
-  doc.text(`Portail Nusuk : ${nbNusuk}`, 165, 40)
+  doc.text(`Soldés : ${nbComplets}`, 60, 40)
+  doc.text(`Gouv : ${nbGouv}`, 95, 40)
+  doc.text(`Nusuk : ${nbNusuk}`, 128, 40)
   if (showPrix) {
-    doc.text(`Encaissé : ${formatMoney(totalPaye)} F / ${formatMoney(totalPackage)} F`, 215, 40)
+    const resumeEncaisse = activeCurrencies.length > 0
+      ? activeCurrencies.map(c => formatHajjMoneyPdf(payeByCurrency[c.code], c.code)).join('  |  ')
+      : '0 FCFA'
+    doc.text(`Encaissé : ${resumeEncaisse}`, 160, 40)
   }
 
   const columns: any[] = [
@@ -137,9 +155,10 @@ const exporterPDF = async (
   ]
   if (showAgence) columns.push({ header: 'AGENCE / ASSOCIÉ', dataKey: 'agence' })
   if (showPrix) {
-    columns.push({ header: 'PACKAGE (F)', dataKey: 'package' })
-    columns.push({ header: 'PAYÉ (F)', dataKey: 'paye' })
-    columns.push({ header: 'SOLDE (F)', dataKey: 'reste' })
+    columns.push({ header: 'DEVISE', dataKey: 'devise' })
+    columns.push({ header: 'PACKAGE', dataKey: 'package' })
+    columns.push({ header: 'PAYÉ', dataKey: 'paye' })
+    columns.push({ header: 'SOLDE', dataKey: 'reste' })
   }
   columns.push({ header: 'STATUT', dataKey: 'statut' })
 
@@ -159,9 +178,10 @@ const exporterPDF = async (
     }
     if (showAgence) row.agence = p.agences?.nom_agence || p.agence_ou_personne_associee || '—'
     if (showPrix) {
-      row.package = formatMoney(p.prix_package)
-      row.paye = formatMoney(p.total_paye)
-      row.reste = formatMoney(Math.max(0, (p.prix_package || 0) - (p.total_paye || 0)))
+      row.devise = p.devise
+      row.package = formatHajjMoneyPdf(p.prix_package, p.devise)
+      row.paye = formatHajjMoneyPdf(p.total_paye, p.devise)
+      row.reste = formatHajjMoneyPdf(Math.max(0, (p.prix_package || 0) - (p.total_paye || 0)), p.devise)
     }
     return row
   })
@@ -220,6 +240,7 @@ const exporterPDF = async (
 
 export default function ListePelerins() {
   const { selectedYear } = useYear()
+  const { profile: workProfile } = useWorkProfile()
   const db = usePowerSync()
   const router = useRouter()
 
@@ -263,6 +284,7 @@ export default function ListePelerins() {
       ...p,
       total_paye: Number(p.total_paye || 0),
       prix_package: Number(p.prix_package || 0),
+      devise: normalizeHajjCurrency(p.devise),
       sur_plateforme_gouv: Boolean(p.sur_plateforme_gouv),
       sur_plateforme_nusuk: Boolean(p.sur_plateforme_nusuk),
       campagne: p.campagne ? Number(p.campagne) : undefined,
@@ -287,6 +309,7 @@ export default function ListePelerins() {
   const [activeFilterType, setActiveFilterType] = useState<FilterType>(null)
   const [selectedFilterValue, setSelectedFilterValue] = useState<string | null>(null)
   const [statutPaiementFilter, setStatutPaiementFilter] = useState<PaiementStatut>('all')
+  const [deviseFilter, setDeviseFilter] = useState<HajjCurrencyFilter>('ALL')
   const [plateformeFilter, setPlateformeFilter] = useState<'all' | 'gouv' | 'nusuk' | 'both' | 'neither'>('all')
   const [hotelFilter, setHotelFilter] = useState<string>('all')
   const [showFilterPanel, setShowFilterPanel] = useState(false)
@@ -323,6 +346,7 @@ export default function ListePelerins() {
         if (parsed.activeFilterType !== undefined) setActiveFilterType(parsed.activeFilterType)
         if (parsed.selectedFilterValue !== undefined) setSelectedFilterValue(parsed.selectedFilterValue)
         if (parsed.statutPaiementFilter !== undefined) setStatutPaiementFilter(parsed.statutPaiementFilter)
+        if (parsed.deviseFilter !== undefined) setDeviseFilter(parsed.deviseFilter)
         if (parsed.plateformeFilter !== undefined) setPlateformeFilter(parsed.plateformeFilter)
         if (parsed.hotelFilter !== undefined) setHotelFilter(parsed.hotelFilter)
         if (parsed.searchTerm !== undefined) setSearchTerm(parsed.searchTerm)
@@ -337,13 +361,14 @@ export default function ListePelerins() {
         activeFilterType,
         selectedFilterValue,
         statutPaiementFilter,
+        deviseFilter,
         plateformeFilter,
         hotelFilter,
         searchTerm,
         showFilterPanel,
       }))
     } catch { /* ignore */ }
-  }, [activeFilterType, selectedFilterValue, statutPaiementFilter, plateformeFilter, hotelFilter, searchTerm, showFilterPanel])
+  }, [activeFilterType, selectedFilterValue, statutPaiementFilter, deviseFilter, plateformeFilter, hotelFilter, searchTerm, showFilterPanel])
 
   const restoreScrollPosition = () => {
     const savedScroll = sessionStorage.getItem('liste_pelerins_scroll_y')
@@ -516,6 +541,10 @@ export default function ListePelerins() {
       { header: 'TÉLÉPHONE', key: 'phone', width: 20 },
       { header: 'DATE NAISSANCE', key: 'naissance', width: 20 },
       { header: 'AGENCE ENREGISTREMENT', key: 'agence', width: 30 },
+      { header: 'DEVISE', key: 'devise', width: 12 },
+      { header: 'PACKAGE', key: 'package', width: 18 },
+      { header: 'PAYÉ', key: 'paye', width: 18 },
+      { header: 'RESTE', key: 'reste', width: 18 },
       { header: 'PLATEFORME GOUV', key: 'gouv', width: 20 },
       { header: 'PORTAIL NUSUK', key: 'nusuk', width: 20 },
     ]
@@ -536,6 +565,10 @@ export default function ListePelerins() {
         phone: p.telephone_pelerin || 'N/A',
         naissance: p.date_naissance ? new Date(p.date_naissance).toLocaleDateString('fr-FR') : 'N/A',
         agence: p.agences?.nom_agence || 'N/A',
+        devise: p.devise,
+        package: formatHajjMoney(p.prix_package, p.devise),
+        paye: formatHajjMoney(p.total_paye, p.devise),
+        reste: formatHajjMoney(Math.max(0, (p.prix_package || 0) - (p.total_paye || 0)), p.devise),
         gouv: p.sur_plateforme_gouv ? '✅ OUI' : '❌ NON',
         nusuk: p.sur_plateforme_nusuk ? '✅ OUI' : '❌ NON',
       })
@@ -575,6 +608,7 @@ export default function ListePelerins() {
         (p.hotel_medine || '').toLowerCase().includes(q)
 
       if (!matchesSearch) return false
+      if (deviseFilter !== 'ALL' && p.devise !== deviseFilter) return false
       if (statutPaiementFilter !== 'all' && getPaiementStatut(p) !== statutPaiementFilter) return false
       if (plateformeFilter === 'gouv' && !p.sur_plateforme_gouv) return false
       if (plateformeFilter === 'nusuk' && !p.sur_plateforme_nusuk) return false
@@ -599,17 +633,26 @@ export default function ListePelerins() {
       }
       return true
     })
-  }, [pelerins, searchTerm, statutPaiementFilter, plateformeFilter, hotelFilter, selectedFilterValue, activeFilterType])
+  }, [pelerins, searchTerm, deviseFilter, statutPaiementFilter, plateformeFilter, hotelFilter, selectedFilterValue, activeFilterType])
 
-  const totalPackage = pelerinsFiltrés.reduce((s, p) => s + (p.prix_package || 0), 0)
-  const totalPaye = pelerinsFiltrés.reduce((s, p) => s + (p.total_paye || 0), 0)
+  const deviseCounts = useMemo(() => countByCurrency(pelerins), [pelerins])
+  const packageByCurrency = useMemo(() => groupTotalsByCurrency(pelerinsFiltrés, p => p.prix_package || 0), [pelerinsFiltrés])
+  const payeByCurrency = useMemo(() => groupTotalsByCurrency(pelerinsFiltrés, p => p.total_paye || 0), [pelerinsFiltrés])
+  const resteByCurrency = useMemo(() => groupTotalsByCurrency(pelerinsFiltrés, p => Math.max(0, (p.prix_package || 0) - (p.total_paye || 0))), [pelerinsFiltrés])
+  const activeCurrenciesInFiltered = useMemo(
+    () => HAJJ_CURRENCIES.filter(c => pelerinsFiltrés.some(p => p.devise === c.code)),
+    [pelerinsFiltrés]
+  )
+  const totalPackage = deviseFilter === 'ALL' ? 0 : packageByCurrency[deviseFilter]
+  const totalPaye = deviseFilter === 'ALL' ? 0 : payeByCurrency[deviseFilter]
   const nbComplets = pelerinsFiltrés.filter(p => getPaiementStatut(p) === 'complet').length
   const nbGouv = pelerinsFiltrés.filter(p => p.sur_plateforme_gouv).length
 
-  const hasActiveFilters = !!selectedFilterValue || statutPaiementFilter !== 'all' || plateformeFilter !== 'all' || hotelFilter !== 'all' || !!searchTerm
+  const hasActiveFilters = !!selectedFilterValue || deviseFilter !== 'ALL' || statutPaiementFilter !== 'all' || plateformeFilter !== 'all' || hotelFilter !== 'all' || !!searchTerm
 
   const activeFilterCount = [
     selectedFilterValue ? 1 : 0,
+    deviseFilter !== 'ALL' ? 1 : 0,
     statutPaiementFilter !== 'all' ? 1 : 0,
     plateformeFilter !== 'all' ? 1 : 0,
     hotelFilter !== 'all' ? 1 : 0,
@@ -658,6 +701,7 @@ export default function ListePelerins() {
   const clearAllFilters = () => {
     setActiveFilterType(null)
     setSelectedFilterValue(null)
+    setDeviseFilter('ALL')
     setStatutPaiementFilter('all')
     setPlateformeFilter('all')
     setHotelFilter('all')
@@ -712,6 +756,28 @@ export default function ListePelerins() {
     }
   }
 
+  const handleQuickChangeDevise = async (nextDevise: HajjCurrency) => {
+    if (!quickViewPelerin || quickViewPelerin.devise === nextDevise) return
+    setQuickViewUpdating(true)
+    try {
+      const { data, error } = await supabase
+        .from('pelerins')
+        .update({ devise: nextDevise })
+        .eq('id', quickViewPelerin.id)
+        .select('id')
+      requireSupabaseRows(data, error, 'mise à jour de la devise')
+      await supabase.from('pelerin_payments').update({ devise: nextDevise }).eq('pelerin_id', quickViewPelerin.id)
+      await db.execute('UPDATE pelerins SET devise = ? WHERE id = ?', [nextDevise, quickViewPelerin.id]).catch(() => {})
+      await db.execute('UPDATE pelerin_payments SET devise = ? WHERE pelerin_id = ?', [nextDevise, quickViewPelerin.id]).catch(() => {})
+      setQuickViewPelerin({ ...quickViewPelerin, devise: nextDevise })
+    } catch (err) {
+      console.error(err)
+      alert("Erreur lors du changement de devise.")
+    } finally {
+      setQuickViewUpdating(false)
+    }
+  }
+
   const handleQuickAddPayment = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!quickViewPelerin) return
@@ -726,9 +792,12 @@ export default function ListePelerins() {
         id: crypto.randomUUID(),
         pelerin_id: quickViewPelerin.id,
         amount,
+        devise: quickViewPelerin.devise,
         payment_date: new Date().toISOString().slice(0, 10),
         payment_mode: 'ESPECES',
         notes: 'Versement rapide',
+        recorded_by_name: workProfile?.name?.trim() || null,
+        recorded_by_role: workProfile?.profile_type || null,
         created_at: new Date().toISOString(),
       }
       const { error: paymentError } = await supabase.from('pelerin_payments').insert(payment)
@@ -741,9 +810,9 @@ export default function ListePelerins() {
       requireSupabaseRows(updatedRows, updateError, 'mise à jour du total payé')
 
       await db.execute(
-        `INSERT OR REPLACE INTO pelerin_payments (id, pelerin_id, amount, payment_date, payment_mode, notes, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
-        [payment.id, payment.pelerin_id, payment.amount, payment.payment_date, payment.payment_mode, payment.notes, payment.created_at]
+        `INSERT OR REPLACE INTO pelerin_payments (id, pelerin_id, amount, devise, payment_date, payment_mode, notes, recorded_by_name, recorded_by_role, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [payment.id, payment.pelerin_id, payment.amount, payment.devise, payment.payment_date, payment.payment_mode, payment.notes, payment.recorded_by_name, payment.recorded_by_role, payment.created_at]
       )
       await db.execute(`UPDATE pelerins SET total_paye = ? WHERE id = ?`, [nextTotal, quickViewPelerin.id])
       setQuickViewPelerin({ ...quickViewPelerin, total_paye: nextTotal })
@@ -874,25 +943,45 @@ export default function ListePelerins() {
 
                 {/* Situation financière */}
                 <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-2">
+                  <div className="flex items-center justify-between gap-2 pb-2 border-b border-slate-200/80">
+                    <span className="text-[10px] font-black uppercase text-slate-400">Devise du dossier</span>
+                    <div className="inline-flex items-center gap-1 bg-white p-0.5 rounded-lg border border-slate-200">
+                      {HAJJ_CURRENCIES.map((cur) => (
+                        <button
+                          key={cur.code}
+                          type="button"
+                          disabled={quickViewUpdating}
+                          onClick={() => handleQuickChangeDevise(cur.code)}
+                          className={`px-2 py-1 rounded-md text-[10px] font-black uppercase transition cursor-pointer disabled:opacity-50 ${
+                            quickViewPelerin.devise === cur.code
+                              ? cur.pillActiveClass
+                              : 'text-slate-500 hover:bg-slate-100'
+                          }`}
+                        >
+                          {cur.shortLabel}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
                   <div className="flex justify-between items-center text-slate-700 font-bold">
                     <span>Prix total :</span>
-                    <span className="font-mono text-slate-900">{formatMoney(quickViewPelerin.prix_package)} F</span>
+                    <span className="font-mono text-slate-900">{formatHajjMoney(quickViewPelerin.prix_package, quickViewPelerin.devise)}</span>
                   </div>
                   <div className="flex justify-between items-center text-slate-700 font-bold">
                     <span>Déjà payé :</span>
-                    <span className="font-mono text-emerald-700">{formatMoney(quickViewPelerin.total_paye)} F</span>
+                    <span className="font-mono text-emerald-700">{formatHajjMoney(quickViewPelerin.total_paye, quickViewPelerin.devise)}</span>
                   </div>
                   <div className="pt-2 border-t border-slate-200 flex justify-between items-center text-slate-900 font-black">
                     <span>Reste dû :</span>
                     <span className="font-mono text-amber-700">
-                      {formatMoney(Math.max(0, (quickViewPelerin.prix_package || 0) - (quickViewPelerin.total_paye || 0)))} CFA
+                      {formatHajjMoney(Math.max(0, (quickViewPelerin.prix_package || 0) - (quickViewPelerin.total_paye || 0)), quickViewPelerin.devise)}
                     </span>
                   </div>
 
                   <form onSubmit={handleQuickAddPayment} className="flex gap-2 pt-2">
                     <input 
                       type="text"
-                      placeholder="Ajouter acompte (F)"
+                      placeholder={`Ajouter acompte (${getHajjCurrencySymbol(quickViewPelerin.devise)})`}
                       value={quickPaymentMontant}
                       onChange={(e) => setQuickPaymentMontant(e.target.value.replace(/\D/g, '').replace(/\B(?=(\d{3})+(?!\d))/g, ' '))}
                       className="flex-1 bg-white border border-slate-300 rounded-lg px-3 py-1.5 text-xs text-slate-900 font-bold outline-none focus:border-blue-600"
@@ -1204,53 +1293,88 @@ export default function ListePelerins() {
           </div>
         </div>
 
+        {/* ── SÉLECTEUR DE DEVISE (SÉPARATION STRICTE) ── */}
+        <div className="mb-4">
+          <HajjCurrencyTabs
+            value={deviseFilter}
+            onChange={setDeviseFilter}
+            includeAll
+            counts={deviseCounts}
+            totalCount={pelerins.length}
+            size="sm"
+          />
+        </div>
+
         {/* ── CARTES STATISTIQUES EN HAUT ── */}
         {!loading && pelerinsFiltrés.length > 0 && (
           <div className="grid grid-cols-2 md:grid-cols-4 gap-2.5 sm:gap-3 mb-6 sm:mb-8">
-            {[
-              {
-                label: 'Total encaissé',
-                value: `${(totalPaye / 1000000).toFixed(1)}M F`,
-                sub: `sur ${(totalPackage / 1000000).toFixed(1)}M F`,
-                icon: <TrendingUp size={16} className="text-slate-700" />,
-                bar: totalPackage > 0 ? (totalPaye / totalPackage) * 100 : 0,
-              },
-              {
-                label: 'Reste à payer',
-                value: `${((totalPackage - totalPaye) / 1000000).toFixed(1)}M F`,
-                sub: `${pelerinsFiltrés.filter(p => getPaiementStatut(p) !== 'complet').length} pèlerins`,
-                icon: <AlertCircle size={16} className="text-slate-700" />,
-                bar: null,
-              },
-              {
-                label: 'Paiements complets',
-                value: `${nbComplets}`,
-                sub: `${totalPaye > 0 ? Math.round((nbComplets / pelerinsFiltrés.length) * 100) : 0}% du groupe`,
-                icon: <CheckCircle2 size={16} className="text-slate-700" />,
-                bar: pelerinsFiltrés.length > 0 ? (nbComplets / pelerinsFiltrés.length) * 100 : 0,
-              },
-              {
-                label: 'Plateforme Gouv',
-                value: `${nbGouv} / ${pelerinsFiltrés.length}`,
-                sub: `${pelerinsFiltrés.length > 0 ? Math.round((nbGouv / pelerinsFiltrés.length) * 100) : 0}% inscrits`,
-                icon: <Clock size={16} className="text-slate-700" />,
-                bar: pelerinsFiltrés.length > 0 ? (nbGouv / pelerinsFiltrés.length) * 100 : 0,
-              },
-            ].map((stat, i) => (
-              <div key={i} className="bg-white border border-slate-200 rounded-xl sm:rounded-2xl p-3.5 sm:p-4 shadow-xs">
-                <div className="flex items-center justify-between mb-1.5">
-                  <span className="p-1.5 rounded-lg bg-slate-100 border border-slate-200/80">{stat.icon}</span>
-                  <span className="font-black text-base sm:text-lg text-slate-900 tabular-nums">{stat.value}</span>
-                </div>
-                <p className="text-[10px] font-black uppercase text-slate-500 tracking-wider leading-tight">{stat.label}</p>
-                <p className="text-[10px] font-bold text-slate-400 mt-0.5">{stat.sub}</p>
-                {stat.bar !== null && (
-                  <div className="mt-2.5 w-full bg-slate-100 h-1.5 rounded-full overflow-hidden">
-                    <div className="h-full bg-blue-600 rounded-full" style={{ width: `${stat.bar}%` }} />
+            {(() => {
+              const singleCurrency = deviseFilter !== 'ALL' ? deviseFilter : (activeCurrenciesInFiltered.length === 1 ? activeCurrenciesInFiltered[0].code : null)
+              const encaisseMulti = activeCurrenciesInFiltered.map(c => formatHajjMoney(payeByCurrency[c.code], c.code, { compact: true }))
+              const resteMulti = activeCurrenciesInFiltered.map(c => formatHajjMoney(resteByCurrency[c.code], c.code, { compact: true }))
+
+              return [
+                {
+                  label: 'Total encaissé',
+                  value: singleCurrency
+                    ? formatHajjMoney(payeByCurrency[singleCurrency], singleCurrency, { compact: true })
+                    : (encaisseMulti[0] || '0 F'),
+                  extraLines: singleCurrency ? [] : encaisseMulti.slice(1),
+                  sub: singleCurrency
+                    ? `sur ${formatHajjMoney(packageByCurrency[singleCurrency], singleCurrency, { compact: true })}`
+                    : 'Séparé par devise',
+                  icon: <TrendingUp size={16} className="text-slate-700" />,
+                  bar: singleCurrency && packageByCurrency[singleCurrency] > 0
+                    ? (payeByCurrency[singleCurrency] / packageByCurrency[singleCurrency]) * 100
+                    : null,
+                },
+                {
+                  label: 'Reste à payer',
+                  value: singleCurrency
+                    ? formatHajjMoney(resteByCurrency[singleCurrency], singleCurrency, { compact: true })
+                    : (resteMulti[0] || '0 F'),
+                  extraLines: singleCurrency ? [] : resteMulti.slice(1),
+                  sub: `${pelerinsFiltrés.filter(p => getPaiementStatut(p) !== 'complet').length} pèlerins`,
+                  icon: <AlertCircle size={16} className="text-slate-700" />,
+                  bar: null,
+                },
+                {
+                  label: 'Paiements complets',
+                  value: `${nbComplets}`,
+                  extraLines: [],
+                  sub: `${pelerinsFiltrés.length > 0 ? Math.round((nbComplets / pelerinsFiltrés.length) * 100) : 0}% du groupe`,
+                  icon: <CheckCircle2 size={16} className="text-slate-700" />,
+                  bar: pelerinsFiltrés.length > 0 ? (nbComplets / pelerinsFiltrés.length) * 100 : 0,
+                },
+                {
+                  label: 'Plateforme Gouv',
+                  value: `${nbGouv} / ${pelerinsFiltrés.length}`,
+                  extraLines: [],
+                  sub: `${pelerinsFiltrés.length > 0 ? Math.round((nbGouv / pelerinsFiltrés.length) * 100) : 0}% inscrits`,
+                  icon: <Clock size={16} className="text-slate-700" />,
+                  bar: pelerinsFiltrés.length > 0 ? (nbGouv / pelerinsFiltrés.length) * 100 : 0,
+                },
+              ].map((stat, i) => (
+                <div key={i} className="bg-white border border-slate-200 rounded-xl sm:rounded-2xl p-3.5 sm:p-4 shadow-xs">
+                  <div className="flex items-start justify-between gap-2 mb-1.5">
+                    <span className="p-1.5 rounded-lg bg-slate-100 border border-slate-200/80 shrink-0">{stat.icon}</span>
+                    <div className="text-right min-w-0">
+                      <span className="block font-black text-sm sm:text-base text-slate-900 tabular-nums truncate">{stat.value}</span>
+                      {stat.extraLines.map((line, idx) => (
+                        <span key={idx} className="block font-black text-xs text-slate-600 tabular-nums truncate">{line}</span>
+                      ))}
+                    </div>
                   </div>
-                )}
-              </div>
-            ))}
+                  <p className="text-[10px] font-black uppercase text-slate-500 tracking-wider leading-tight">{stat.label}</p>
+                  <p className="text-[10px] font-bold text-slate-400 mt-0.5">{stat.sub}</p>
+                  {stat.bar !== null && (
+                    <div className="mt-2.5 w-full bg-slate-100 h-1.5 rounded-full overflow-hidden">
+                      <div className="h-full bg-blue-600 rounded-full" style={{ width: `${Math.min(100, stat.bar)}%` }} />
+                    </div>
+                  )}
+                </div>
+              ))
+            })()}
           </div>
         )}
 
@@ -1553,16 +1677,21 @@ export default function ListePelerins() {
 
                       <div className="px-4 pb-3">
                         <div className="bg-slate-50 rounded-xl p-3 border border-slate-200/80">
-                          <div className="flex justify-between text-[10px] font-black uppercase mb-1.5">
-                            <span className="text-slate-500">Paiement</span>
+                          <div className="flex justify-between items-center text-[10px] font-black uppercase mb-1.5">
+                            <span className="text-slate-500 flex items-center gap-1.5">
+                              Paiement
+                              <span className={`px-1.5 py-0.5 rounded border text-[9px] font-black ${HAJJ_CURRENCY_MAP[p.devise].badgeClass}`}>
+                                {p.devise}
+                              </span>
+                            </span>
                             <span className="font-black text-blue-600">{Math.round((p.total_paye / (p.prix_package || 1)) * 100) || 0}%</span>
                           </div>
                           <div className="w-full bg-slate-200 h-1.5 rounded-full overflow-hidden mb-1.5">
                             <div className="h-full bg-blue-600 rounded-full" style={{ width: `${Math.min((p.total_paye / (p.prix_package || 1)) * 100, 100)}%` }} />
                           </div>
-                          <div className="flex justify-between text-[10px] font-bold text-slate-600">
-                            <span>{formatMoney(p.total_paye)} F</span>
-                            <span className="text-slate-400">{formatMoney(p.prix_package)} F</span>
+                          <div className="flex justify-between text-[10px] font-bold text-slate-600 tabular-nums">
+                            <span>{formatHajjMoney(p.total_paye, p.devise, { compact: true })}</span>
+                            <span className="text-slate-400">{formatHajjMoney(p.prix_package, p.devise, { compact: true })}</span>
                           </div>
                         </div>
                       </div>
@@ -1688,16 +1817,19 @@ export default function ListePelerins() {
                             {role === 'admin' ? (
                               <span className="font-bold text-slate-900 text-sm">{p.agences?.nom_agence}</span>
                             ) : (
-                              <div className="w-32">
-                                <div className="flex justify-between text-[10px] font-black uppercase mb-1">
+                              <div className="w-36">
+                                <div className="flex justify-between items-center text-[10px] font-black uppercase mb-1">
                                   <span className="font-black text-blue-600">{Math.round((p.total_paye / (p.prix_package || 1)) * 100) || 0}%</span>
+                                  <span className={`px-1.5 py-0.5 rounded border text-[9px] font-black ${HAJJ_CURRENCY_MAP[p.devise].badgeClass}`}>
+                                    {p.devise}
+                                  </span>
                                 </div>
                                 <div className="w-full bg-slate-100 h-1.5 rounded-full overflow-hidden mb-1">
                                   <div className="h-full bg-blue-600 rounded-full" style={{ width: `${Math.min((p.total_paye / (p.prix_package || 1)) * 100, 100)}%` }} />
                                 </div>
-                                <div className="flex justify-between text-xs font-bold text-slate-700">
-                                  <span>{formatMoney(p.total_paye)} F</span>
-                                  <span className="text-slate-400">/ {formatMoney(p.prix_package)} F</span>
+                                <div className="flex justify-between text-xs font-bold text-slate-700 tabular-nums">
+                                  <span>{formatHajjMoney(p.total_paye, p.devise, { compact: true })}</span>
+                                  <span className="text-slate-400">/ {formatHajjMoney(p.prix_package, p.devise, { compact: true })}</span>
                                 </div>
                               </div>
                             )}

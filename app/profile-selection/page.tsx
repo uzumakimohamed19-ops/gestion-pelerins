@@ -7,16 +7,19 @@ import {
   Delete,
   Fingerprint,
   KeyRound,
-  Keyboard,
   ArrowRight,
   Lock,
   X,
   Trash2,
   ShieldAlert,
-  Users,
+  ShieldCheck,
+  Landmark,
+  Briefcase,
+  Loader2,
+  Star,
 } from 'lucide-react'
-import { useWorkProfile, type WorkProfileType } from '@/lib/ProfileContext'
-import { usePowerSync } from '@powersync/react'
+import { useWorkProfile, type WorkProfile, type WorkProfileType } from '@/lib/ProfileContext'
+import { usePowerSync, useQuery } from '@powersync/react'
 import { requireSupabaseRows, supabase, getUser } from '@/lib/supabase'
 
 export type ExtendedProfileType = WorkProfileType | 'intermediaire'
@@ -38,8 +41,17 @@ export default function ProfileSelectionPage() {
   // 1. Initialisation verrouillée sur l'animation orbitale
   const [isInitializing, setIsInitializing] = useState(true)
   const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null)
-  const [isSwitchingProfile, setIsSwitchingProfile] = useState(false)
+  const [pinScreenOpen, setPinScreenOpen] = useState(false)
   const [currentUserId, setCurrentUserId] = useState<string | null>(null)
+  const [nomAgence, setNomAgence] = useState<string>('')
+
+  // États du carrousel tactile mobile
+  const [activeIndex, setActiveIndex] = useState<number>(0)
+  const [dragOffset, setDragOffset] = useState<number>(0)
+  const [isDragging, setIsDragging] = useState<boolean>(false)
+  const touchStartXRef = useRef<number | null>(null)
+  const touchStartYRef = useRef<number | null>(null)
+  const hasSwipedRef = useRef<boolean>(false)
 
   // Modales d'action
   const [modalCreateOpen, setModalCreateOpen] = useState(false)
@@ -65,9 +77,7 @@ export default function ProfileSelectionPage() {
 
   // Saisie du PIN (déverrouillage principal)
   const [pin, setPin] = useState('')
-  const [showKeypadOnDesktop, setShowKeypadOnDesktop] = useState(false)
-  const desktopInputRef = useRef<HTMLInputElement>(null)
-  
+
   const pinInputProps = {
     autoComplete: 'one-time-code',
     autoCorrect: 'off',
@@ -101,6 +111,35 @@ export default function ProfileSelectionPage() {
   const [success, setSuccess] = useState<string | null>(null)
   const [isPending, startTransition] = useTransition()
 
+  // Nom d'agence via PowerSync SQLite (avec cache local)
+  const { data: agenceData } = useQuery<{ nom_agence: string }>(
+    `SELECT a.nom_agence
+     FROM profiles p
+     JOIN agences a ON p.agence_id = a.id
+     WHERE p.id = ?
+     LIMIT 1`,
+    [currentUserId ?? '']
+  )
+
+  useEffect(() => {
+    if (!currentUserId) return
+    try {
+      const cached = localStorage.getItem(`cached_nom_agence_${currentUserId}`)
+      if (cached) setNomAgence(cached)
+    } catch {}
+  }, [currentUserId])
+
+  useEffect(() => {
+    if (!currentUserId || !agenceData || agenceData.length === 0) return
+    const agenceLocale = agenceData[0]?.nom_agence
+    if (agenceLocale) {
+      setNomAgence(agenceLocale)
+      try {
+        localStorage.setItem(`cached_nom_agence_${currentUserId}`, agenceLocale)
+      } catch {}
+    }
+  }, [agenceData, currentUserId])
+
   // 2. Vérification locale + secours Supabase direct
   useEffect(() => {
     let isMounted = true
@@ -133,9 +172,10 @@ export default function ProfileSelectionPage() {
 
         if (localRows && localRows.length > 0) {
           if (isMounted) {
-            const validSavedId = savedLastProfileId && localRows.some((p) => p.id === savedLastProfileId) 
-              ? savedLastProfileId 
-              : localRows[0].id
+            const validSavedId =
+              savedLastProfileId && localRows.some((p) => p.id === savedLastProfileId)
+                ? savedLastProfileId
+                : localRows[0].id
 
             setSelectedProfileId(validSavedId)
             setModalCreateOpen(false)
@@ -174,9 +214,10 @@ export default function ProfileSelectionPage() {
           }
 
           if (isMounted) {
-            const validSavedId = savedLastProfileId && remoteProfiles.some((p) => p.id === savedLastProfileId) 
-              ? savedLastProfileId 
-              : remoteProfiles[0].id
+            const validSavedId =
+              savedLastProfileId && remoteProfiles.some((p) => p.id === savedLastProfileId)
+                ? savedLastProfileId
+                : remoteProfiles[0].id
 
             setSelectedProfileId(validSavedId)
             setModalCreateOpen(false)
@@ -203,23 +244,39 @@ export default function ProfileSelectionPage() {
     }
   }, [db, profilesLoading, router])
 
-  // Synchronisation avec PowerSync & sélection automatique du profil mémorisé
+  // Synchronisation avec PowerSync & positionnement sur le profil mémorisé
   useEffect(() => {
     if (profiles.length > 0) {
+      let targetId = selectedProfileId
       if (currentUserId) {
         const savedId = localStorage.getItem(`last_selected_profile_id_${currentUserId}`)
         if (savedId && profiles.some((p) => p.id === savedId) && !selectedProfileId) {
+          targetId = savedId
           setSelectedProfileId(savedId)
         } else if (!selectedProfileId || !profiles.some((p) => p.id === selectedProfileId)) {
+          targetId = profiles[0].id
           setSelectedProfileId(profiles[0].id)
         }
       } else if (!selectedProfileId || !profiles.some((p) => p.id === selectedProfileId)) {
+        targetId = profiles[0].id
         setSelectedProfileId(profiles[0].id)
+      }
+
+      if (targetId) {
+        const idx = profiles.findIndex((p) => p.id === targetId)
+        if (idx >= 0) setActiveIndex(idx)
       }
       setModalCreateOpen(false)
       setIsInitializing(false)
     }
   }, [profiles, selectedProfileId, currentUserId])
+
+  // Maintien d'activeIndex dans les bornes si un profil est supprimé
+  useEffect(() => {
+    if (profiles.length > 0 && activeIndex >= profiles.length) {
+      setActiveIndex(profiles.length - 1)
+    }
+  }, [profiles.length, activeIndex])
 
   // Direction Principale
   const directionProfiles = useMemo(() => {
@@ -243,13 +300,6 @@ export default function ProfileSelectionPage() {
       } catch {}
     }
   }, [directionProfiles, mainDirectionId])
-
-  // Focus clavier PC
-  useEffect(() => {
-    if (!isInitializing && !modalCreateOpen && !modalPinOpen && !modalAdminPinOpen) {
-      desktopInputRef.current?.focus()
-    }
-  }, [isInitializing, modalCreateOpen, modalPinOpen, modalAdminPinOpen, selectedProfileId])
 
   const selectedCandidate = profiles.find((p) => p.id === selectedProfileId) || profiles[0]
 
@@ -278,10 +328,67 @@ export default function ProfileSelectionPage() {
     }
   }, [isBiometricAvailable, selectedCandidate])
 
+  // Style visuel inspiré du modèle selon le rôle
+  const getProfileVisuals = (profileType: string) => {
+    if (profileType === 'direction') {
+      return {
+        icon: <ShieldCheck className="w-10 h-10 md:w-11 md:h-11 text-indigo-600" strokeWidth={1.75} />,
+        smallIcon: <ShieldCheck className="w-5 h-5 text-indigo-600" strokeWidth={2} />,
+        ringColor: 'border-slate-200 group-hover:border-indigo-400',
+        iconBg: 'bg-indigo-50 text-indigo-600',
+        dotActive: 'bg-indigo-600',
+        accentText: 'text-indigo-600',
+      }
+    }
+    if (profileType === 'intermediaire') {
+      return {
+        icon: <Landmark className="w-10 h-10 md:w-11 md:h-11 text-emerald-600" strokeWidth={1.75} />,
+        smallIcon: <Landmark className="w-5 h-5 text-emerald-600" strokeWidth={2} />,
+        ringColor: 'border-slate-200 group-hover:border-emerald-400',
+        iconBg: 'bg-emerald-50 text-emerald-600',
+        dotActive: 'bg-emerald-600',
+        accentText: 'text-emerald-600',
+      }
+    }
+    return {
+      icon: <Briefcase className="w-10 h-10 md:w-11 md:h-11 text-blue-600" strokeWidth={1.75} />,
+      smallIcon: <Briefcase className="w-5 h-5 text-blue-600" strokeWidth={2} />,
+      ringColor: 'border-slate-200 group-hover:border-blue-400',
+      iconBg: 'bg-blue-50 text-blue-600',
+      dotActive: 'bg-blue-600',
+      accentText: 'text-blue-600',
+    }
+  }
+
+  const getProfileBadgeLabel = (p: { id: string; profile_type: string }) => {
+    if (p.profile_type === 'direction') {
+      return p.id === mainDirectionId ? 'Direction Principale' : 'Direction'
+    }
+    if (p.profile_type === 'intermediaire') {
+      return 'Intermédiaire'
+    }
+    return 'Agent'
+  }
+
+  // Sélection d'un profil -> ouverture de l'écran PIN immersif
+  const handleSelectProfileCard = (profile: WorkProfile) => {
+    if (hasSwipedRef.current) return
+    setSelectedProfileId(profile.id)
+    setPin('')
+    setError(null)
+    setSuccess(null)
+    if (currentUserId) {
+      try {
+        localStorage.setItem(`last_selected_profile_id_${currentUserId}`, profile.id)
+      } catch {}
+    }
+    setPinScreenOpen(true)
+  }
+
   // Connexion au profil sélectionné
   const handleOpenProfile = (codeToTest?: string) => {
     const activePin = codeToTest || pin
-    if (!selectedCandidate || activePin.length < 4) return
+    if (!selectedCandidate || activePin.length < 4 || isPending) return
 
     setError(null)
     startTransition(async () => {
@@ -317,12 +424,12 @@ export default function ProfileSelectionPage() {
       } catch (err: unknown) {
         setPin('')
         setError(err instanceof Error ? err.message : 'Code PIN incorrect.')
-        desktopInputRef.current?.focus()
       }
     })
   }
 
   const handleDigitPress = (digit: string) => {
+    if (isPending) return
     if (pin.length < 6) {
       const nextPin = pin + digit
       setPin(nextPin)
@@ -334,16 +441,72 @@ export default function ProfileSelectionPage() {
   }
 
   const handleDeleteDigit = () => {
+    if (isPending) return
     setPin((prev) => prev.slice(0, -1))
     setError(null)
   }
 
-  // Écoute clavier PC
+  // Gestion tactile du swipe mobile
+  const handleTouchStart = (e: React.TouchEvent) => {
+    if (e.touches.length !== 1) return
+    touchStartXRef.current = e.touches[0].clientX
+    touchStartYRef.current = e.touches[0].clientY
+    hasSwipedRef.current = false
+    setIsDragging(true)
+  }
+
+  const handleTouchMove = (e: React.TouchEvent) => {
+    if (touchStartXRef.current === null || touchStartYRef.current === null) return
+    const currentX = e.touches[0].clientX
+    const currentY = e.touches[0].clientY
+    const diffX = currentX - touchStartXRef.current
+    const diffY = currentY - touchStartYRef.current
+
+    if (Math.abs(diffX) > Math.abs(diffY) && Math.abs(diffX) > 6) {
+      hasSwipedRef.current = true
+      const isAtStart = activeIndex === 0 && diffX > 0
+      const isAtEnd = activeIndex === profiles.length - 1 && diffX < 0
+      setDragOffset(isAtStart || isAtEnd ? diffX * 0.28 : diffX)
+    }
+  }
+
+  const handleTouchEnd = () => {
+    if (touchStartXRef.current === null) return
+    const threshold = 55
+
+    if (dragOffset < -threshold && activeIndex < profiles.length - 1) {
+      setActiveIndex((prev) => prev + 1)
+    } else if (dragOffset > threshold && activeIndex > 0) {
+      setActiveIndex((prev) => prev - 1)
+    }
+
+    setDragOffset(0)
+    setIsDragging(false)
+    touchStartXRef.current = null
+    touchStartYRef.current = null
+
+    setTimeout(() => {
+      hasSwipedRef.current = false
+    }, 60)
+  }
+
+  // Écoute clavier physique PC (navigation flèches + saisie PIN + Échap)
   useEffect(() => {
     if (isInitializing || modalCreateOpen || modalPinOpen || modalAdminPinOpen) return
 
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.target instanceof HTMLInputElement && e.target !== desktopInputRef.current) return
+      if (e.target instanceof HTMLInputElement && !e.target.readOnly) return
+
+      if (!pinScreenOpen) {
+        if (e.key === 'ArrowRight') {
+          setActiveIndex((prev) => Math.min(Math.max(0, profiles.length - 1), prev + 1))
+        } else if (e.key === 'ArrowLeft') {
+          setActiveIndex((prev) => Math.max(0, prev - 1))
+        }
+        return
+      }
+
+      if (isPending) return
 
       if (e.key >= '0' && e.key <= '9') {
         e.preventDefault()
@@ -356,12 +519,17 @@ export default function ProfileSelectionPage() {
         if (pin.length >= 4) {
           handleOpenProfile()
         }
+      } else if (e.key === 'Escape') {
+        e.preventDefault()
+        setPinScreenOpen(false)
+        setPin('')
+        setError(null)
       }
     }
 
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [isInitializing, modalCreateOpen, modalPinOpen, modalAdminPinOpen, pin, selectedCandidate])
+  }, [isInitializing, modalCreateOpen, modalPinOpen, modalAdminPinOpen, pinScreenOpen, pin, selectedCandidate, isPending, profiles.length])
 
   const handleBiometricUnlock = async () => {
     if (!selectedCandidate) return
@@ -497,6 +665,7 @@ export default function ProfileSelectionPage() {
       if (selectedProfileId === profileId) {
         const remaining = profiles.filter((p) => p.id !== profileId)
         setSelectedProfileId(remaining[0]?.id || null)
+        setPinScreenOpen(false)
       }
 
       setSuccess(`Profil "${profileName}" supprimé avec succès.`)
@@ -570,19 +739,9 @@ export default function ProfileSelectionPage() {
     })
   }
 
-  const getProfileBadgeLabel = (p: { id: string; profile_type: string }) => {
-    if (p.profile_type === 'direction') {
-      return p.id === mainDirectionId ? 'Direction Principale' : 'Direction'
-    }
-    if (p.profile_type === 'intermediaire') {
-      return 'Intermédiaire'
-    }
-    return 'Agent'
-  }
-
   if (isInitializing) {
     return (
-      <main className="fixed inset-0 z-50 bg-[#F4F6F8] flex flex-col items-center justify-center p-6 select-none">
+      <main className="fixed inset-0 z-50 bg-[#F8FAFC] flex flex-col items-center justify-center p-6 select-none">
         <div className="relative flex items-center justify-center">
           <div className="absolute w-44 h-44 sm:w-56 sm:h-56 rounded-full bg-blue-500/15 blur-2xl animate-pulse" />
           <div className="relative w-36 h-36 sm:w-44 sm:h-44 rounded-full border-2 border-dashed border-blue-200 animate-[spin_8s_linear_infinite] flex items-center justify-center">
@@ -604,502 +763,458 @@ export default function ProfileSelectionPage() {
     )
   }
 
+  const activeMobileProfile = profiles[activeIndex]
+  const activeMobileVisuals = activeMobileProfile
+    ? getProfileVisuals(activeMobileProfile.profile_type)
+    : null
+  const desktopGridClass =
+    profiles.length <= 1
+      ? 'md:grid-cols-1 max-w-sm'
+      : profiles.length === 3
+        ? 'md:grid-cols-3 max-w-4xl'
+        : 'md:grid-cols-2 max-w-2xl'
+
   return (
-    <main className="fixed inset-0 z-50 overflow-y-auto bg-[#F4F6F8] text-slate-900 flex items-center justify-center p-4 sm:p-6 lg:p-8 select-none">
-      
-      {/* --- A. VERSION MOBILE --- */}
-      <div className="sm:hidden w-full h-full flex flex-col justify-between py-4 px-2">
-        <div>
-          {/* Si l'utilisateur clique sur changer de profil, on affiche la liste, sinon on reste focus sur son profil */}
-          {isSwitchingProfile ? (
-            <div className="animate-in fade-in duration-200">
-              <div className="flex items-center justify-between mb-3 px-1">
-                <span className="text-xs font-black uppercase tracking-wider text-slate-500">
-                  Choisir un profil
-                </span>
-                <button
-                  type="button"
-                  onClick={() => setIsSwitchingProfile(false)}
-                  className="text-xs font-bold text-blue-600 underline"
+    <div
+      id="role-selection-page"
+      className="fixed inset-0 z-50 w-full min-h-dvh bg-[#F8FAFC] flex flex-col justify-between overflow-y-auto overflow-x-hidden select-none font-sans antialiased"
+    >
+      {/* 1. EN-TÊTE : NOM DE L'AGENCE + MESSAGE DE BIENVENUE */}
+      <header className="w-full max-w-4xl mx-auto px-6 pt-10 md:pt-14 text-center shrink-0">
+        <div className="space-y-1.5">
+          <h1 className="text-2xl sm:text-3xl md:text-4xl font-black text-slate-900 tracking-tight uppercase">
+            {nomAgence || 'Agence Pro'}
+          </h1>
+          <p className="text-xs sm:text-sm font-medium text-slate-500">
+            Bienvenue, sélectionnez votre profil pour accéder à votre espace.
+          </p>
+        </div>
+
+        {/* Feedback global (création / suppression / modification PIN) */}
+        {(success || (error && !pinScreenOpen && !modalAdminPinOpen && !modalCreateOpen && !modalPinOpen)) && (
+          <div className="mt-4 flex justify-center">
+            {success && (
+              <span className="inline-flex items-center px-3.5 py-1.5 rounded-full bg-emerald-50 border border-emerald-200 text-xs font-bold text-emerald-700 animate-in fade-in duration-150">
+                {success}
+              </span>
+            )}
+            {error && !pinScreenOpen && !modalAdminPinOpen && !modalCreateOpen && !modalPinOpen && (
+              <span className="inline-flex items-center px-3.5 py-1.5 rounded-full bg-rose-50 border border-rose-200 text-xs font-bold text-rose-600 animate-in fade-in duration-150">
+                {error}
+              </span>
+            )}
+          </div>
+        )}
+      </header>
+
+      {/* 2. ZONE DES PROFILS */}
+      <main className="w-full flex-1 flex flex-col items-center justify-center py-4">
+        {profiles.length === 0 ? (
+          <div className="text-center px-6 py-10 space-y-4">
+            <p className="text-sm font-bold text-slate-500">
+              Aucun profil configuré pour cet espace.
+            </p>
+            <button
+              type="button"
+              onClick={() => requestCreateProfile('direction')}
+              className="inline-flex items-center gap-2 px-6 py-3 rounded-full bg-slate-900 hover:bg-slate-800 text-white text-xs font-black uppercase tracking-wider shadow-sm transition cursor-pointer"
+            >
+              <Plus size={15} />
+              <span>Créer le profil Direction</span>
+            </button>
+          </div>
+        ) : (
+          <>
+            {/* === VERSION MOBILE : UN SEUL GRAND CERCLE + SWIPE FLUIDE === */}
+            <div
+              className="md:hidden w-full flex flex-col items-center justify-center touch-pan-y"
+              onTouchStart={handleTouchStart}
+              onTouchMove={handleTouchMove}
+              onTouchEnd={handleTouchEnd}
+            >
+              <div className="w-full overflow-hidden py-10">
+                <div
+                  className="flex w-full will-change-transform"
+                  style={{
+                    transform: `translate3d(calc(-${activeIndex * 100}% + ${dragOffset}px), 0, 0)`,
+                    transition: isDragging
+                      ? 'none'
+                      : 'transform 400ms cubic-bezier(0.22, 1, 0.36, 1)',
+                  }}
                 >
-                  Fermer
-                </button>
-              </div>
+                  {profiles.map((p, idx) => {
+                    const visuals = getProfileVisuals(p.profile_type)
+                    const isCurrent = idx === activeIndex
 
-              <div className="flex items-center gap-2 overflow-x-auto pb-2 pt-1 no-scrollbar -mx-2 px-2">
-                {profiles.map((p) => {
-                  const isSelected = (selectedCandidate?.id || selectedProfileId) === p.id
-                  const isMain = p.profile_type === 'direction' && p.id === mainDirectionId
-
-                  return (
-                    <button
-                      key={p.id}
-                      type="button"
-                      onClick={() => {
-                        setSelectedProfileId(p.id)
-                        setPin('')
-                        setError(null)
-                        setIsSwitchingProfile(false)
-                        if (currentUserId) {
-                          localStorage.setItem(`last_selected_profile_id_${currentUserId}`, p.id)
-                        }
-                      }}
-                      className={`px-3.5 py-2 rounded-2xl text-xs font-bold tracking-tight transition-all shrink-0 flex items-center gap-2 ${
-                        isSelected
-                          ? 'bg-slate-900 text-white shadow-sm ring-2 ring-slate-900/10'
-                          : 'bg-white text-slate-700 border border-slate-200'
-                      }`}
-                    >
-                      <span className="truncate max-w-[110px]">{p.name}</span>
-                      <span
-                        className={`text-[9px] font-black uppercase px-1.5 py-0.5 rounded-md ${
-                          isSelected
-                            ? 'bg-white/20 text-white'
-                            : isMain
-                            ? 'bg-amber-100 text-amber-800'
-                            : p.profile_type === 'direction'
-                            ? 'bg-amber-50 text-amber-700'
-                            : p.profile_type === 'intermediaire'
-                            ? 'bg-sky-50 text-sky-700'
-                            : 'bg-slate-100 text-slate-600'
-                        }`}
+                    return (
+                      <div
+                        key={p.id}
+                        className="w-full shrink-0 flex flex-col items-center justify-center px-6"
                       >
-                        {isMain ? 'DIR. P' : p.profile_type === 'direction' ? 'DIR' : p.profile_type === 'intermediaire' ? 'INT' : 'AGT'}
-                      </span>
-                    </button>
-                  )
-                })}
+                        <button
+                          type="button"
+                          onClick={() => handleSelectProfileCard(p)}
+                          className={`w-[260px] h-[260px] sm:w-[280px] sm:h-[280px] rounded-full bg-white border border-slate-200/90 shadow-[0_6px_20px_rgba(15,23,42,0.05)] flex flex-col items-center justify-center p-7 text-center relative transition-all duration-300 active:scale-95 cursor-pointer ${
+                            isCurrent ? 'scale-100 opacity-100' : 'scale-92 opacity-50'
+                          }`}
+                        >
+                          {/* Anneau fin interne */}
+                          <div className="absolute inset-3 rounded-full border border-slate-100 pointer-events-none" />
 
-                <div className="flex items-center gap-1.5 pl-1 shrink-0">
-                  {directionCount < 2 && (
-                    <button
-                      type="button"
-                      onClick={() => requestCreateProfile('direction')}
-                      className="px-2.5 py-2 rounded-2xl bg-white border border-slate-200 text-slate-700 text-xs font-bold active:scale-95 transition"
-                    >
-                      + Dir
-                    </button>
-                  )}
-                  <button
-                    type="button"
-                    onClick={() => requestCreateProfile('intermediaire')}
-                    className="px-2.5 py-2 rounded-2xl bg-white border border-slate-200 text-slate-700 text-xs font-bold active:scale-95 transition"
-                  >
-                    + Inter
-                  </button>
-                  {agentCount < 2 && (
-                    <button
-                      type="button"
-                      onClick={() => requestCreateProfile('agent')}
-                      className="w-8 h-8 rounded-2xl bg-white border border-slate-200 text-slate-700 flex items-center justify-center active:scale-95 transition"
-                    >
-                      <Plus size={14} />
-                    </button>
-                  )}
+                          {/* Cadenas discret en haut du cercle */}
+                          <div className="absolute top-6 w-7 h-7 rounded-full bg-slate-50 border border-slate-200/80 flex items-center justify-center text-slate-400">
+                            <Lock className="w-3.5 h-3.5" />
+                          </div>
+
+                          {/* Icône du rôle */}
+                          <div
+                            className={`w-18 h-18 rounded-full ${visuals.iconBg} flex items-center justify-center mb-3.5`}
+                          >
+                            {visuals.icon}
+                          </div>
+
+                          {/* Nom du profil */}
+                          <h2 className="text-lg font-black text-slate-900 tracking-tight max-w-[190px] truncate">
+                            {p.name}
+                          </h2>
+
+                          {/* Sous-titre rôle */}
+                          <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400 mt-0.5">
+                            {getProfileBadgeLabel(p)}
+                          </p>
+
+                          {/* Flèche d'entrée */}
+                          <div
+                            className={`mt-3 w-8 h-8 rounded-full bg-slate-50 flex items-center justify-center ${visuals.accentText}`}
+                          >
+                            <ArrowRight className="w-4 h-4" />
+                          </div>
+                        </button>
+                      </div>
+                    )
+                  })}
                 </div>
               </div>
-            </div>
-          ) : (
-            <div className="flex justify-end px-1">
-              <button
-                type="button"
-                onClick={() => setIsSwitchingProfile(true)}
-                className="inline-flex items-center gap-1.5 text-xs font-bold text-slate-600 bg-white border border-slate-200 px-3 py-1.5 rounded-full active:scale-95 transition shadow-xs"
-              >
-                <Users size={13} />
-                <span>Changer d'utilisateur</span>
-              </button>
-            </div>
-          )}
 
-          <div className="text-center mt-6">
-            <h1 className="text-2xl font-black tracking-tight text-slate-900">
-              {selectedCandidate?.name ?? 'Sélectionnez un profil'}
-            </h1>
-            <p className="text-[11px] text-slate-500 mt-1 uppercase tracking-wider font-bold">
-              {selectedCandidate ? getProfileBadgeLabel(selectedCandidate) : ''}
-            </p>
-
-            {/* Indicateurs de saisie */}
-            <div className="flex justify-center items-center gap-3.5 my-6">
-              {[0, 1, 2, 3].map((index) => (
-                <div
-                  key={index}
-                  className={`w-3.5 h-3.5 rounded-full transition-all duration-150 ${
-                    pin.length > index
-                      ? 'bg-blue-600 scale-125 shadow-sm shadow-blue-600/40'
-                      : 'bg-slate-200'
-                  }`}
-                />
-              ))}
-              {pin.length > 4 && (
-                <div className="w-3.5 h-3.5 rounded-full bg-blue-600 scale-125 shadow-sm shadow-blue-600/40 animate-pulse" />
+              {/* Indicateurs de pagination bien séparés du cercle */}
+              {profiles.length > 1 && (
+                <div className="flex items-center justify-center gap-2.5 pt-1 pb-2">
+                  {profiles.map((p, idx) => {
+                    const isSelected = idx === activeIndex
+                    return (
+                      <button
+                        key={p.id}
+                        type="button"
+                        onClick={() => setActiveIndex(idx)}
+                        aria-label={p.name}
+                        className={`h-2 rounded-full transition-all duration-300 cursor-pointer ${
+                          isSelected
+                            ? `w-7 ${activeMobileVisuals?.dotActive || 'bg-slate-900'}`
+                            : 'w-2 bg-slate-300'
+                        }`}
+                      />
+                    )
+                  })}
+                </div>
               )}
             </div>
 
-            {error && (
-              <p className="text-xs text-rose-600 font-bold animate-in fade-in duration-150">
-                {error}
-              </p>
-            )}
-            {success && (
-              <p className="text-xs text-emerald-600 font-bold animate-in fade-in duration-150">
-                {success}
-              </p>
-            )}
-          </div>
+            {/* === VERSION PC : GRILLE DE GRANDS CERCLES === */}
+            <div
+              className={`hidden md:grid ${desktopGridClass} gap-10 lg:gap-14 mx-auto place-items-center px-6 py-4`}
+            >
+              {profiles.map((p) => {
+                const visuals = getProfileVisuals(p.profile_type)
+
+                return (
+                  <button
+                    key={p.id}
+                    type="button"
+                    onClick={() => handleSelectProfileCard(p)}
+                    className={`w-64 h-64 lg:w-72 lg:h-72 rounded-full bg-white border ${visuals.ringColor} shadow-[0_4px_18px_rgba(15,23,42,0.04)] hover:shadow-[0_10px_28px_rgba(15,23,42,0.08)] hover:-translate-y-1 active:scale-[0.98] transition-all duration-200 flex flex-col items-center justify-center p-8 text-center relative group cursor-pointer`}
+                  >
+                    {/* Anneau fin interne */}
+                    <div className="absolute inset-3.5 rounded-full border border-slate-100 group-hover:border-slate-200/70 transition-colors pointer-events-none" />
+
+                    {/* Indicateur PIN */}
+                    <div className="absolute top-6 w-7 h-7 rounded-full bg-slate-50 border border-slate-200/80 flex items-center justify-center text-slate-400 group-hover:text-slate-700 transition-colors">
+                      <Lock className="w-3.5 h-3.5" />
+                    </div>
+
+                    {/* Icône */}
+                    <div
+                      className={`w-20 h-20 rounded-full ${visuals.iconBg} flex items-center justify-center mb-4 group-hover:scale-105 transition-transform duration-200`}
+                    >
+                      {visuals.icon}
+                    </div>
+
+                    {/* Nom du profil */}
+                    <h2 className="text-lg lg:text-xl font-black text-slate-900 tracking-tight max-w-[200px] truncate">
+                      {p.name}
+                    </h2>
+
+                    {/* Rôle */}
+                    <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400 mt-1">
+                      {getProfileBadgeLabel(p)}
+                    </p>
+                  </button>
+                )
+              })}
+            </div>
+          </>
+        )}
+      </main>
+
+      {/* 3. PIED DE PAGE : AJOUT DE PROFILS DISCRET + COPYRIGHT */}
+      <footer className="w-full px-6 pb-6 pt-2 flex flex-col items-center gap-3 shrink-0">
+        <div className="flex flex-wrap items-center justify-center gap-2">
+          {directionCount < 2 && (
+            <button
+              type="button"
+              onClick={() => requestCreateProfile('direction')}
+              className="inline-flex items-center gap-1 text-xs font-bold text-slate-600 bg-white hover:bg-slate-100 border border-slate-200/90 px-3.5 py-1.5 rounded-full shadow-2xs active:scale-95 transition cursor-pointer"
+            >
+              <Plus size={13} />
+              <span>Direction</span>
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => requestCreateProfile('intermediaire')}
+            className="inline-flex items-center gap-1 text-xs font-bold text-slate-600 bg-white hover:bg-slate-100 border border-slate-200/90 px-3.5 py-1.5 rounded-full shadow-2xs active:scale-95 transition cursor-pointer"
+          >
+            <Plus size={13} />
+            <span>Intermédiaire</span>
+          </button>
+          {agentCount < 2 && (
+            <button
+              type="button"
+              onClick={() => requestCreateProfile('agent')}
+              className="inline-flex items-center gap-1 text-xs font-bold text-slate-600 bg-white hover:bg-slate-100 border border-slate-200/90 px-3.5 py-1.5 rounded-full shadow-2xs active:scale-95 transition cursor-pointer"
+            >
+              <Plus size={13} />
+              <span>Agent</span>
+            </button>
+          )}
         </div>
 
-        {/* 🔘 CLAVIER TACTILE MOBILE : BOUTONS RONDS EN CERCLE PARFAIT */}
-        <div className="w-full max-w-[280px] mx-auto my-auto">
-          <div className="grid grid-cols-3 gap-y-3.5 gap-x-6 justify-items-center">
-            {[
-              { n: '1', l: '' },
-              { n: '2', l: 'ABC' },
-              { n: '3', l: 'DEF' },
-              { n: '4', l: 'GHI' },
-              { n: '5', l: 'JKL' },
-              { n: '6', l: 'MNO' },
-              { n: '7', l: 'PQRS' },
-              { n: '8', l: 'TUV' },
-              { n: '9', l: 'WXYZ' },
-            ].map(({ n, l }) => (
-              <button
-                key={n}
-                type="button"
-                onClick={() => handleDigitPress(n)}
-                className="w-16 h-16 rounded-full bg-white active:bg-blue-50 border border-slate-100 shadow-sm flex flex-col items-center justify-center transition active:scale-95"
-              >
-                <span className="text-xl font-black text-slate-900 leading-none">{n}</span>
-                {l && <span className="text-[8px] font-bold text-slate-400 mt-0.5 tracking-widest">{l}</span>}
-              </button>
-            ))}
+        <p className="text-[11px] font-semibold text-slate-400">
+          © {new Date().getFullYear()} {nomAgence || 'Agence Pro'}
+        </p>
+      </footer>
 
-            <div className="w-16 h-16 flex items-center justify-center">
-              {canUseBiometricsNow ? (
-                <button
-                  type="button"
-                  onClick={handleBiometricUnlock}
-                  disabled={isPending}
-                  className="w-12 h-12 rounded-full flex items-center justify-center text-blue-600 active:bg-blue-100 transition"
-                >
-                  <Fingerprint size={26} />
-                </button>
-              ) : null}
+      {/* 4. ÉCRAN PIN PLEIN ÉCRAN IMMERSIF */}
+      {pinScreenOpen && selectedCandidate && (
+        <div className="fixed inset-0 z-50 w-screen h-dvh bg-white flex flex-col justify-between px-6 py-6 sm:py-10 overflow-hidden animate-in fade-in duration-150">
+          {/* Barre supérieure : Profil actif & bouton fermer */}
+          <div className="w-full max-w-md mx-auto flex items-center justify-between">
+            <div className="flex items-center gap-3 min-w-0">
+              <div
+                className={`w-11 h-11 rounded-full shrink-0 ${getProfileVisuals(selectedCandidate.profile_type).iconBg} flex items-center justify-center`}
+              >
+                {getProfileVisuals(selectedCandidate.profile_type).smallIcon}
+              </div>
+              <div className="min-w-0">
+                <p className="font-black text-slate-900 text-lg tracking-tight truncate leading-tight">
+                  {selectedCandidate.name}
+                </p>
+                <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
+                  {getProfileBadgeLabel(selectedCandidate)}
+                </p>
+              </div>
             </div>
 
             <button
               type="button"
-              onClick={() => handleDigitPress('0')}
-              className="w-16 h-16 rounded-full bg-white active:bg-blue-50 border border-slate-100 shadow-sm flex items-center justify-center transition active:scale-95"
+              onClick={() => {
+                if (isPending) return
+                setPinScreenOpen(false)
+                setPin('')
+                setError(null)
+              }}
+              disabled={isPending}
+              aria-label="Fermer"
+              className="w-11 h-11 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-700 flex items-center justify-center active:scale-90 transition disabled:opacity-30 cursor-pointer shrink-0"
             >
-              <span className="text-xl font-black text-slate-900">0</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={handleDeleteDigit}
-              className="w-16 h-16 rounded-full flex items-center justify-center text-slate-400 active:text-rose-600 transition active:scale-95"
-            >
-              <Delete size={20} />
+              <X className="w-5 h-5" />
             </button>
           </div>
-        </div>
 
-        <div className="pt-3 pb-2 flex flex-col gap-2 text-xs text-slate-400 border-t border-slate-200">
-          {selectedCandidate && (
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setTargetProfileId(selectedCandidate.id)
-                    setOldPin('')
-                    setNewPin('')
-                    setConfirmPin('')
-                    setError(null)
-                    setModalPinOpen(true)
-                  }}
-                  className="font-bold text-slate-600 hover:text-slate-900 transition"
-                >
-                  Changer PIN
-                </button>
-                <button
-                  type="button"
-                  onClick={() => requestDeleteProfile(selectedCandidate.id, selectedCandidate.name)}
-                  className="font-bold text-rose-500 hover:text-rose-700 transition"
-                >
-                  Supprimer
-                </button>
+          {/* Centre : Indicateurs visuels PIN + Pavé numérique circulaire */}
+          <form
+            onSubmit={(e) => {
+              e.preventDefault()
+              handleOpenProfile()
+            }}
+            className="w-full max-w-xs mx-auto flex-1 flex flex-col items-center justify-center gap-7 sm:gap-9"
+          >
+            {/* Pastilles PIN */}
+            <div className="flex flex-col items-center gap-3">
+              <input
+                type="password"
+                readOnly
+                value={pin}
+                id="agency-pin-input"
+                aria-label="Code PIN"
+                className="sr-only"
+              />
+
+              <div className="flex items-center justify-center gap-4 h-8">
+                {Array.from({ length: Math.max(4, pin.length) }).map((_, idx) => {
+                  const isFilled = idx < pin.length
+                  return (
+                    <span
+                      key={idx}
+                      className={`rounded-full transition-all duration-200 ${
+                        isFilled
+                          ? error
+                            ? 'w-4 h-4 bg-rose-500 scale-110'
+                            : 'w-4 h-4 bg-slate-900 scale-110'
+                          : 'w-3.5 h-3.5 bg-slate-200'
+                      }`}
+                    />
+                  )
+                })}
               </div>
 
-              {selectedCandidate.profile_type === 'direction' && selectedCandidate.id !== mainDirectionId && (
+              <div className="h-5 flex items-center justify-center">
+                {error && (
+                  <span className="text-xs font-bold text-rose-600 animate-in fade-in duration-150">
+                    {error}
+                  </span>
+                )}
+                {!error && success && (
+                  <span className="text-xs font-bold text-emerald-600 animate-in fade-in duration-150">
+                    {success}
+                  </span>
+                )}
+              </div>
+            </div>
+
+            {/* Pavé numérique circulaire */}
+            <div className="grid grid-cols-3 gap-4 sm:gap-5 place-items-center w-full">
+              {['1', '2', '3', '4', '5', '6', '7', '8', '9'].map((num) => (
+                <button
+                  key={num}
+                  type="button"
+                  onClick={() => handleDigitPress(num)}
+                  disabled={isPending}
+                  className="w-[72px] h-[72px] sm:w-[78px] sm:h-[78px] rounded-full bg-slate-50 hover:bg-slate-100 border border-slate-200/70 text-slate-900 text-2xl font-black flex items-center justify-center active:bg-slate-900 active:text-white active:scale-90 transition-all duration-150 disabled:opacity-40 cursor-pointer"
+                >
+                  {num}
+                </button>
+              ))}
+
+              {/* Bouton tout effacer OU biométrie */}
+              <div className="w-[72px] h-[72px] sm:w-[78px] sm:h-[78px] flex items-center justify-center">
+                {pin.length > 0 ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (!isPending) {
+                        setError(null)
+                        setPin('')
+                      }
+                    }}
+                    className="text-xs font-extrabold text-slate-400 hover:text-slate-800 active:scale-90 transition px-3 py-2 cursor-pointer"
+                  >
+                    C
+                  </button>
+                ) : canUseBiometricsNow ? (
+                  <button
+                    type="button"
+                    onClick={handleBiometricUnlock}
+                    disabled={isPending}
+                    aria-label="Déverrouiller par biométrie"
+                    className="w-14 h-14 rounded-full bg-blue-50 hover:bg-blue-100 text-blue-600 flex items-center justify-center active:scale-90 transition cursor-pointer"
+                  >
+                    <Fingerprint className="w-6 h-6" />
+                  </button>
+                ) : null}
+              </div>
+
+              <button
+                type="button"
+                onClick={() => handleDigitPress('0')}
+                disabled={isPending}
+                className="w-[72px] h-[72px] sm:w-[78px] sm:h-[78px] rounded-full bg-slate-50 hover:bg-slate-100 border border-slate-200/70 text-slate-900 text-2xl font-black flex items-center justify-center active:bg-slate-900 active:text-white active:scale-90 transition-all duration-150 disabled:opacity-40 cursor-pointer"
+              >
+                0
+              </button>
+
+              <button
+                type="button"
+                onClick={handleDeleteDigit}
+                disabled={isPending || pin.length === 0}
+                aria-label="Effacer"
+                className="w-[72px] h-[72px] sm:w-[78px] sm:h-[78px] rounded-full bg-transparent hover:bg-slate-100 text-slate-600 flex items-center justify-center active:bg-rose-500 active:text-white active:scale-90 transition-all duration-150 disabled:opacity-25 cursor-pointer"
+              >
+                <Delete className="w-6 h-6" />
+              </button>
+            </div>
+
+            {/* Bouton de validation */}
+            <button
+              type="submit"
+              disabled={pin.length < 4 || isPending}
+              className="w-full h-14 rounded-full bg-slate-900 hover:bg-slate-800 disabled:bg-slate-100 text-white disabled:text-slate-300 font-extrabold text-sm tracking-wide flex items-center justify-center gap-2 transition-all duration-200 active:scale-[0.98] shadow-sm disabled:shadow-none cursor-pointer"
+            >
+              {isPending ? (
+                <Loader2 className="w-5 h-5 animate-spin text-white" />
+              ) : (
+                <>
+                  <span>Valider</span>
+                  <ArrowRight className="w-4 h-4" />
+                </>
+              )}
+            </button>
+          </form>
+
+          {/* Actions secondaires discrètes du profil (Modifier PIN / Principal / Supprimer) */}
+          <div className="w-full max-w-md mx-auto pt-3 border-t border-slate-100 flex items-center justify-center gap-5 text-xs">
+            <button
+              type="button"
+              onClick={() => {
+                setTargetProfileId(selectedCandidate.id)
+                setOldPin('')
+                setNewPin('')
+                setConfirmPin('')
+                setError(null)
+                setModalPinOpen(true)
+              }}
+              className="inline-flex items-center gap-1.5 font-bold text-slate-500 hover:text-slate-900 transition cursor-pointer"
+            >
+              <KeyRound size={13} />
+              <span>Changer PIN</span>
+            </button>
+
+            {selectedCandidate.profile_type === 'direction' &&
+              selectedCandidate.id !== mainDirectionId && (
                 <button
                   type="button"
                   onClick={() => requestSetMainDirection(selectedCandidate.id)}
-                  className="font-bold text-slate-700 hover:text-slate-900"
+                  className="inline-flex items-center gap-1.5 font-bold text-indigo-600 hover:text-indigo-800 transition cursor-pointer"
                 >
-                  Définir principal
+                  <Star size={13} />
+                  <span>Définir principal</span>
                 </button>
               )}
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* --- B. VERSION PC / DESKTOP --- */}
-      <div className="hidden sm:flex w-full max-w-xl bg-white border border-slate-200 rounded-3xl p-8 sm:p-10 shadow-lg flex-col">
-        <div className="mb-6">
-          <div className="flex items-center justify-between mb-4">
-            <h1 className="text-lg font-black text-slate-900 tracking-tight">
-              Espace de Travail
-            </h1>
-
-            <div className="flex items-center gap-2">
-              {directionCount < 2 && (
-                <button
-                  type="button"
-                  onClick={() => requestCreateProfile('direction')}
-                  className="text-xs font-bold text-slate-700 bg-slate-50 hover:bg-slate-100 border border-slate-200 px-3 py-1.5 rounded-xl transition"
-                >
-                  + Direction
-                </button>
-              )}
-
-              <button
-                type="button"
-                onClick={() => requestCreateProfile('intermediaire')}
-                className="text-xs font-bold text-slate-700 bg-slate-50 hover:bg-slate-100 border border-slate-200 px-3 py-1.5 rounded-xl transition"
-              >
-                + Intermédiaire
-              </button>
-
-              {agentCount < 2 && (
-                <button
-                  type="button"
-                  onClick={() => requestCreateProfile('agent')}
-                  className="text-xs font-bold text-slate-700 bg-slate-50 hover:bg-slate-100 border border-slate-200 px-3 py-1.5 rounded-xl transition"
-                >
-                  + Agent
-                </button>
-              )}
-            </div>
-          </div>
-
-          <div className="grid grid-cols-2 gap-3 max-h-64 overflow-y-auto pr-1">
-            {profiles.map((p) => {
-              const isSelected = (selectedCandidate?.id || selectedProfileId) === p.id
-              const isMainDir = p.profile_type === 'direction' && p.id === mainDirectionId
-
-              return (
-                <div
-                  key={p.id}
-                  onClick={() => {
-                    setSelectedProfileId(p.id)
-                    setPin('')
-                    setError(null)
-                    desktopInputRef.current?.focus()
-                    if (currentUserId) {
-                      localStorage.setItem(`last_selected_profile_id_${currentUserId}`, p.id)
-                    }
-                  }}
-                  className={`p-3.5 rounded-2xl border transition-all cursor-pointer flex items-center justify-between gap-2 ${
-                    isSelected
-                      ? 'border-slate-900 bg-slate-900 text-white shadow-sm'
-                      : 'border-slate-200 bg-slate-50/50 text-slate-700 hover:border-slate-300 hover:bg-slate-100/50'
-                  }`}
-                >
-                  <div className="truncate">
-                    <p className="text-sm font-bold truncate leading-tight">{p.name}</p>
-                    <p
-                      className={`text-[10px] font-bold tracking-wider uppercase mt-0.5 ${
-                        isSelected ? 'text-slate-300' : 'text-slate-400'
-                      }`}
-                    >
-                      {getProfileBadgeLabel(p)}
-                    </p>
-                  </div>
-
-                  <div className="flex items-center gap-1 shrink-0">
-                    {p.profile_type === 'direction' && !isMainDir && (
-                      <button
-                        type="button"
-                        title="Définir comme Direction Principale"
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          requestSetMainDirection(p.id)
-                        }}
-                        className={`text-[10px] font-bold px-2 py-1 rounded-lg transition ${
-                          isSelected
-                            ? 'text-white hover:bg-white/20'
-                            : 'text-slate-600 hover:bg-slate-200'
-                        }`}
-                      >
-                        Principal
-                      </button>
-                    )}
-
-                    <button
-                      type="button"
-                      title="Modifier le code PIN"
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        setTargetProfileId(p.id)
-                        setOldPin('')
-                        setNewPin('')
-                        setConfirmPin('')
-                        setError(null)
-                        setModalPinOpen(true)
-                      }}
-                      className={`p-1.5 rounded-lg transition ${
-                        isSelected
-                          ? 'text-slate-300 hover:text-white hover:bg-white/20'
-                          : 'text-slate-400 hover:text-slate-700 hover:bg-slate-200'
-                      }`}
-                    >
-                      <KeyRound size={15} />
-                    </button>
-
-                    <button
-                      type="button"
-                      title="Supprimer ce profil"
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        requestDeleteProfile(p.id, p.name)
-                      }}
-                      className={`p-1.5 rounded-lg transition ${
-                        isSelected
-                          ? 'text-slate-300 hover:text-rose-200 hover:bg-rose-500/20'
-                          : 'text-slate-400 hover:text-rose-600 hover:bg-rose-50'
-                      }`}
-                    >
-                      <Trash2 size={15} />
-                    </button>
-                  </div>
-                </div>
-              )
-            })}
-          </div>
-        </div>
-
-        {selectedCandidate && (
-          <div className="pt-6 border-t border-slate-100 flex flex-col items-center">
-            <p className="text-xs font-bold text-slate-500 mb-4 text-center">
-              Code PIN pour <span className="font-black text-slate-900">{selectedCandidate.name}</span>
-              <span className="block text-[11px] text-slate-400 font-semibold mt-0.5">
-                ({getProfileBadgeLabel(selectedCandidate)})
-              </span>
-            </p>
-
-            <input
-              ref={desktopInputRef}
-              type="text"
-              name="pin-code-field"
-              inputMode="numeric"
-              pattern="[0-9]*"
-              maxLength={6}
-              value={pin}
-              onChange={(e) => {
-                const val = e.target.value.replace(/\D/g, '').slice(0, 6)
-                setPin(val)
-                if (val.length === 4 || val.length === 6) handleOpenProfile(val)
-              }}
-              className="opacity-0 absolute -z-10"
-              autoFocus
-              {...pinInputProps}
-            />
-
-            <div
-              onClick={() => desktopInputRef.current?.focus()}
-              className="flex justify-center items-center gap-3.5 my-3 cursor-pointer p-2"
-            >
-              {[0, 1, 2, 3].map((index) => (
-                <div
-                  key={index}
-                  className={`w-3.5 h-3.5 rounded-full transition-all duration-150 ${
-                    pin.length > index
-                      ? 'bg-blue-600 scale-125 shadow-sm shadow-blue-600/40'
-                      : 'bg-slate-200'
-                  }`}
-                />
-              ))}
-              {pin.length > 4 && (
-                <div className="w-3.5 h-3.5 rounded-full bg-blue-600 scale-125 shadow-sm shadow-blue-600/40 animate-pulse" />
-              )}
-            </div>
-
-            {error && (
-              <p className="text-xs text-rose-600 font-bold mt-2 text-center animate-in fade-in">
-                {error}
-              </p>
-            )}
-            {success && (
-              <p className="text-xs text-emerald-600 font-bold mt-2 text-center animate-in fade-in">
-                {success}
-              </p>
-            )}
-
-            <div className="flex items-center gap-2 text-xs font-semibold text-slate-400 mt-5">
-              <Keyboard size={15} className="text-slate-600" />
-              <span>Utilisez les touches numériques de votre clavier</span>
-            </div>
 
             <button
               type="button"
-              onClick={() => setShowKeypadOnDesktop(!showKeypadOnDesktop)}
-              className="text-[11px] font-bold text-slate-600 hover:text-slate-900 underline mt-2 transition"
+              onClick={() => requestDeleteProfile(selectedCandidate.id, selectedCandidate.name)}
+              className="inline-flex items-center gap-1.5 font-bold text-rose-500 hover:text-rose-700 transition cursor-pointer"
             >
-              {showKeypadOnDesktop ? 'Masquer le pavé virtuel' : 'Afficher le pavé virtuel'}
+              <Trash2 size={13} />
+              <span>Supprimer</span>
             </button>
-
-            {showKeypadOnDesktop && (
-              <div className="mt-6 w-full max-w-[260px] mx-auto grid grid-cols-3 gap-y-3 gap-x-4 justify-items-center">
-                {['1', '2', '3', '4', '5', '6', '7', '8', '9'].map((n) => (
-                  <button
-                    key={n}
-                    type="button"
-                    onClick={() => handleDigitPress(n)}
-                    className="w-14 h-14 rounded-2xl bg-slate-50 hover:bg-slate-100 active:bg-slate-200 font-black text-slate-900 text-lg flex items-center justify-center transition active:scale-95 border border-slate-200"
-                  >
-                    {n}
-                  </button>
-                ))}
-                <div />
-                <button
-                  type="button"
-                  onClick={() => handleDigitPress('0')}
-                  className="w-14 h-14 rounded-2xl bg-slate-50 hover:bg-slate-100 active:bg-slate-200 font-black text-slate-900 text-lg flex items-center justify-center transition active:scale-95 border border-slate-200"
-                >
-                  0
-                </button>
-                <button
-                  type="button"
-                  onClick={handleDeleteDigit}
-                  className="w-14 h-14 rounded-2xl flex items-center justify-center text-slate-400 hover:text-rose-600 active:scale-95 transition"
-                >
-                  <Delete size={20} />
-                </button>
-              </div>
-            )}
-
-            <div className="w-full mt-6">
-              <button
-                type="button"
-                disabled={pin.length < 4 || isPending}
-                onClick={() => handleOpenProfile()}
-                className="w-full py-4 rounded-2xl bg-blue-600 hover:bg-blue-700 active:scale-98 text-white text-xs font-black uppercase tracking-wider flex items-center justify-center gap-2 transition shadow-md disabled:opacity-40 disabled:cursor-not-allowed"
-              >
-                <span>{isPending ? 'Vérification...' : 'Ouvrir la session'}</span>
-                <ArrowRight size={15} />
-              </button>
-            </div>
           </div>
-        )}
-      </div>
+        </div>
+      )}
 
       {/* --- MODALE PIN DIRECTION REQUIS --- */}
       {modalAdminPinOpen && (
-        <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-[60] bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-4">
           <div className="w-full max-w-md bg-white border border-slate-200 rounded-3xl p-6 sm:p-8 shadow-2xl relative animate-in fade-in zoom-in-95 duration-150">
             <button
               type="button"
@@ -1108,7 +1223,7 @@ export default function ProfileSelectionPage() {
                 setPendingAction(null)
                 setAdminPin('')
               }}
-              className="absolute top-5 right-5 p-1.5 rounded-full text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition"
+              className="absolute top-5 right-5 p-1.5 rounded-full text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition cursor-pointer"
             >
               <X size={18} />
             </button>
@@ -1119,12 +1234,14 @@ export default function ProfileSelectionPage() {
 
             <h2 className="text-base font-black text-slate-900">Autorisation Direction Principale</h2>
             <p className="text-xs text-slate-500 mt-1 font-semibold leading-relaxed">
-              Pour {pendingAction?.type === 'CREATE' 
-                ? 'créer ce profil' 
-                : pendingAction?.type === 'SET_MAIN_DIRECTION' 
-                ? 'changer la Direction Principale' 
-                : `supprimer le profil "${pendingAction && 'profileName' in pendingAction ? pendingAction.profileName : ''}"`}, 
-              veuillez entrer le code PIN du Directeur Principal ({principalDirectorProfile?.name || 'Direction'}).
+              Pour{' '}
+              {pendingAction?.type === 'CREATE'
+                ? 'créer ce profil'
+                : pendingAction?.type === 'SET_MAIN_DIRECTION'
+                  ? 'changer la Direction Principale'
+                  : `supprimer le profil "${pendingAction && 'profileName' in pendingAction ? pendingAction.profileName : ''}"`}
+              , veuillez entrer le code PIN du Directeur Principal (
+              {principalDirectorProfile?.name || 'Direction'}).
             </p>
 
             {error && <p className="text-xs text-rose-600 font-bold mt-3">{error}</p>}
@@ -1145,7 +1262,7 @@ export default function ProfileSelectionPage() {
                   placeholder="••••"
                   autoFocus
                   required
-                  className="w-full px-3.5 py-3 rounded-xl border border-slate-200 bg-slate-50 text-sm font-bold tracking-widest text-slate-900 focus:bg-white focus:border-blue-600 outline-none transition"
+                  className="w-full px-3.5 py-3 rounded-xl border border-slate-200 bg-slate-50 text-sm font-bold tracking-widest text-slate-900 focus:bg-white focus:border-slate-900 outline-none transition"
                   {...pinInputProps}
                 />
               </div>
@@ -1158,14 +1275,14 @@ export default function ProfileSelectionPage() {
                     setPendingAction(null)
                     setAdminPin('')
                   }}
-                  className="flex-1 py-3 rounded-xl border border-slate-200 text-slate-600 text-xs font-black uppercase tracking-wider hover:bg-slate-50 transition"
+                  className="flex-1 py-3 rounded-full border border-slate-200 text-slate-600 text-xs font-black uppercase tracking-wider hover:bg-slate-50 transition cursor-pointer"
                 >
                   Annuler
                 </button>
                 <button
                   type="submit"
                   disabled={isPending || adminPin.length < 4}
-                  className="flex-1 py-3 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-black uppercase tracking-wider disabled:opacity-40 transition"
+                  className="flex-1 py-3 rounded-full bg-slate-900 hover:bg-slate-800 text-white text-xs font-black uppercase tracking-wider disabled:opacity-40 transition cursor-pointer"
                 >
                   {isPending ? 'Vérification...' : 'Confirmer'}
                 </button>
@@ -1177,20 +1294,22 @@ export default function ProfileSelectionPage() {
 
       {/* --- MODALE CRÉATION DE PROFIL --- */}
       {modalCreateOpen && (
-        <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-[60] bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4">
           <div className="w-full max-w-md bg-white border border-slate-200 rounded-3xl p-6 sm:p-8 shadow-2xl relative animate-in fade-in zoom-in-95 duration-150">
             {profiles.length > 0 && (
               <button
                 type="button"
                 onClick={() => setModalCreateOpen(false)}
-                className="absolute top-5 right-5 p-1.5 rounded-full text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition"
+                className="absolute top-5 right-5 p-1.5 rounded-full text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition cursor-pointer"
               >
                 <X size={18} />
               </button>
             )}
 
             <h2 className="text-base font-black text-slate-900">Nouveau profil</h2>
-            <p className="text-xs text-slate-500 mt-0.5 font-bold">Sécurisez l'accès avec un code PIN personnel.</p>
+            <p className="text-xs text-slate-500 mt-0.5 font-bold">
+              Sécurisez l'accès avec un code PIN personnel.
+            </p>
 
             {error && <p className="text-xs text-rose-600 font-bold mt-3">{error}</p>}
 
@@ -1200,7 +1319,7 @@ export default function ProfileSelectionPage() {
                   type="button"
                   disabled={directionCount >= 2}
                   onClick={() => setType('direction')}
-                  className={`py-2 text-xs font-bold rounded-lg transition ${
+                  className={`py-2 text-xs font-bold rounded-lg transition cursor-pointer ${
                     type === 'direction' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'
                   } ${directionCount >= 2 ? 'opacity-40' : ''}`}
                 >
@@ -1209,7 +1328,7 @@ export default function ProfileSelectionPage() {
                 <button
                   type="button"
                   onClick={() => setType('intermediaire')}
-                  className={`py-2 text-xs font-bold rounded-lg transition ${
+                  className={`py-2 text-xs font-bold rounded-lg transition cursor-pointer ${
                     type === 'intermediaire' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'
                   }`}
                 >
@@ -1219,7 +1338,7 @@ export default function ProfileSelectionPage() {
                   type="button"
                   disabled={agentCount >= 2}
                   onClick={() => setType('agent')}
-                  className={`py-2 text-xs font-bold rounded-lg transition ${
+                  className={`py-2 text-xs font-bold rounded-lg transition cursor-pointer ${
                     type === 'agent' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'
                   } ${agentCount >= 2 ? 'opacity-40' : ''}`}
                 >
@@ -1228,19 +1347,23 @@ export default function ProfileSelectionPage() {
               </div>
 
               <div>
-                <label className="text-[11px] font-black uppercase text-slate-400 block mb-1">Nom du titulaire</label>
+                <label className="text-[11px] font-black uppercase text-slate-400 block mb-1">
+                  Nom du titulaire
+                </label>
                 <input
                   type="text"
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                   placeholder="Ex: Ousmane"
                   required
-                  className="w-full px-3.5 py-3 rounded-xl border border-slate-200 bg-slate-50 text-sm font-bold text-slate-900 focus:bg-white focus:border-blue-600 outline-none transition"
+                  className="w-full px-3.5 py-3 rounded-xl border border-slate-200 bg-slate-50 text-sm font-bold text-slate-900 focus:bg-white focus:border-slate-900 outline-none transition"
                 />
               </div>
 
               <div>
-                <label className="text-[11px] font-black uppercase text-slate-400 block mb-1">Code PIN (4 chiffres)</label>
+                <label className="text-[11px] font-black uppercase text-slate-400 block mb-1">
+                  Code PIN (4 chiffres)
+                </label>
                 <input
                   type="text"
                   name="new-profile-pin"
@@ -1251,7 +1374,7 @@ export default function ProfileSelectionPage() {
                   onChange={(e) => setCreatePin(e.target.value.replace(/\D/g, '').slice(0, 4))}
                   placeholder="••••"
                   required
-                  className="w-full px-3.5 py-3 rounded-xl border border-slate-200 bg-slate-50 text-sm font-bold tracking-widest text-slate-900 focus:bg-white focus:border-blue-600 outline-none transition"
+                  className="w-full px-3.5 py-3 rounded-xl border border-slate-200 bg-slate-50 text-sm font-bold tracking-widest text-slate-900 focus:bg-white focus:border-slate-900 outline-none transition"
                   {...pinInputProps}
                 />
               </div>
@@ -1260,7 +1383,7 @@ export default function ProfileSelectionPage() {
                 <button
                   type="submit"
                   disabled={isPending || !name.trim() || createPin.length !== 4}
-                  className="w-full py-3.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-black uppercase tracking-wider disabled:opacity-40 transition shadow-md"
+                  className="w-full py-3.5 rounded-full bg-slate-900 hover:bg-slate-800 text-white text-xs font-black uppercase tracking-wider disabled:opacity-40 transition shadow-sm cursor-pointer"
                 >
                   {isPending ? 'Enregistrement...' : 'Créer le profil'}
                 </button>
@@ -1269,7 +1392,7 @@ export default function ProfileSelectionPage() {
                   <button
                     type="button"
                     onClick={() => setModalCreateOpen(false)}
-                    className="w-full py-2.5 text-xs font-bold text-slate-500 hover:text-slate-900 transition"
+                    className="w-full py-2.5 text-xs font-bold text-slate-500 hover:text-slate-900 transition cursor-pointer"
                   >
                     Annuler
                   </button>
@@ -1282,14 +1405,14 @@ export default function ProfileSelectionPage() {
 
       {/* --- MODALE MODIFICATION DU PIN --- */}
       {modalPinOpen && (
-        <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-[60] bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4">
           <div className="w-full max-w-md bg-white border border-slate-200 rounded-3xl p-6 sm:p-8 shadow-2xl relative animate-in fade-in zoom-in-95 duration-150">
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-base font-black text-slate-900">Modifier le code PIN</h2>
               <button
                 type="button"
                 onClick={() => setModalPinOpen(false)}
-                className="p-1 rounded-full text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition"
+                className="p-1 rounded-full text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition cursor-pointer"
               >
                 <X size={18} />
               </button>
@@ -1312,7 +1435,7 @@ export default function ProfileSelectionPage() {
                   onChange={(e) => setOldPin(e.target.value.replace(/\D/g, '').slice(0, 6))}
                   placeholder="Votre ancien code"
                   required
-                  className="w-full px-3.5 py-3 rounded-xl border border-slate-200 bg-slate-50 text-sm font-bold tracking-widest text-slate-900 focus:bg-white focus:border-blue-600 outline-none transition"
+                  className="w-full px-3.5 py-3 rounded-xl border border-slate-200 bg-slate-50 text-sm font-bold tracking-widest text-slate-900 focus:bg-white focus:border-slate-900 outline-none transition"
                   {...pinInputProps}
                 />
               </div>
@@ -1331,7 +1454,7 @@ export default function ProfileSelectionPage() {
                   onChange={(e) => setNewPin(e.target.value.replace(/\D/g, '').slice(0, 4))}
                   placeholder="••••"
                   required
-                  className="w-full px-3.5 py-3 rounded-xl border border-slate-200 bg-slate-50 text-sm font-bold tracking-widest text-slate-900 focus:bg-white focus:border-blue-600 outline-none transition"
+                  className="w-full px-3.5 py-3 rounded-xl border border-slate-200 bg-slate-50 text-sm font-bold tracking-widest text-slate-900 focus:bg-white focus:border-slate-900 outline-none transition"
                   {...pinInputProps}
                 />
               </div>
@@ -1350,7 +1473,7 @@ export default function ProfileSelectionPage() {
                   onChange={(e) => setConfirmPin(e.target.value.replace(/\D/g, '').slice(0, 4))}
                   placeholder="••••"
                   required
-                  className="w-full px-3.5 py-3 rounded-xl border border-slate-200 bg-slate-50 text-sm font-bold tracking-widest text-slate-900 focus:bg-white focus:border-blue-600 outline-none transition"
+                  className="w-full px-3.5 py-3 rounded-xl border border-slate-200 bg-slate-50 text-sm font-bold tracking-widest text-slate-900 focus:bg-white focus:border-slate-900 outline-none transition"
                   {...pinInputProps}
                 />
               </div>
@@ -1359,7 +1482,7 @@ export default function ProfileSelectionPage() {
                 <button
                   type="button"
                   onClick={() => setModalPinOpen(false)}
-                  className="flex-1 py-3.5 rounded-xl border border-slate-200 text-slate-600 text-xs font-black uppercase tracking-wider hover:bg-slate-50 transition"
+                  className="flex-1 py-3.5 rounded-full border border-slate-200 text-slate-600 text-xs font-black uppercase tracking-wider hover:bg-slate-50 transition cursor-pointer"
                 >
                   Annuler
                 </button>
@@ -1372,7 +1495,7 @@ export default function ProfileSelectionPage() {
                     newPin.length !== 4 ||
                     confirmPin.length !== 4
                   }
-                  className="flex-1 py-3.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-black uppercase tracking-wider disabled:opacity-40 transition shadow-md"
+                  className="flex-1 py-3.5 rounded-full bg-slate-900 hover:bg-slate-800 text-white text-xs font-black uppercase tracking-wider disabled:opacity-40 transition shadow-sm cursor-pointer"
                 >
                   {isPending ? 'Mise à jour...' : 'Valider'}
                 </button>
@@ -1381,7 +1504,6 @@ export default function ProfileSelectionPage() {
           </div>
         </div>
       )}
-
-    </main>
+    </div>
   )
 }

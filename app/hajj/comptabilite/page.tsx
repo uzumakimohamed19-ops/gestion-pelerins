@@ -4,7 +4,17 @@ import { usePowerSync, useQuery } from '@powersync/react'
 import { requireSupabaseRows, supabase } from '@/lib/supabase'
 import { useYear } from '@/lib/YearContext'
 import { useUI } from '@/lib/UIContext'
+import { useWorkProfile } from '@/lib/ProfileContext'
 import { YearSelector } from '@/components/YearSelector'
+import { HajjCurrencyTabs } from '@/components/HajjCurrencySelector'
+import { formatAuthorInline, formatProfileRoleLabel, getProfileRoleBadgeClass } from '@/lib/profileAuthor'
+import {
+  HAJJ_CURRENCY_MAP,
+  countByCurrency,
+  getHajjCurrencySymbol,
+  normalizeHajjCurrency,
+  type HajjCurrency,
+} from '@/lib/hajjCurrency'
 import type { LucideIcon } from 'lucide-react'
 import {
   TrendingUp, Package, Wallet, CreditCard, BarChart2, ChevronDown, ChevronUp,
@@ -24,6 +34,7 @@ type Pelerin = {
   nom_package?: string
   prix_package?: number | null
   total_paye?: number | null
+  devise: HajjCurrency
   reference?: string
   agence_ou_personne_associee?: string
   num_passeport?: string
@@ -43,6 +54,9 @@ type Depense = {
   cible_valeur: string
   libelle: string
   montant: number
+  devise: HajjCurrency
+  recorded_by_name?: string | null
+  recorded_by_role?: string | null
   created_at?: string
   user_id?: string
 }
@@ -267,7 +281,7 @@ function Sheet({
 }
 
 function TargetPicker({
-  mode, data, referencesList, associesList, selectedIds, cibleValeur, recentFirst, onConfirmIds, onConfirmValue, onClose,
+  mode, data, referencesList, associesList, selectedIds, cibleValeur, recentFirst, currencyUnit, onConfirmIds, onConfirmValue, onClose,
 }: {
   mode: 'pelerin' | 'groupe' | 'reference' | 'associe'
   data: Pelerin[]
@@ -276,6 +290,7 @@ function TargetPicker({
   selectedIds: string[]
   cibleValeur: string
   recentFirst?: boolean
+  currencyUnit: string
   onConfirmIds: (ids: string[]) => void
   onConfirmValue: (v: string) => void
   onClose: () => void
@@ -428,7 +443,7 @@ function TargetPicker({
                 <div className="text-right shrink-0">
                   <span className={`text-[9px] sm:text-[10px] font-bold px-2 py-0.5 rounded-md ${STATUT_STYLE[st]}`}>{STATUT_LABEL[st]}</span>
                   {st !== 'solde' && reste > 0 && (
-                    <p className="text-[9px] sm:text-[10px] text-slate-400 font-bold mt-1 tabular-nums">Reste {fmt(reste)} F</p>
+                    <p className="text-[9px] sm:text-[10px] text-slate-400 font-bold mt-1 tabular-nums">Reste {fmt(reste)} {currencyUnit}</p>
                   )}
                 </div>
               </button>
@@ -478,14 +493,18 @@ function TargetPicker({
 export default function ComptabiliteHajj() {
   const { selectedYear } = useYear()
   const { setHideNavbar } = useUI()
+  const { profile: workProfile } = useWorkProfile()
   const db = usePowerSync()
   const isMobile = useIsMobile()
 
-  const [allPelerins, setAllPelerins] = useState<Pelerin[]>([])
-  const [data, setData] = useState<Pelerin[]>([])
-  const [depenses, setDepenses] = useState<Depense[]>([])
+  const [allPelerinsRaw, setAllPelerinsRaw] = useState<Pelerin[]>([])
+  const [allDepensesRaw, setAllDepensesRaw] = useState<Depense[]>([])
+  const [selectedDevise, setSelectedDevise] = useState<HajjCurrency>('FCFA')
   const [loading, setLoading] = useState<boolean>(true)
   const [expandedAgence, setExpandedAgence] = useState<string | null>(null)
+
+  const curSymbol = getHajjCurrencySymbol(selectedDevise)
+  const curShort = getHajjCurrencySymbol(selectedDevise, true)
 
   // Navigation
   const [tab, setTab] = useState<'apercu' | 'depenses'>('depenses')
@@ -558,17 +577,40 @@ export default function ComptabiliteHajj() {
   )
 
   useEffect(() => {
-    const mappedPelerins = (rawPelerins ?? []).map((p: any) => ({
+    const mappedPelerins: Pelerin[] = (rawPelerins ?? []).map((p: any) => ({
       ...p,
       total_paye: Number(p.total_paye || 0),
       prix_package: Number(p.prix_package || 0),
+      devise: normalizeHajjCurrency(p.devise),
       agences: p.agence_nom_agence ? { nom_agence: p.agence_nom_agence } : undefined,
     }))
-    setAllPelerins(mappedPelerins)
-    setData(filterByYear(mappedPelerins))
-    setDepenses((rawDepenses ?? []) as Depense[])
+    const mappedDepenses: Depense[] = (rawDepenses ?? []).map((d: any) => ({
+      ...d,
+      montant: Number(d.montant || 0),
+      devise: normalizeHajjCurrency(d.devise),
+    }))
+    setAllPelerinsRaw(mappedPelerins)
+    setAllDepensesRaw(mappedDepenses)
     setLoading(pelerinsLoading || depensesLoading)
-  }, [rawPelerins, rawDepenses, selectedYear, pelerinsLoading, depensesLoading])
+  }, [rawPelerins, rawDepenses, pelerinsLoading, depensesLoading])
+
+  // Compteurs de pèlerins par devise sur l'année sélectionnée
+  const yearPelerins = useMemo(() => filterByYear(allPelerinsRaw), [allPelerinsRaw, selectedYear])
+  const deviseCounts = useMemo(() => countByCurrency(yearPelerins), [yearPelerins])
+
+  // Isolation stricte par devise : aucun mélange possible
+  const allPelerins = useMemo(
+    () => allPelerinsRaw.filter(p => p.devise === selectedDevise),
+    [allPelerinsRaw, selectedDevise]
+  )
+  const data = useMemo(
+    () => yearPelerins.filter(p => p.devise === selectedDevise),
+    [yearPelerins, selectedDevise]
+  )
+  const depenses = useMemo(
+    () => allDepensesRaw.filter(d => d.devise === selectedDevise),
+    [allDepensesRaw, selectedDevise]
+  )
 
   /* ---------- Groupements pour le sélecteur ---------- */
   const referencesList = useMemo(() => {
@@ -615,7 +657,7 @@ export default function ComptabiliteHajj() {
           dyn,
           isList,
           label,
-          blob: `${d.libelle} ${d.type_cible} ${TYPE_META[d.type_cible]?.short ?? ''} ${label} ${meta.base} ${names}`.toLowerCase(),
+          blob: `${d.libelle} ${d.type_cible} ${TYPE_META[d.type_cible]?.short ?? ''} ${label} ${meta.base} ${names} ${d.recorded_by_name || ''} ${formatProfileRoleLabel(d.recorded_by_role)}`.toLowerCase(),
         }
       }),
     [depenses, allPelerins],
@@ -789,7 +831,7 @@ export default function ComptabiliteHajj() {
   /* ---------- Persistance ---------- */
   const persistUpdate = async (
     id: string,
-    patch: Partial<Pick<Depense, 'type_cible' | 'cible_valeur' | 'libelle' | 'montant'>>,
+    patch: Partial<Pick<Depense, 'type_cible' | 'cible_valeur' | 'libelle' | 'montant' | 'devise'>>,
   ) => {
     const { data: upd, error } = await supabase.from('depenses_hajj').update(patch).eq('id', id).select('id')
     requireSupabaseRows(upd, error, 'modification de la dépense Hajj')
@@ -905,18 +947,25 @@ export default function ComptabiliteHajj() {
       cible_valeur,
       libelle: finalLibelle || 'Frais divers',
       montant: montantTotalStocke,
+      devise: selectedDevise,
     }
 
     try {
       if (editingId) {
         await persistUpdate(editingId, payload)
       } else {
-        const depense = { id: crypto.randomUUID(), ...payload, created_at: new Date().toISOString() }
+        const depense = {
+          id: crypto.randomUUID(),
+          ...payload,
+          recorded_by_name: workProfile?.name?.trim() || null,
+          recorded_by_role: workProfile?.profile_type || null,
+          created_at: new Date().toISOString(),
+        }
         const { error } = await supabase.from('depenses_hajj').insert(depense)
         if (error) throw error
         await db.execute(
-          'INSERT OR REPLACE INTO depenses_hajj (id, type_cible, cible_valeur, libelle, montant, created_at) VALUES (?, ?, ?, ?, ?, ?)',
-          [depense.id, depense.type_cible, depense.cible_valeur, depense.libelle, depense.montant, depense.created_at],
+          'INSERT OR REPLACE INTO depenses_hajj (id, type_cible, cible_valeur, libelle, montant, devise, recorded_by_name, recorded_by_role, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+          [depense.id, depense.type_cible, depense.cible_valeur, depense.libelle, depense.montant, depense.devise, depense.recorded_by_name, depense.recorded_by_role, depense.created_at],
         )
       }
       closeSheet()
@@ -1019,13 +1068,15 @@ export default function ComptabiliteHajj() {
 
   /* ---------- Divers ---------- */
   const exportCsv = () => {
-    const header = ['Date', 'Nature', 'Type', 'Mode', 'Cible', 'Nb pèlerins', 'Quote-part (F)', 'Montant total (F)']
+    const header = ['Date', 'Devise', 'Nature', 'Type', 'Mode', 'Cible', 'Enregistrée par', 'Nb pèlerins', `Quote-part (${curSymbol})`, `Montant total (${curSymbol})`]
     const lines = filteredRows.map(r => [
       r.d.created_at ? new Date(r.d.created_at).toLocaleDateString('fr-FR') : '',
+      selectedDevise,
       r.d.libelle,
       TYPE_META[r.d.type_cible]?.label ?? r.d.type_cible,
       r.dyn ? 'Dynamique' : 'Fixe',
       r.label,
+      formatAuthorInline(r.d.recorded_by_name, r.d.recorded_by_role) || '—',
       r.count,
       r.unit,
       r.montant,
@@ -1036,7 +1087,7 @@ export default function ComptabiliteHajj() {
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = `depenses_hajj_${selectedYear}.csv`
+    a.download = `depenses_hajj_${selectedYear}_${selectedDevise}.csv`
     a.click()
     URL.revokeObjectURL(url)
   }
@@ -1066,7 +1117,7 @@ export default function ComptabiliteHajj() {
                 {n.libelle} <span className="text-slate-400 font-semibold">×{n.count}</span>
               </span>
               <span className="font-black text-slate-900 tabular-nums shrink-0">
-                {fmt(n.total)} F <span className="text-slate-400 font-bold">• {pct}%</span>
+                {fmt(n.total)} {curShort} <span className="text-slate-400 font-bold">• {pct}%</span>
               </span>
             </div>
             <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
@@ -1196,7 +1247,7 @@ export default function ComptabiliteHajj() {
           {shown.map(p => (
             <span key={String(p.id)} className="text-[11px] font-semibold text-slate-700 bg-white border border-slate-200 rounded-lg px-2 py-1">
               {pName(p)}
-              {r.count > 1 && <span className="text-slate-400"> • {fmt(r.unit)} F</span>}
+              {r.count > 1 && <span className="text-slate-400"> • {fmt(r.unit)} {curShort}</span>}
             </span>
           ))}
           {r.targets.length > shown.length && (
@@ -1264,13 +1315,14 @@ export default function ComptabiliteHajj() {
             <p className="text-[11px] text-slate-500 truncate mt-0.5">{r.label}</p>
             <p className="text-[10px] text-slate-400 mt-0.5 truncate">
               {r.targets.length === 0 && !r.isList ? 'Cible introuvable' : `${r.count} pers.`}
-              {r.count > 1 && ` • ${fmt(r.unit)} F/pers.`}
+              {r.count > 1 && ` • ${fmt(r.unit)} ${curShort}/pers.`}
               {r.d.created_at && ` • ${new Date(r.d.created_at).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' })}`}
+              {r.d.recorded_by_name && ` • Par ${r.d.recorded_by_name}`}
             </p>
           </div>
           <div className="text-right shrink-0">
             <p className="text-xs sm:text-sm font-black text-rose-600 tabular-nums">-{fmt(r.montant)}</p>
-            <p className="text-[9px] text-slate-400 font-bold">CFA</p>
+            <p className="text-[9px] text-slate-400 font-bold">{curSymbol}</p>
           </div>
         </button>
       )
@@ -1299,15 +1351,27 @@ export default function ComptabiliteHajj() {
               )}
             </div>
             <p className="text-xs text-slate-500 truncate mt-0.5">{r.label}</p>
-            <p className="text-[11px] text-slate-400 mt-0.5">
-              {r.targets.length === 0 && !r.isList ? 'Cible introuvable' : `${r.count} pèlerin(s)`}
-              {r.count > 1 && ` • ${fmt(r.unit)} F / pers.`}
-              {r.d.created_at && ` • ${new Date(r.d.created_at).toLocaleDateString('fr-FR')}`}
+            <p className="text-[11px] text-slate-400 mt-0.5 flex items-center gap-1.5 flex-wrap">
+              <span>
+                {r.targets.length === 0 && !r.isList ? 'Cible introuvable' : `${r.count} pèlerin(s)`}
+                {r.count > 1 && ` • ${fmt(r.unit)} ${curShort} / pers.`}
+                {r.d.created_at && ` • ${new Date(r.d.created_at).toLocaleDateString('fr-FR')}`}
+              </span>
+              {r.d.recorded_by_name && (
+                <span className="inline-flex items-center gap-1 text-[10px] font-bold text-slate-600">
+                  • Par <strong className="text-slate-800">{r.d.recorded_by_name}</strong>
+                  {formatProfileRoleLabel(r.d.recorded_by_role) && (
+                    <span className={`px-1.5 py-0.2 rounded border text-[9px] font-black uppercase ${getProfileRoleBadgeClass(r.d.recorded_by_role)}`}>
+                      {formatProfileRoleLabel(r.d.recorded_by_role)}
+                    </span>
+                  )}
+                </span>
+              )}
             </p>
           </div>
           <div className="text-right shrink-0 flex flex-col items-end">
             <p className="text-sm font-black text-rose-600 tabular-nums">-{fmt(r.montant)}</p>
-            <p className="text-[10px] text-slate-400 font-bold">CFA</p>
+            <p className="text-[10px] text-slate-400 font-bold">{curSymbol}</p>
             <ChevronDown size={14} className={`text-slate-300 mt-1 transition-transform ${open ? 'rotate-180' : ''}`} />
           </div>
         </button>
@@ -1316,7 +1380,7 @@ export default function ComptabiliteHajj() {
           <div className="border-t border-slate-100 bg-slate-50/70 p-3.5 space-y-3">
             {r.dyn && (
               <p className="text-[11px] text-blue-800 font-semibold bg-blue-50 border border-blue-100 rounded-xl p-2.5">
-                Dépense dynamique : le total ({fmt(r.montant)} F) suit automatiquement les pèlerins ajoutés ou retirés ({fmt(r.unit)} F × {r.targets.length}).
+                Dépense dynamique : le total ({fmt(r.montant)} {curShort}) suit automatiquement les pèlerins ajoutés ou retirés ({fmt(r.unit)} {curShort} × {r.targets.length}).
               </p>
             )}
             {renderPelerinChips(r)}
@@ -1343,13 +1407,16 @@ export default function ComptabiliteHajj() {
     <div className="w-full min-w-0 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 md:py-8 pb-24 overflow-x-hidden text-slate-800">
 
       {/* HEADER RESPONSIVE (Sélecteur d'année masqué sur mobile) */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4 md:mb-6">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4 md:mb-5">
         <div className="min-w-0">
-          <h1 className="text-xl sm:text-2xl md:text-3xl font-black text-slate-900 tracking-tight leading-tight">
-            Comptabilité & Dépenses
+          <h1 className="text-xl sm:text-2xl md:text-3xl font-black text-slate-900 tracking-tight leading-tight flex items-center gap-2 flex-wrap">
+            <span>Comptabilité & Dépenses</span>
+            <span className={`text-xs px-2.5 py-1 rounded-xl border font-black uppercase ${HAJJ_CURRENCY_MAP[selectedDevise].badgeClass}`}>
+              {HAJJ_CURRENCY_MAP[selectedDevise].label}
+            </span>
           </h1>
           <p className="text-xs sm:text-sm text-slate-500 font-medium mt-0.5">
-            Suivi des encaissements, gestion des charges et solde net.
+            Comptabilité séparée par devise — aucun mélange entre FCFA, Euro et Dollar.
           </p>
         </div>
         <div className="flex w-full sm:w-auto items-center justify-end gap-2 shrink-0">
@@ -1364,9 +1431,28 @@ export default function ComptabiliteHajj() {
             }}
             className="inline-flex w-full sm:w-auto justify-center items-center gap-1.5 px-3.5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 active:scale-95 text-white text-xs font-black shadow-sm transition-all cursor-pointer shrink-0"
           >
-            <Plus size={16} /> <span>Nouvelle dépense</span>
+            <Plus size={16} /> <span>Nouvelle dépense ({curSymbol})</span>
           </button>
         </div>
+      </div>
+
+      {/* SÉLECTEUR DE DEVISE STRICT (FCFA | EUR | USD) */}
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+        <HajjCurrencyTabs
+          value={selectedDevise}
+          onChange={(next) => {
+            setSelectedDevise(next)
+            setExpandedAgence(null)
+            setExpandedDepense(null)
+            setExpandedPelerin(null)
+            setDetailId(null)
+            resetFilters()
+          }}
+          counts={deviseCounts}
+        />
+        <span className="text-[11px] font-bold text-slate-400">
+          {data.length} pèlerin(s) en {HAJJ_CURRENCY_MAP[selectedDevise].label}
+        </span>
       </div>
 
       {/* BARRE D'ONGLETS UNIFIÉE (MOBILE & BUREAU) */}
@@ -1410,8 +1496,8 @@ export default function ComptabiliteHajj() {
                 <div className="p-1.5 bg-white/15 rounded-xl"><Wallet size={16} /></div>
               </div>
               <div>
-                <h3 className="text-xl sm:text-2xl font-black tabular-nums">{fmt(totalEncaisse)} <span className="text-xs font-bold text-blue-200">F</span></h3>
-                <p className="text-[10px] text-blue-100 font-medium mt-0.5">Sur {fmt(totalAttendu)} F attendus</p>
+                <h3 className="text-xl sm:text-2xl font-black tabular-nums">{fmt(totalEncaisse)} <span className="text-xs font-bold text-blue-200">{curShort}</span></h3>
+                <p className="text-[10px] text-blue-100 font-medium mt-0.5">Sur {fmt(totalAttendu)} {curShort} attendus</p>
               </div>
             </div>
 
@@ -1425,7 +1511,7 @@ export default function ComptabiliteHajj() {
                 <div className="p-1.5 bg-amber-50 text-amber-600 rounded-xl"><DollarSign size={16} /></div>
               </div>
               <div>
-                <h3 className="text-base sm:text-xl font-black text-slate-900 tabular-nums">{fmt(totalDepenses)} <span className="text-xs font-bold text-slate-400">F</span></h3>
+                <h3 className="text-base sm:text-xl font-black text-slate-900 tabular-nums">{fmt(totalDepenses)} <span className="text-xs font-bold text-slate-400">{curShort}</span></h3>
                 <p className="text-[10px] text-slate-400 font-medium mt-0.5">{depenses.length} écriture(s)</p>
               </div>
             </button>
@@ -1439,7 +1525,7 @@ export default function ComptabiliteHajj() {
               </div>
               <div>
                 <h3 className={`text-base sm:text-xl font-black tabular-nums ${beneficeReel >= 0 ? 'text-emerald-700' : 'text-rose-700'}`}>
-                  {beneficeReel > 0 ? '+' : ''}{fmt(beneficeReel)} <span className="text-xs font-bold text-slate-400">F</span>
+                  {beneficeReel > 0 ? '+' : ''}{fmt(beneficeReel)} <span className="text-xs font-bold text-slate-400">{curShort}</span>
                 </h3>
                 <p className="text-[10px] text-slate-400 font-medium mt-0.5">Encaissé moins sorties</p>
               </div>
@@ -1451,7 +1537,7 @@ export default function ComptabiliteHajj() {
                 <div className="p-1.5 bg-slate-100 text-slate-600 rounded-xl"><CreditCard size={16} /></div>
               </div>
               <div>
-                <h3 className="text-base sm:text-xl font-black text-amber-700 tabular-nums">{fmt(totalRestant)} <span className="text-xs font-bold text-slate-400">F</span></h3>
+                <h3 className="text-base sm:text-xl font-black text-amber-700 tabular-nums">{fmt(totalRestant)} <span className="text-xs font-bold text-slate-400">{curShort}</span></h3>
                 <p className="text-[10px] text-slate-400 font-medium mt-0.5">{enAttente.length} dossier(s) incomplet(s)</p>
               </div>
             </div>
@@ -1507,15 +1593,15 @@ export default function ComptabiliteHajj() {
                         </span>
                       </div>
                       <div className="flex justify-between text-xs mb-1">
-                        <span className="text-emerald-700 font-bold">{fmt(pkg.encaisse)} F</span>
-                        <span className="text-slate-400">/ {fmt(pkg.attendu)} F</span>
+                        <span className="text-emerald-700 font-bold">{fmt(pkg.encaisse)} {curShort}</span>
+                        <span className="text-slate-400">/ {fmt(pkg.attendu)} {curShort}</span>
                       </div>
                       <div className="h-1.5 bg-slate-200 rounded-full overflow-hidden">
                         <div className="h-full bg-blue-600 rounded-full" style={{ width: `${taux}%` }} />
                       </div>
                     </div>
                     <div className="flex justify-between items-center text-[10px] font-bold text-slate-400 mt-2">
-                      <span>Reste : {fmt(pkg.attendu - pkg.encaisse)} F</span>
+                      <span>Reste : {fmt(pkg.attendu - pkg.encaisse)} {curShort}</span>
                       <span>{taux}%</span>
                     </div>
                   </div>
@@ -1546,7 +1632,7 @@ export default function ComptabiliteHajj() {
                       </div>
                       <div className="flex items-center gap-2.5 shrink-0">
                         <div className="text-right">
-                          <p className="text-xs font-black text-emerald-700">{fmt(agc.encaisse)} CFA</p>
+                          <p className="text-xs font-black text-emerald-700">{fmt(agc.encaisse)} {curSymbol}</p>
                           <p className="text-[10px] text-slate-400">{taux}% recouvré</p>
                         </div>
                         {isOpen ? <ChevronUp size={16} className="text-slate-400" /> : <ChevronDown size={16} className="text-slate-400" />}
@@ -1567,7 +1653,7 @@ export default function ComptabiliteHajj() {
                                 </div>
                                 <div className="text-right shrink-0">
                                   <span className={`text-[10px] font-bold px-2 py-0.5 rounded ${solde ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}`}>
-                                    {solde ? 'Soldé' : `Reste: ${fmt(restant)} F`}
+                                    {solde ? 'Soldé' : `Reste: ${fmt(restant)} ${curShort}`}
                                   </span>
                                 </div>
                               </div>
@@ -1590,7 +1676,7 @@ export default function ComptabiliteHajj() {
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-3 mb-4 sm:mb-5">
             <div className="bg-white p-3.5 sm:p-4 rounded-2xl border border-slate-200 shadow-xs">
               <span className="text-[10px] font-black uppercase tracking-wider text-slate-400">Total dépensé</span>
-              <h3 className="text-base sm:text-xl font-black text-rose-600 tabular-nums mt-1">-{fmt(totalDepenses)} <span className="text-xs text-slate-400">F</span></h3>
+              <h3 className="text-base sm:text-xl font-black text-rose-600 tabular-nums mt-1">-{fmt(totalDepenses)} <span className="text-xs text-slate-400">{curShort}</span></h3>
             </div>
             <div className="bg-white p-3.5 sm:p-4 rounded-2xl border border-slate-200 shadow-xs">
               <span className="text-[10px] font-black uppercase tracking-wider text-slate-400">Écritures</span>
@@ -1599,13 +1685,13 @@ export default function ComptabiliteHajj() {
             <div className="bg-white p-3.5 sm:p-4 rounded-2xl border border-slate-200 shadow-xs">
               <span className="text-[10px] font-black uppercase tracking-wider text-slate-400">Coût moyen / pèlerin</span>
               <h3 className="text-base sm:text-xl font-black text-slate-900 tabular-nums mt-1">
-                {fmt(data.length ? totalDepenses / data.length : 0)} <span className="text-xs text-slate-400">F</span>
+                {fmt(data.length ? totalDepenses / data.length : 0)} <span className="text-xs text-slate-400">{curShort}</span>
               </h3>
             </div>
             <div className="bg-white p-3.5 sm:p-4 rounded-2xl border border-slate-200 shadow-xs">
               <span className="text-[10px] font-black uppercase tracking-wider text-slate-400">Bénéfice réel</span>
               <h3 className={`text-base sm:text-xl font-black tabular-nums mt-1 ${beneficeReel >= 0 ? 'text-emerald-700' : 'text-rose-700'}`}>
-                {beneficeReel > 0 ? '+' : ''}{fmt(beneficeReel)} <span className="text-xs text-slate-400">F</span>
+                {beneficeReel > 0 ? '+' : ''}{fmt(beneficeReel)} <span className="text-xs text-slate-400">{curShort}</span>
               </h3>
             </div>
           </div>
@@ -1702,13 +1788,13 @@ export default function ComptabiliteHajj() {
                 </button>
               )}
             </span>
-            <span className="text-rose-700 font-black tabular-nums">-{fmt(filteredTotal)} CFA</span>
+            <span className="text-rose-700 font-black tabular-nums">-{fmt(filteredTotal)} {curSymbol}</span>
           </div>
 
           {/* Contenu selon la vue */}
           {filteredRows.length === 0 ? (
             <div className="text-center py-14 text-xs text-slate-400 font-bold border-2 border-dashed border-slate-200 rounded-2xl bg-white">
-              {depenses.length === 0 ? 'Aucune dépense enregistrée pour le moment.' : 'Aucune dépense ne correspond aux critères.'}
+              {depenses.length === 0 ? `Aucune dépense en ${HAJJ_CURRENCY_MAP[selectedDevise].label} enregistrée pour le moment.` : 'Aucune dépense ne correspond aux critères.'}
             </div>
           ) : viewMode === 'liste' ? (
             renderRowList(filteredRows)
@@ -1732,7 +1818,7 @@ export default function ComptabiliteHajj() {
                           <p className="text-[11px] text-slate-400 font-medium">{g.rows.length} écriture(s) • {pct}% du total</p>
                         </div>
                         <div className="flex items-center gap-2 shrink-0">
-                          <p className="text-xs sm:text-sm font-black text-rose-600 tabular-nums">-{fmt(g.total)} F</p>
+                          <p className="text-xs sm:text-sm font-black text-rose-600 tabular-nums">-{fmt(g.total)} {curShort}</p>
                           <ChevronDown size={16} className={`text-slate-400 transition-transform ${collapsed ? '' : 'rotate-180'}`} />
                         </div>
                       </div>
@@ -1768,17 +1854,17 @@ export default function ComptabiliteHajj() {
                         <p className="font-bold text-slate-900 text-xs sm:text-sm truncate">{pName(p)}</p>
                         <p className="text-[10px] sm:text-[11px] text-slate-400 font-mono truncate">{p.num_passeport || 'Sans passeport'}</p>
                         <p className="text-[11px] text-slate-500 font-semibold mt-0.5">
-                          Payé {fmt(paye)} F • {lignes.length} charge(s)
+                          Payé {fmt(paye)} {curShort} • {lignes.length} charge(s)
                         </p>
                       </div>
                       <div className="text-right shrink-0">
-                        <p className="text-xs sm:text-sm font-black text-rose-600 tabular-nums">-{fmt(cout)} F</p>
+                        <p className="text-xs sm:text-sm font-black text-rose-600 tabular-nums">-{fmt(cout)} {curShort}</p>
                         <span
                           className={`inline-block mt-1 text-[10px] font-bold px-2 py-0.5 rounded-md tabular-nums ${
                             net >= 0 ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700'
                           }`}
                         >
-                          Marge {net > 0 ? '+' : ''}{fmt(net)}
+                          Marge {net > 0 ? '+' : ''}{fmt(net)} {curShort}
                         </span>
                       </div>
                       <ChevronDown size={14} className={`text-slate-300 shrink-0 transition-transform ${open ? 'rotate-180' : ''}`} />
@@ -1788,7 +1874,7 @@ export default function ComptabiliteHajj() {
                         {lignes.map((l, i) => (
                           <div key={`${l.id}-${i}`} className="flex items-center justify-between text-xs bg-white border border-slate-200 rounded-lg px-3 py-2">
                             <span className="font-semibold text-slate-700 truncate pr-2">{l.libelle}</span>
-                            <span className="font-black text-rose-600 tabular-nums shrink-0">-{fmt(l.part)} F</span>
+                            <span className="font-black text-rose-600 tabular-nums shrink-0">-{fmt(l.part)} {curShort}</span>
                           </div>
                         ))}
                       </div>
@@ -1806,7 +1892,7 @@ export default function ComptabiliteHajj() {
         open={showFilters}
         onClose={() => setShowFilters(false)}
         title="Filtrer & trier"
-        subtitle={`${filteredRows.length} écriture(s) • -${fmt(filteredTotal)} CFA`}
+        subtitle={`${filteredRows.length} écriture(s) • -${fmt(filteredTotal)} ${curSymbol}`}
         footer={
           <div className="grid grid-cols-3 gap-2">
             <button
@@ -1865,11 +1951,11 @@ export default function ComptabiliteHajj() {
             <div className="rounded-2xl bg-rose-50 border border-rose-100 p-4 text-center">
               <p className="text-[10px] font-black uppercase tracking-wider text-rose-400">Total de la dépense</p>
               <p className="text-2xl sm:text-3xl font-black text-rose-600 tabular-nums mt-1">
-                -{fmt(detailRow.montant)} <span className="text-sm">CFA</span>
+                -{fmt(detailRow.montant)} <span className="text-sm">{curSymbol}</span>
               </p>
               {detailRow.count > 1 && (
                 <p className="text-xs font-bold text-rose-500 mt-1">
-                  {fmt(detailRow.unit)} F × {detailRow.dyn ? detailRow.targets.length : detailRow.count} pèlerins
+                  {fmt(detailRow.unit)} {curShort} × {detailRow.dyn ? detailRow.targets.length : detailRow.count} pèlerins
                 </p>
               )}
             </div>
@@ -1886,6 +1972,7 @@ export default function ComptabiliteHajj() {
                 ['Type', TYPE_META[detailRow.d.type_cible]?.label ?? detailRow.d.type_cible],
                 ['Mode', detailRow.dyn ? 'Dynamique (auto)' : 'Montant fixe'],
                 ['Pèlerins', String(detailRow.dyn ? detailRow.targets.length : detailRow.count)],
+                ['Enregistrée par', formatAuthorInline(detailRow.d.recorded_by_name, detailRow.d.recorded_by_role) || 'Non renseigné'],
                 ['Date', detailRow.d.created_at ? new Date(detailRow.d.created_at).toLocaleDateString('fr-FR') : '—'],
               ].map(([k, v]) => (
                 <div key={k} className="flex items-center justify-between px-3.5 py-2.5">
@@ -1907,7 +1994,7 @@ export default function ComptabiliteHajj() {
                         <p className="text-xs font-bold text-slate-900 truncate">{pName(p)}</p>
                         <p className="text-[10px] text-slate-400 font-mono truncate">{p.num_passeport || 'Sans passeport'}</p>
                       </div>
-                      <span className="text-[11px] font-black text-rose-600 tabular-nums shrink-0">-{fmt(detailRow.unit)} F</span>
+                      <span className="text-[11px] font-black text-rose-600 tabular-nums shrink-0">-{fmt(detailRow.unit)} {curShort}</span>
                     </div>
                   ))}
                   {detailRow.targets.length > 80 && (
@@ -1926,8 +2013,8 @@ export default function ComptabiliteHajj() {
       <Sheet
         open={showSheet}
         onClose={closeSheet}
-        title={editingId ? 'Modifier la dépense' : 'Nouvelle dépense'}
-        subtitle={editingId ? 'Modifiez la cible, le mode ou le montant.' : 'Affectez la charge puis saisissez le montant.'}
+        title={editingId ? `Modifier la dépense (${curSymbol})` : `Nouvelle dépense (${curSymbol})`}
+        subtitle={editingId ? `Devise active : ${HAJJ_CURRENCY_MAP[selectedDevise].label}` : `Affectée uniquement aux pèlerins en ${HAJJ_CURRENCY_MAP[selectedDevise].label}.`}
         footer={
           <button
             type="button"
@@ -1943,8 +2030,8 @@ export default function ComptabiliteHajj() {
             {formLoading
               ? 'Enregistrement...'
               : editingId
-                ? `Enregistrer les modifications (${fmt(montantTotalStocke)} F)`
-                : `Valider la dépense (${fmt(montantTotalStocke)} F)`}
+                ? `Enregistrer les modifications (${fmt(montantTotalStocke)} ${curShort})`
+                : `Valider la dépense (${fmt(montantTotalStocke)} ${curShort})`}
           </button>
         }
       >
@@ -2132,7 +2219,7 @@ export default function ComptabiliteHajj() {
                 placeholder={effMode === 'unitaire' && cibleImpactCount > 1 ? 'Montant unitaire par personne' : 'Montant total décaissé'}
                 className="w-full pl-4 pr-14 py-3 rounded-2xl border border-slate-300 bg-white font-black text-base sm:text-lg outline-none focus:border-blue-600"
               />
-              <span className="absolute right-4 top-1/2 -translate-y-1/2 text-xs font-bold text-slate-400">CFA</span>
+              <span className="absolute right-4 top-1/2 -translate-y-1/2 text-xs font-bold text-slate-400">{curSymbol}</span>
             </div>
 
             {montantNumerique > 0 && cibleImpactCount > 0 && (
@@ -2143,26 +2230,26 @@ export default function ComptabiliteHajj() {
                 </div>
                 <div className="flex justify-between text-blue-800">
                   <span>Coût unitaire par pèlerin :</span>
-                  <span className="font-bold tabular-nums">{fmt(montantUnitaireCalcule)} F</span>
+                  <span className="font-bold tabular-nums">{fmt(montantUnitaireCalcule)} {curShort}</span>
                 </div>
                 <div className="pt-1.5 border-t border-blue-200/60 flex justify-between items-center text-blue-950 font-black">
                   <span>{isRuleType && dynamique ? 'Total actuel :' : 'Total stocké en base :'}</span>
-                  <span className="text-sm bg-blue-600 text-white px-2 py-0.5 rounded-md tabular-nums">{fmt(montantTotalStocke)} CFA</span>
+                  <span className="text-sm bg-blue-600 text-white px-2 py-0.5 rounded-md tabular-nums">{fmt(montantTotalStocke)} {curSymbol}</span>
                 </div>
                 {isRuleType && dynamique && (
                   <p className="text-[11px] text-blue-800 font-semibold pt-1">
-                    Chaque nouveau pèlerin ajoutera automatiquement {fmt(montantNumerique)} F au total.
+                    Chaque nouveau pèlerin ajoutera automatiquement {fmt(montantNumerique)} {curShort} au total.
                   </p>
                 )}
                 {editingRow && (
                   <div className="pt-1.5 border-t border-blue-200/60 flex justify-between items-center text-blue-900 font-bold">
-                    <span>Ancien total : {fmt(editingRow.montant)} F</span>
+                    <span>Ancien total : {fmt(editingRow.montant)} {curShort}</span>
                     <span
                       className={`font-black tabular-nums ${
                         deltaEdition === 0 ? 'text-slate-500' : deltaEdition > 0 ? 'text-rose-600' : 'text-emerald-600'
                       }`}
                     >
-                      {deltaEdition === 0 ? 'Inchangé' : `${deltaEdition > 0 ? '+' : ''}${fmt(deltaEdition)} F`}
+                      {deltaEdition === 0 ? 'Inchangé' : `${deltaEdition > 0 ? '+' : ''}${fmt(deltaEdition)} ${curShort}`}
                     </span>
                   </div>
                 )}
@@ -2185,7 +2272,7 @@ export default function ComptabiliteHajj() {
             disabled={!canSaveAdd || addLoading}
             className="w-full py-3.5 bg-blue-600 active:bg-blue-700 text-white font-black text-xs sm:text-sm rounded-2xl transition-colors disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
           >
-            {addLoading ? 'Enregistrement...' : canSaveAdd ? `Ajouter +${fmt(addResult.add)} F à la dépense` : 'Ajouter à la dépense'}
+            {addLoading ? 'Enregistrement...' : canSaveAdd ? `Ajouter +${fmt(addResult.add)} ${curShort} à la dépense` : 'Ajouter à la dépense'}
           </button>
         }
       >
@@ -2194,7 +2281,7 @@ export default function ComptabiliteHajj() {
             <div className="grid grid-cols-3 gap-2 text-center">
               <div className="rounded-2xl bg-slate-50 border border-slate-200 p-2.5 sm:p-3">
                 <p className="text-[9px] sm:text-[10px] font-black uppercase tracking-wider text-slate-400">Total actuel</p>
-                <p className="text-xs sm:text-sm font-black text-slate-900 tabular-nums mt-1">{fmt(addRow.montant)} F</p>
+                <p className="text-xs sm:text-sm font-black text-slate-900 tabular-nums mt-1">{fmt(addRow.montant)} {curShort}</p>
               </div>
               <div className="rounded-2xl bg-slate-50 border border-slate-200 p-2.5 sm:p-3">
                 <p className="text-[9px] sm:text-[10px] font-black uppercase tracking-wider text-slate-400">Pèlerins</p>
@@ -2202,7 +2289,7 @@ export default function ComptabiliteHajj() {
               </div>
               <div className="rounded-2xl bg-slate-50 border border-slate-200 p-2.5 sm:p-3">
                 <p className="text-[9px] sm:text-[10px] font-black uppercase tracking-wider text-slate-400">Par pers.</p>
-                <p className="text-xs sm:text-sm font-black text-slate-900 tabular-nums mt-1">{fmt(addRow.unit)} F</p>
+                <p className="text-xs sm:text-sm font-black text-slate-900 tabular-nums mt-1">{fmt(addRow.unit)} {curShort}</p>
               </div>
             </div>
 
@@ -2288,7 +2375,7 @@ export default function ComptabiliteHajj() {
                       placeholder="Prix par personne"
                       className="w-full pl-4 pr-14 py-3 rounded-2xl border border-slate-300 bg-white font-black text-base sm:text-lg outline-none focus:border-blue-600"
                     />
-                    <span className="absolute right-4 top-1/2 -translate-y-1/2 text-xs font-bold text-slate-400">CFA</span>
+                    <span className="absolute right-4 top-1/2 -translate-y-1/2 text-xs font-bold text-slate-400">{curSymbol}</span>
                   </div>
                   <p className="text-[11px] text-slate-400 font-medium mt-1.5">Pré-rempli avec le prix actuel par personne.</p>
                 </div>
@@ -2329,7 +2416,7 @@ export default function ComptabiliteHajj() {
                     placeholder="Montant supplémentaire"
                     className="w-full pl-4 pr-14 py-3 rounded-2xl border border-slate-300 bg-white font-black text-base sm:text-lg outline-none focus:border-blue-600"
                   />
-                  <span className="absolute right-4 top-1/2 -translate-y-1/2 text-xs font-bold text-slate-400">CFA</span>
+                  <span className="absolute right-4 top-1/2 -translate-y-1/2 text-xs font-bold text-slate-400">{curSymbol}</span>
                 </div>
                 <p className="text-[11px] text-slate-400 font-medium mt-1.5">
                   S'ajoute à la dépense existante, sans l'écraser (ex. supplément, frais complémentaires).
@@ -2341,11 +2428,11 @@ export default function ComptabiliteHajj() {
               <div className="p-3.5 bg-blue-50 border border-blue-200/70 rounded-2xl text-xs space-y-1.5">
                 <div className="flex justify-between text-blue-900 font-bold">
                   <span>Total actuel</span>
-                  <span className="tabular-nums">{fmt(addRow.montant)} F</span>
+                  <span className="tabular-nums">{fmt(addRow.montant)} {curShort}</span>
                 </div>
                 <div className="flex justify-between text-blue-800 font-bold">
                   <span>Ajout</span>
-                  <span className="tabular-nums">+{fmt(addResult.add)} F</span>
+                  <span className="tabular-nums">+{fmt(addResult.add)} {curShort}</span>
                 </div>
                 {addMode === 'pelerins' && (
                   <div className="flex justify-between text-blue-800">
@@ -2357,7 +2444,7 @@ export default function ComptabiliteHajj() {
                 )}
                 <div className="pt-1.5 border-t border-blue-200/60 flex justify-between items-center text-blue-950 font-black">
                   <span>Nouveau total</span>
-                  <span className="text-sm bg-blue-600 text-white px-2 py-0.5 rounded-md tabular-nums">{fmt(addResult.newTotal)} CFA</span>
+                  <span className="text-sm bg-blue-600 text-white px-2 py-0.5 rounded-md tabular-nums">{fmt(addResult.newTotal)} {curSymbol}</span>
                 </div>
               </div>
             )}
@@ -2374,6 +2461,7 @@ export default function ComptabiliteHajj() {
           associesList={associesList}
           selectedIds={selectedIds}
           cibleValeur={cibleValeur}
+          currencyUnit={curShort}
           onConfirmIds={ids => {
             setSelectedIds(ids)
             setShowPicker(false)
@@ -2395,6 +2483,7 @@ export default function ComptabiliteHajj() {
           selectedIds={addIds}
           cibleValeur=""
           recentFirst
+          currencyUnit={curShort}
           onConfirmIds={ids => {
             setAddIds(ids)
             setShowAddPicker(false)

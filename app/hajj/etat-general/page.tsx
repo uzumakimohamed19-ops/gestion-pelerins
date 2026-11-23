@@ -5,6 +5,14 @@ import { useQuery } from '@powersync/react'
 import { useRouter } from 'next/navigation'
 import { useYear } from '@/lib/YearContext'
 import { YearSelector } from '@/components/YearSelector'
+import { HajjCurrencyTabs } from '@/components/HajjCurrencySelector'
+import {
+  HAJJ_CURRENCY_MAP,
+  countByCurrency,
+  getHajjCurrencySymbol,
+  normalizeHajjCurrency,
+  type HajjCurrency,
+} from '@/lib/hajjCurrency'
 import { 
   BarChart3, Download, Loader2, Search,
   Receipt, Wallet, ChevronDown, ChevronUp,
@@ -22,6 +30,7 @@ interface Pelerin {
   reference?: string
   total_paye?: number
   prix_package?: number
+  devise: HajjCurrency
   agence_ou_personne_associee?: string
   campagne?: number | string
   hotel_mecque?: string
@@ -38,6 +47,9 @@ interface DepenseHajj {
   cible_valeur: string
   libelle: string
   montant: number
+  devise: HajjCurrency
+  recorded_by_name?: string | null
+  recorded_by_role?: string | null
   created_at: string
 }
 
@@ -51,13 +63,17 @@ const getNomPelerin = (p: Pelerin) => `${p.prenom || ''} ${p.nom_complet || ''}`
 const getAgenceNom = (p: Pelerin) => p.agences?.nom_agence || p.agence_ou_personne_associee || 'Agence non renseignée'
 
 export default function EtatGeneralHajj() {
-  const [pelerins, setPelerins] = useState<Pelerin[]>([])
-  const [depenses, setDepenses] = useState<DepenseHajj[]>([])
+  const [allPelerins, setAllPelerins] = useState<Pelerin[]>([])
+  const [allDepenses, setAllDepenses] = useState<DepenseHajj[]>([])
+  const [selectedDevise, setSelectedDevise] = useState<HajjCurrency>('FCFA')
   const [loading, setLoading] = useState(true)
   const [searchTerm, setSearchTerm] = useState('')
   const [filtreRentabilite, setFiltreRentabilite] = useState<'tous' | 'positif' | 'negatif' | 'impaye'>('tous')
   const [filtreAgence, setFiltreAgence] = useState<string>('toutes')
   const [expandedPelerinId, setExpandedPelerinId] = useState<string | null>(null)
+
+  const curSymbol = getHajjCurrencySymbol(selectedDevise)
+  const curShort = getHajjCurrencySymbol(selectedDevise, true)
 
   const router = useRouter()
   const { selectedYear } = useYear()
@@ -86,15 +102,32 @@ export default function EtatGeneralHajj() {
   }, [router, selectedYear])
 
   useEffect(() => {
-    setPelerins((rawPelerins ?? []).map((p: any) => ({
+    setAllPelerins((rawPelerins ?? []).map((p: any) => ({
       ...p,
       total_paye: Number(p.total_paye || 0),
       prix_package: Number(p.prix_package || 0),
+      devise: normalizeHajjCurrency(p.devise),
       agences: p.agence_nom_agence ? { nom_agence: p.agence_nom_agence } : undefined,
     })))
-    setDepenses((rawDepenses ?? []) as DepenseHajj[])
+    setAllDepenses((rawDepenses ?? []).map((d: any) => ({
+      ...d,
+      montant: Number(d.montant || 0),
+      devise: normalizeHajjCurrency(d.devise),
+    })))
     setLoading(pelerinsLoading || depensesLoading)
   }, [rawPelerins, rawDepenses, pelerinsLoading, depensesLoading])
+
+  const deviseCounts = useMemo(() => countByCurrency(allPelerins), [allPelerins])
+
+  // Isolation stricte par devise : aucun mélange possible
+  const pelerins = useMemo(
+    () => allPelerins.filter(p => p.devise === selectedDevise),
+    [allPelerins, selectedDevise]
+  )
+  const depenses = useMemo(
+    () => allDepenses.filter(d => d.devise === selectedDevise),
+    [allDepenses, selectedDevise]
+  )
 
   // Pré-indexation rapide des dépenses et des groupes en O(N + D)
   const calculsConsolides = useMemo(() => {
@@ -352,18 +385,19 @@ export default function EtatGeneralHajj() {
 
   const exporterExcel = async () => {
     const workbook = new ExcelJS.Workbook()
-    const worksheet = workbook.addWorksheet(`Rentabilite ${selectedYear}`)
+    const worksheet = workbook.addWorksheet(`Rentabilite ${selectedYear} ${selectedDevise}`)
 
     worksheet.columns = [
       { header: 'RÉFÉRENCE', key: 'ref', width: 14 },
       { header: 'NOM DU PÈLERIN', key: 'nom', width: 30 },
       { header: 'PASSEPORT', key: 'pass', width: 16 },
-      { header: 'PRIX PACKAGE (F)', key: 'prix', width: 18 },
-      { header: 'PAYÉ CLIENT (F)', key: 'paye', width: 18 },
-      { header: 'RELIQUAT DÛ (F)', key: 'solde', width: 18 },
-      { header: 'TOTAL DÉPENSÉ (F)', key: 'cout_total', width: 20 },
-      { header: 'GAIN RÉEL ENCAISSÉ (F)', key: 'gain_reel', width: 22 },
-      { header: 'GAIN PRÉVISIONNEL (F)', key: 'gain_prev', width: 22 },
+      { header: 'DEVISE', key: 'devise', width: 10 },
+      { header: `PRIX PACKAGE (${curSymbol})`, key: 'prix', width: 18 },
+      { header: `PAYÉ CLIENT (${curSymbol})`, key: 'paye', width: 18 },
+      { header: `RELIQUAT DÛ (${curSymbol})`, key: 'solde', width: 18 },
+      { header: `TOTAL DÉPENSÉ (${curSymbol})`, key: 'cout_total', width: 20 },
+      { header: `GAIN RÉEL ENCAISSÉ (${curSymbol})`, key: 'gain_reel', width: 22 },
+      { header: `GAIN PRÉVISIONNEL (${curSymbol})`, key: 'gain_prev', width: 22 },
       { header: 'MARGE (%)', key: 'marge', width: 12 },
       { header: 'AGENCE / CANAL', key: 'agence', width: 22 },
     ]
@@ -379,6 +413,7 @@ export default function EtatGeneralHajj() {
         ref: p.reference || '-',
         nom: getNomPelerin(p).toUpperCase(),
         pass: p.num_passeport || '-',
+        devise: selectedDevise,
         prix: p.prix_package || 0,
         paye: p.total_paye || 0,
         solde: p.soldeRestant,
@@ -391,7 +426,7 @@ export default function EtatGeneralHajj() {
     })
 
     const buffer = await workbook.xlsx.writeBuffer()
-    saveAs(new Blob([buffer]), `Rentabilite_${selectedYear}_${new Date().toISOString().split('T')[0]}.xlsx`)
+    saveAs(new Blob([buffer]), `Rentabilite_${selectedYear}_${selectedDevise}_${new Date().toISOString().split('T')[0]}.xlsx`)
   }
 
   if (loading) {
@@ -409,25 +444,44 @@ export default function EtatGeneralHajj() {
     <div className="max-w-[1600px] mx-auto px-4 sm:px-6 py-6 bg-slate-50 min-h-screen w-full min-w-0 overflow-x-hidden text-slate-800">
       
       {/* ── EN-TÊTE PRINCIPAL ── */}
-      <div className="flex flex-col lg:flex-row justify-between items-stretch lg:items-center gap-4 mb-6">
+      <div className="flex flex-col lg:flex-row justify-between items-stretch lg:items-center gap-4 mb-4">
         <div className="min-w-0">
-          <h1 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight flex items-start gap-2">
-            <BarChart3 className="text-blue-600" size={26} />
+          <h1 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight flex items-center gap-2 flex-wrap">
+            <BarChart3 className="text-blue-600 shrink-0" size={26} />
             <span className="break-words">État Général & Rentabilité — {selectedYear}</span>
+            <span className={`text-xs px-2.5 py-1 rounded-xl border font-black uppercase ${HAJJ_CURRENCY_MAP[selectedDevise].badgeClass}`}>
+              {HAJJ_CURRENCY_MAP[selectedDevise].label}
+            </span>
           </h1>
           <p className="text-xs text-slate-500 font-medium mt-0.5">
-            Imputation automatique des charges ciblées (nominatif, groupe, dossier, étape)
+            État séparé par devise — recettes, charges et rentabilité uniquement en {HAJJ_CURRENCY_MAP[selectedDevise].label}.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2.5 w-full lg:w-auto">
           <YearSelector />
           <button 
             onClick={exporterExcel}
-            className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-xl text-xs font-bold transition-colors shadow-xs active:scale-95 max-w-full"
+            className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-xl text-xs font-bold transition-colors shadow-xs active:scale-95 max-w-full cursor-pointer"
           >
-            <Download size={14} /> Exporter (.xlsx)
+            <Download size={14} /> Exporter {selectedDevise} (.xlsx)
           </button>
         </div>
+      </div>
+
+      {/* ── SÉLECTEUR DE DEVISE STRICT (FCFA | EUR | USD) ── */}
+      <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
+        <HajjCurrencyTabs
+          value={selectedDevise}
+          onChange={(next) => {
+            setSelectedDevise(next)
+            setFiltreAgence('toutes')
+            setExpandedPelerinId(null)
+          }}
+          counts={deviseCounts}
+        />
+        <span className="text-[11px] font-bold text-slate-400">
+          {pelerins.length} pèlerin(s) • {depenses.length} dépense(s) en {HAJJ_CURRENCY_MAP[selectedDevise].label}
+        </span>
       </div>
 
       {/* ── BANDEAU SYNTHÈSE TRÉSORERIE ── */}
@@ -438,10 +492,10 @@ export default function EtatGeneralHajj() {
             <div className="p-1.5 rounded-lg bg-blue-50 text-blue-600"><Wallet size={15} /></div>
           </div>
           <p className="text-xl font-black text-slate-900 tabular-nums">
-            {statsGlobales.caEncaisse.toLocaleString('fr-FR')} <span className="text-xs text-slate-400 font-semibold">F</span>
+            {statsGlobales.caEncaisse.toLocaleString('fr-FR')} <span className="text-xs text-slate-400 font-semibold">{curShort}</span>
           </p>
           <p className="text-[11px] text-slate-500 mt-1">
-            Chiffre d'affaires visé : <span className="font-semibold text-slate-700">{statsGlobales.caAttendu.toLocaleString('fr-FR')} F</span>
+            Chiffre d'affaires visé : <span className="font-semibold text-slate-700">{statsGlobales.caAttendu.toLocaleString('fr-FR')} {curShort}</span>
           </p>
         </div>
 
@@ -451,10 +505,10 @@ export default function EtatGeneralHajj() {
             <div className="p-1.5 rounded-lg bg-amber-50 text-amber-600"><Receipt size={15} /></div>
           </div>
           <p className="text-xl font-black text-amber-900 tabular-nums">
-            {statsGlobales.totalDepensesReelles.toLocaleString('fr-FR')} <span className="text-xs text-slate-400 font-semibold">F</span>
+            {statsGlobales.totalDepensesReelles.toLocaleString('fr-FR')} <span className="text-xs text-slate-400 font-semibold">{curShort}</span>
           </p>
           <p className="text-[11px] text-slate-500 mt-1">
-            {depenses.length} opérations enregistrées en base
+            {depenses.length} opérations en {curSymbol}
           </p>
         </div>
 
@@ -466,7 +520,7 @@ export default function EtatGeneralHajj() {
             </div>
           </div>
           <p className={`text-xl font-black tabular-nums ${statsGlobales.soldeCompteActuel >= 0 ? 'text-emerald-700' : 'text-rose-700'}`}>
-            {statsGlobales.soldeCompteActuel > 0 ? '+' : ''}{statsGlobales.soldeCompteActuel.toLocaleString('fr-FR')} <span className="text-xs text-slate-400 font-semibold">F</span>
+            {statsGlobales.soldeCompteActuel > 0 ? '+' : ''}{statsGlobales.soldeCompteActuel.toLocaleString('fr-FR')} <span className="text-xs text-slate-400 font-semibold">{curShort}</span>
           </p>
           <p className="text-[11px] text-slate-500 mt-1">
             Encaissé moins sorties effectives
@@ -479,10 +533,10 @@ export default function EtatGeneralHajj() {
             <div className="p-1.5 rounded-lg bg-slate-100 text-slate-600"><CreditCard size={15} /></div>
           </div>
           <p className="text-xl font-black text-amber-700 tabular-nums">
-            {statsGlobales.soldeACollecter.toLocaleString('fr-FR')} <span className="text-xs text-slate-400 font-semibold">F</span>
+            {statsGlobales.soldeACollecter.toLocaleString('fr-FR')} <span className="text-xs text-slate-400 font-semibold">{curShort}</span>
           </p>
           <p className="text-[11px] text-slate-500 mt-1">
-            Marge finale estimée : <span className="font-semibold text-slate-800">{statsGlobales.soldeComptePrevisionnel.toLocaleString('fr-FR')} F</span>
+            Marge finale estimée : <span className="font-semibold text-slate-800">{statsGlobales.soldeComptePrevisionnel.toLocaleString('fr-FR')} {curShort}</span>
           </p>
         </div>
       </div>
@@ -591,14 +645,14 @@ export default function EtatGeneralHajj() {
                   <div className="flex justify-between items-baseline text-xs">
                     <span className="text-slate-500">Prix forfait</span>
                     <span className="font-bold text-slate-800 tabular-nums">
-                      {(p.prix_package || 0).toLocaleString('fr-FR')} F
+                      {(p.prix_package || 0).toLocaleString('fr-FR')} {curShort}
                     </span>
                   </div>
 
                   <div className="flex justify-between items-baseline text-xs">
                     <span className="text-slate-500">Versé par client</span>
                     <span className="font-bold text-emerald-700 tabular-nums">
-                      {(p.total_paye || 0).toLocaleString('fr-FR')} F
+                      {(p.total_paye || 0).toLocaleString('fr-FR')} {curShort}
                     </span>
                   </div>
 
@@ -616,7 +670,7 @@ export default function EtatGeneralHajj() {
                       <span className="font-bold text-emerald-600 text-[11px]">Soldé</span>
                     ) : (
                       <span className="font-bold text-amber-700 tabular-nums">
-                        {p.soldeRestant.toLocaleString('fr-FR')} F
+                        {p.soldeRestant.toLocaleString('fr-FR')} {curShort}
                       </span>
                     )}
                   </div>
@@ -627,7 +681,7 @@ export default function EtatGeneralHajj() {
                   <div className="flex justify-between items-center text-xs">
                     <span className="text-slate-500">Dépenses imputées</span>
                     <span className="font-bold text-slate-900 tabular-nums">
-                      {p.totalCout.toLocaleString('fr-FR')} F
+                      {p.totalCout.toLocaleString('fr-FR')} {curShort}
                     </span>
                   </div>
 
@@ -635,7 +689,7 @@ export default function EtatGeneralHajj() {
                     <span className="text-slate-500 font-medium">Bénéfice encaissé</span>
                     <span className={`font-black tabular-nums flex items-center gap-0.5 ${margePositive ? 'text-emerald-700' : 'text-rose-700'}`}>
                       {margePositive ? <ArrowUpRight size={13} /> : <ArrowDownRight size={13} />}
-                      {p.gainReel > 0 ? '+' : ''}{p.gainReel.toLocaleString('fr-FR')} F
+                      {p.gainReel > 0 ? '+' : ''}{p.gainReel.toLocaleString('fr-FR')} {curShort}
                     </span>
                   </div>
 
@@ -658,7 +712,7 @@ export default function EtatGeneralHajj() {
                 <div className="bg-slate-100/90 border-t border-slate-200 p-3 text-xs space-y-1.5">
                   <div className="flex items-center justify-between text-[11px] font-bold text-slate-700">
                     <span>Ventilation des coûts</span>
-                    <span>{p.totalCout.toLocaleString('fr-FR')} F</span>
+                    <span>{p.totalCout.toLocaleString('fr-FR')} {curShort}</span>
                   </div>
 
                   {detailImputations.length === 0 ? (
@@ -671,10 +725,13 @@ export default function EtatGeneralHajj() {
                         <div key={idx} className="p-2 flex justify-between items-center text-[11px]">
                           <div className="min-w-0 flex-1 pr-2">
                             <p className="font-bold text-slate-800 truncate">{item.depense.libelle}</p>
-                            <p className="text-[10px] text-slate-400 capitalize">{item.motif}</p>
+                            <p className="text-[10px] text-slate-400 capitalize">
+                              {item.motif}
+                              {item.depense.recorded_by_name ? ` • Par ${item.depense.recorded_by_name}` : ''}
+                            </p>
                           </div>
                           <span className="font-bold text-slate-900 tabular-nums shrink-0">
-                            {item.montantPartage.toLocaleString('fr-FR')} F
+                            {item.montantPartage.toLocaleString('fr-FR')} {curShort}
                           </span>
                         </div>
                       ))}
