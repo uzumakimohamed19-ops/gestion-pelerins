@@ -9,6 +9,8 @@ const nextConfig: NextConfig = {
 
   distDir: process.env.NODE_ENV === "development" ? ".next-dev" : ".next",
 
+  serverExternalPackages: ["web-push"],
+
   allowedDevOrigins: ["192.168.1.6"],
 
   images: {
