@@ -342,6 +342,79 @@ export default function ListePelerins() {
   const [mobileFilterSheetOpen, setMobileFilterSheetOpen] = useState(false)
   const [mobileExportSheetOpen, setMobileExportSheetOpen] = useState(false)
 
+  // Toast natif flottant (remplace les alert() navigateur)
+  const [toast, setToast] = useState<{ text: string; type: 'success' | 'error' } | null>(null)
+  const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const showToast = useCallback((text: string, type: 'success' | 'error' = 'success') => {
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current)
+    setToast({ text, type })
+    toastTimerRef.current = setTimeout(() => {
+      setToast(null)
+      toastTimerRef.current = null
+    }, 2800)
+  }, [])
+  useEffect(() => {
+    return () => {
+      if (toastTimerRef.current) clearTimeout(toastTimerRef.current)
+    }
+  }, [])
+
+  // Swipe-to-dismiss sur les Bottom Sheets mobiles (glisser l'en-tête vers le bas > 80px)
+  const [sheetDragY, setSheetDragY] = useState(0)
+  const sheetDragStartYRef = useRef<number | null>(null)
+  const sheetDragYRef = useRef(0)
+  const getSheetDragHandlers = (onClose: () => void) => ({
+    onTouchStart: (e: React.TouchEvent) => {
+      sheetDragStartYRef.current = e.touches[0].clientY
+      sheetDragYRef.current = 0
+      setSheetDragY(0)
+    },
+    onTouchMove: (e: React.TouchEvent) => {
+      if (sheetDragStartYRef.current === null) return
+      const dy = e.touches[0].clientY - sheetDragStartYRef.current
+      if (dy > 0) {
+        sheetDragYRef.current = dy
+        setSheetDragY(dy)
+      }
+    },
+    onTouchEnd: () => {
+      const dragged = sheetDragYRef.current
+      sheetDragStartYRef.current = null
+      sheetDragYRef.current = 0
+      setSheetDragY(0)
+      if (dragged > 80) onClose()
+    },
+    onTouchCancel: () => {
+      sheetDragStartYRef.current = null
+      sheetDragYRef.current = 0
+      setSheetDragY(0)
+    },
+  })
+
+  // Bouton flottant "Retour en haut" (mobile uniquement)
+  const [showScrollTop, setShowScrollTop] = useState(false)
+  useEffect(() => {
+    const onScroll = () => {
+      const y = window.scrollY
+      setShowScrollTop(prev => (y > 450 ? true : y < 280 ? false : prev))
+    }
+    window.addEventListener('scroll', onScroll, { passive: true })
+    return () => window.removeEventListener('scroll', onScroll)
+  }, [])
+
+  // Appui long sur une carte mobile pour activer la sélection multiple
+  const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const longPressTriggeredRef = useRef(false)
+  const longPressOriginRef = useRef<{ x: number; y: number } | null>(null)
+  const cancelCardLongPress = useCallback(() => {
+    if (longPressTimerRef.current) {
+      clearTimeout(longPressTimerRef.current)
+      longPressTimerRef.current = null
+    }
+    longPressOriginRef.current = null
+  }, [])
+  useEffect(() => () => cancelCardLongPress(), [cancelCardLongPress])
+
   const anyMobileOverlayOpen = Boolean(
     quickViewPelerin ||
     showDeleteConfirm ||
@@ -351,6 +424,11 @@ export default function ListePelerins() {
   )
   useEffect(() => {
     setHideNavbar(anyMobileOverlayOpen)
+    if (!anyMobileOverlayOpen) {
+      sheetDragStartYRef.current = null
+      sheetDragYRef.current = 0
+      setSheetDragY(0)
+    }
     return () => setHideNavbar(false)
   }, [anyMobileOverlayOpen, setHideNavbar])
 
@@ -452,9 +530,10 @@ export default function ListePelerins() {
       setSelectedIds(new Set())
       setSelectMode(false)
       setShowDeleteConfirm(false)
+      showToast(`${idsArray.length} dossier${idsArray.length > 1 ? 's' : ''} supprimé${idsArray.length > 1 ? 's' : ''}`)
     } catch (err) {
       console.error(err)
-      alert('Erreur lors de la suppression.')
+      showToast('Erreur lors de la suppression.', 'error')
     } finally {
       setDeleting(false)
     }
@@ -467,7 +546,7 @@ export default function ListePelerins() {
       : pelerinsFiltrés
 
     if (cible.length === 0) {
-      alert("Aucun pèlerin sélectionné ou trouvé.")
+      showToast("Aucun pèlerin sélectionné ou trouvé.", 'error')
       return
     }
 
@@ -539,9 +618,10 @@ export default function ListePelerins() {
       const dateStr = new Date().toISOString().slice(0, 10)
 
       saveAs(zipBlob, `Passeports_Et_Photos_${nomAgenceEffective}_${anneeLabel}_${dateStr}.zip`)
+      showToast('Archive ZIP téléchargée')
     } catch (err) {
       console.error(err)
-      alert("Erreur lors de la création du fichier ZIP.")
+      showToast("Erreur lors de la création du fichier ZIP.", 'error')
     } finally {
       setIsDownloadingZip(false)
       setZipProgress('')
@@ -686,7 +766,87 @@ export default function ListePelerins() {
     }
   }
 
-  const handlePersistScroll = () => sessionStorage.setItem('liste_pelerins_scroll_y', window.scrollY.toString())
+  const MOBILE_PAGE_SIZE = 30
+  const [mobileVisibleCount, setMobileVisibleCount] = useState<number>(() => {
+    if (typeof window === 'undefined') return MOBILE_PAGE_SIZE
+    try {
+      const saved = sessionStorage.getItem('liste_pelerins_visible_count')
+      if (saved) {
+        sessionStorage.removeItem('liste_pelerins_visible_count')
+        const parsed = parseInt(saved, 10)
+        if (!Number.isNaN(parsed) && parsed > MOBILE_PAGE_SIZE) return parsed
+      }
+    } catch { /* ignore */ }
+    return MOBILE_PAGE_SIZE
+  })
+  const loadMoreRef = useRef<HTMLDivElement | null>(null)
+  const didMountVisibleResetRef = useRef(false)
+
+  useEffect(() => {
+    if (!didMountVisibleResetRef.current) {
+      didMountVisibleResetRef.current = true
+      return
+    }
+    setMobileVisibleCount(MOBILE_PAGE_SIZE)
+  }, [searchTerm, deviseFilter, statutPaiementFilter, plateformeFilter, hotelFilter, selectedFilterValue, activeFilterType, sortOrder, selectedYear])
+
+  useEffect(() => {
+    const sentinel = loadMoreRef.current
+    if (!sentinel || mobileVisibleCount >= pelerinsFiltrés.length) return
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0]?.isIntersecting) {
+          setMobileVisibleCount(prev => Math.min(prev + MOBILE_PAGE_SIZE, pelerinsFiltrés.length))
+        }
+      },
+      { rootMargin: '250px' }
+    )
+    observer.observe(sentinel)
+    return () => observer.disconnect()
+  }, [mobileVisibleCount, pelerinsFiltrés.length])
+
+  const mobileVisiblePelerins = useMemo(
+    () => pelerinsFiltrés.slice(0, mobileVisibleCount),
+    [pelerinsFiltrés, mobileVisibleCount]
+  )
+
+  const handlePersistScroll = () => {
+    sessionStorage.setItem('liste_pelerins_scroll_y', window.scrollY.toString())
+    sessionStorage.setItem('liste_pelerins_visible_count', String(mobileVisibleCount))
+  }
+
+  const startCardLongPress = (pId: string, e: React.TouchEvent) => {
+    if (selectMode) return
+    const touch = e.touches[0]
+    if (!touch) return
+    longPressTriggeredRef.current = false
+    longPressOriginRef.current = { x: touch.clientX, y: touch.clientY }
+    if (longPressTimerRef.current) clearTimeout(longPressTimerRef.current)
+    longPressTimerRef.current = setTimeout(() => {
+      longPressTimerRef.current = null
+      longPressTriggeredRef.current = true
+      setSelectMode(true)
+      setSelectedIds(prev => {
+        const next = new Set(prev)
+        next.add(pId)
+        return next
+      })
+      if (typeof navigator !== 'undefined' && 'vibrate' in navigator) {
+        try { navigator.vibrate(12) } catch { /* ignore */ }
+      }
+    }, 420)
+  }
+
+  const moveCardLongPress = (e: React.TouchEvent) => {
+    if (!longPressOriginRef.current || !longPressTimerRef.current) return
+    const touch = e.touches[0]
+    if (!touch) return
+    const dx = touch.clientX - longPressOriginRef.current.x
+    const dy = touch.clientY - longPressOriginRef.current.y
+    if (Math.hypot(dx, dy) > 10) {
+      cancelCardLongPress()
+    }
+  }
 
   const toggleSelect = useCallback((id: string) => {
     setSelectedIds(prev => {
@@ -753,7 +913,7 @@ export default function ListePelerins() {
       setQuickViewPelerin({ ...quickViewPelerin, [field]: nextVal })
     } catch (err) {
       console.error(err)
-      alert("Erreur lors de la mise à jour.")
+      showToast("Erreur lors de la mise à jour.", 'error')
     }
   }
 
@@ -788,9 +948,10 @@ export default function ListePelerins() {
       await db.execute('UPDATE pelerins SET devise = ? WHERE id = ?', [nextDevise, quickViewPelerin.id]).catch(() => {})
       await db.execute('UPDATE pelerin_payments SET devise = ? WHERE pelerin_id = ?', [nextDevise, quickViewPelerin.id]).catch(() => {})
       setQuickViewPelerin({ ...quickViewPelerin, devise: nextDevise })
+      showToast('Devise mise à jour')
     } catch (err) {
       console.error(err)
-      alert("Erreur lors du changement de devise.")
+      showToast("Erreur lors du changement de devise.", 'error')
     } finally {
       setQuickViewUpdating(false)
     }
@@ -835,10 +996,10 @@ export default function ListePelerins() {
       await db.execute(`UPDATE pelerins SET total_paye = ? WHERE id = ?`, [nextTotal, quickViewPelerin.id])
       setQuickViewPelerin({ ...quickViewPelerin, total_paye: nextTotal })
       setQuickPaymentMontant('')
-      alert("✅ Versement enregistré avec succès !")
+      showToast('Versement enregistré avec succès')
     } catch (err) {
       console.error(err)
-      alert("Erreur lors de l'enregistrement.")
+      showToast("Erreur lors de l'enregistrement.", 'error')
     } finally {
       setQuickViewUpdating(false)
     }
@@ -853,6 +1014,25 @@ export default function ListePelerins() {
   return (
     <div className="min-h-screen bg-slate-50 md:px-6 md:py-10">
       <div className="max-w-7xl mx-auto">
+
+        {/* ── TOAST NATIF FLOTTANT ── */}
+        {toast && (
+          <div
+            onClick={() => setToast(null)}
+            className={`fixed top-[max(1rem,env(safe-area-inset-top))] left-1/2 -translate-x-1/2 z-[10001] max-w-[calc(100vw-2rem)] px-4 py-2.5 rounded-full shadow-xl border flex items-center gap-2 text-xs font-bold cursor-pointer animate-in fade-in slide-in-from-top-2 duration-200 ${
+              toast.type === 'error'
+                ? 'bg-rose-600 text-white border-rose-500'
+                : 'bg-slate-900 text-white border-slate-700'
+            }`}
+          >
+            {toast.type === 'error' ? (
+              <AlertCircle size={15} className="shrink-0 text-white" />
+            ) : (
+              <CheckCircle2 size={15} className="shrink-0 text-emerald-400" />
+            )}
+            <span className="truncate">{toast.text}</span>
+          </div>
+        )}
 
         {/* ── BANNIÈRE STATUT DU TÉLÉCHARGEMENT ZIP ── */}
         {isDownloadingZip && (
@@ -872,11 +1052,15 @@ export default function ListePelerins() {
             onClick={() => setQuickViewPelerin(null)}
           >
             <div 
-              className="relative bg-white rounded-t-[2rem] md:rounded-2xl shadow-xl w-full md:max-w-lg overflow-hidden border border-slate-200 flex flex-col max-h-[92dvh] md:max-h-[90vh] animate-in slide-in-from-bottom md:zoom-in-95 duration-200"
+              className="relative bg-white rounded-t-[2rem] md:rounded-2xl shadow-xl w-full md:max-w-lg overflow-hidden border border-slate-200 flex flex-col max-h-[92dvh] md:max-h-[90vh] animate-in slide-in-from-bottom md:zoom-in-95 duration-200 transition-transform"
+              style={sheetDragY > 0 ? { transform: `translateY(${sheetDragY}px)`, transition: 'none' } : undefined}
               onClick={(e) => e.stopPropagation()}
             >
-              {/* En-tête sobre */}
-              <div className="bg-slate-900 px-5 pt-3 pb-4 md:py-4 text-white border-b border-slate-800">
+              {/* En-tête sobre (zone glissable vers le bas sur mobile) */}
+              <div
+                {...getSheetDragHandlers(() => setQuickViewPelerin(null))}
+                className="bg-slate-900 px-5 pt-3 pb-4 md:py-4 text-white border-b border-slate-800 touch-none md:touch-auto"
+              >
                 <div className="w-12 h-1.5 bg-white/20 rounded-full mx-auto mb-3 md:hidden" />
                 <div className="flex items-center justify-between gap-2">
                 <div className="flex items-center gap-3 min-w-0">
@@ -1070,8 +1254,14 @@ export default function ListePelerins() {
         {showDeleteConfirm && (
           <div className="fixed inset-0 z-[9999] md:z-50 flex items-end md:items-center justify-center p-0 md:p-4">
             <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-xs" onClick={() => setShowDeleteConfirm(false)} />
-            <div className="relative bg-white rounded-t-[2rem] md:rounded-2xl shadow-xl w-full md:max-w-sm overflow-hidden border border-slate-200 animate-in slide-in-from-bottom md:zoom-in-95 duration-200">
-              <div className="bg-slate-900 px-5 pt-3 pb-4 md:px-6 md:py-5">
+            <div
+              className="relative bg-white rounded-t-[2rem] md:rounded-2xl shadow-xl w-full md:max-w-sm overflow-hidden border border-slate-200 animate-in slide-in-from-bottom md:zoom-in-95 duration-200 transition-transform"
+              style={sheetDragY > 0 ? { transform: `translateY(${sheetDragY}px)`, transition: 'none' } : undefined}
+            >
+              <div
+                {...getSheetDragHandlers(() => setShowDeleteConfirm(false))}
+                className="bg-slate-900 px-5 pt-3 pb-4 md:px-6 md:py-5 touch-none md:touch-auto"
+              >
                 <div className="w-12 h-1.5 bg-white/20 rounded-full mx-auto mb-3 md:hidden" />
                 <div className="flex items-center gap-3">
                   <div className="w-9 h-9 bg-white/10 rounded-xl flex items-center justify-center">
@@ -1120,8 +1310,14 @@ export default function ListePelerins() {
         {showPdfModal && (
           <div className="fixed inset-0 z-[9999] md:z-50 flex items-end md:items-center justify-center p-0 md:p-4">
             <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-xs" onClick={() => setShowPdfModal(false)} />
-            <div className="relative bg-white rounded-t-[2rem] md:rounded-2xl shadow-xl w-full md:max-w-md overflow-hidden border border-slate-200 animate-in slide-in-from-bottom md:zoom-in-95 duration-200">
-              <div className="bg-slate-900 px-5 pt-3 pb-4 md:px-6 md:py-5 border-b border-slate-800">
+            <div
+              className="relative bg-white rounded-t-[2rem] md:rounded-2xl shadow-xl w-full md:max-w-md overflow-hidden border border-slate-200 animate-in slide-in-from-bottom md:zoom-in-95 duration-200 transition-transform"
+              style={sheetDragY > 0 ? { transform: `translateY(${sheetDragY}px)`, transition: 'none' } : undefined}
+            >
+              <div
+                {...getSheetDragHandlers(() => setShowPdfModal(false))}
+                className="bg-slate-900 px-5 pt-3 pb-4 md:px-6 md:py-5 border-b border-slate-800 touch-none md:touch-auto"
+              >
                 <div className="w-12 h-1.5 bg-white/20 rounded-full mx-auto mb-3 md:hidden" />
                 <div className="flex items-center gap-3">
                   <div className="w-9 h-9 bg-white/10 rounded-xl flex items-center justify-center">
@@ -1186,11 +1382,11 @@ export default function ListePelerins() {
         )}
 
         {/* =================================================================== */}
-        {/* 📱 VERSION MOBILE NATIVE — EN-TÊTE BLANC PUR (`md:hidden`)          */}
+        {/* 📱 VERSION MOBILE NATIVE — VARIANTE B (PANNEAU HAUT + LISTE)        */}
         {/* =================================================================== */}
-        <div className="md:hidden pb-32">
+        <div className="md:hidden pb-32 bg-[#F1F5F9] min-h-screen">
           {/* 1. EN-TÊTE BLANC COMPACT, FIXE ET ULTRA-FLUIDE (zéro saccade au scroll) */}
-          <div className="bg-white border-b border-slate-100 px-5 pt-3.5 pb-3 sticky top-0 z-30 shadow-[0_1px_6px_rgba(15,23,42,0.04)]">
+          <div className="bg-white border-b border-slate-200/80 px-5 pt-3.5 pb-3 sticky top-0 z-30 shadow-[0_1px_4px_rgba(15,23,42,0.03)]">
             <div className="flex items-center justify-between gap-3">
               <div className="min-w-0 flex items-baseline gap-2">
                 <h1 className="text-xl font-black text-blue-600 tracking-tight leading-none">
@@ -1283,48 +1479,65 @@ export default function ListePelerins() {
             </div>
           </div>
 
-          {/* 2. CORPS DE PAGE AÉRÉ (devises + KPI + filtres défilent naturellement au scroll) */}
-          <div className="px-5 pt-3.5 space-y-3.5">
-            {/* Sélecteur de devise sobre (blanc par défaut, bleu au clic) */}
-            <div className="-mx-5 px-5 flex items-center gap-2 overflow-x-auto no-scrollbar">
-              <button
-                type="button"
-                onClick={() => setDeviseFilter('ALL')}
-                className={`h-8 px-3.5 rounded-full text-xs font-bold border whitespace-nowrap shrink-0 flex items-center gap-1.5 transition active:scale-95 cursor-pointer ${
-                  deviseFilter === 'ALL'
-                    ? 'bg-blue-600 text-white border-blue-600 shadow-xs'
-                    : 'bg-white text-slate-700 border-slate-200/90'
-                }`}
-              >
-                <span>Toutes</span>
-                <span className={`text-[10px] tabular-nums ${deviseFilter === 'ALL' ? 'text-blue-100' : 'text-slate-400'}`}>
-                  {pelerins.length}
-                </span>
-              </button>
-
-              {HAJJ_CURRENCIES.map(cur => {
-                const active = deviseFilter === cur.code
-                return (
+          {/* 2. PANNEAU SUPÉRIEUR BLANC (Devises + Statistiques + Filtres séparés par de fins filets) */}
+          <div className="bg-white border-b border-slate-200/90 divide-y divide-slate-100">
+            {/* Sous-section A : Devises (rail segmenté discret, blanc par défaut, bleu au clic) */}
+            <section className="px-5 py-3 space-y-2">
+              <div className="flex items-center justify-between">
+                <p className="text-[10px] font-black uppercase tracking-wider text-slate-400">
+                  Devise
+                </p>
+                {deviseFilter !== 'ALL' && (
                   <button
-                    key={cur.code}
                     type="button"
-                    onClick={() => setDeviseFilter(cur.code)}
-                    className={`h-8 px-3.5 rounded-full text-xs font-bold border whitespace-nowrap shrink-0 flex items-center gap-1.5 transition active:scale-95 cursor-pointer ${
-                      active
-                        ? 'bg-blue-600 text-white border-blue-600 shadow-xs'
-                        : 'bg-white text-slate-700 border-slate-200/90'
-                    }`}
+                    onClick={() => setDeviseFilter('ALL')}
+                    className="text-[11px] font-bold text-blue-600 cursor-pointer"
                   >
-                    <span>{cur.shortLabel}</span>
-                    <span className={`text-[10px] tabular-nums ${active ? 'text-blue-100' : 'text-slate-400'}`}>
-                      {deviseCounts[cur.code] ?? 0}
-                    </span>
+                    Toutes
                   </button>
-                )
-              })}
-            </div>
+                )}
+              </div>
 
-            {/* Ruban KPI horizontal compact & élégant (sans scrollbar) */}
+              <div className="bg-slate-100/90 p-1 rounded-2xl flex items-center gap-1 overflow-x-auto no-scrollbar">
+                <button
+                  type="button"
+                  onClick={() => setDeviseFilter('ALL')}
+                  className={`h-8 px-3 rounded-xl text-xs font-bold border whitespace-nowrap shrink-0 flex items-center gap-1.5 transition active:scale-95 cursor-pointer ${
+                    deviseFilter === 'ALL'
+                      ? 'bg-blue-600 text-white border-blue-600 shadow-xs'
+                      : 'bg-white text-slate-700 border-slate-200/70'
+                  }`}
+                >
+                  <span>Toutes</span>
+                  <span className={`text-[10px] tabular-nums ${deviseFilter === 'ALL' ? 'text-blue-100' : 'text-slate-400'}`}>
+                    {pelerins.length}
+                  </span>
+                </button>
+
+                {HAJJ_CURRENCIES.map(cur => {
+                  const active = deviseFilter === cur.code
+                  return (
+                    <button
+                      key={cur.code}
+                      type="button"
+                      onClick={() => setDeviseFilter(cur.code)}
+                      className={`h-8 px-3 rounded-xl text-xs font-bold border whitespace-nowrap shrink-0 flex items-center gap-1.5 transition active:scale-95 cursor-pointer ${
+                        active
+                          ? 'bg-blue-600 text-white border-blue-600 shadow-xs'
+                          : 'bg-white text-slate-700 border-slate-200/70'
+                      }`}
+                    >
+                      <span>{cur.shortLabel}</span>
+                      <span className={`text-[10px] tabular-nums ${active ? 'text-blue-100' : 'text-slate-400'}`}>
+                        {deviseCounts[cur.code] ?? 0}
+                      </span>
+                    </button>
+                  )
+                })}
+              </div>
+            </section>
+
+            {/* Sous-section B : Statistiques / Résumé financier */}
             {!loading && pelerinsFiltrés.length > 0 && (() => {
               const singleCurrency = deviseFilter !== 'ALL' ? deviseFilter : (activeCurrenciesInFiltered.length === 1 ? activeCurrenciesInFiltered[0].code : null)
               const encaisseMulti = activeCurrenciesInFiltered.map(c => formatHajjMoney(payeByCurrency[c.code], c.code, { compact: true }))
@@ -1336,122 +1549,234 @@ export default function ListePelerins() {
                 : null
 
               return (
-                <div className="-mx-5 px-5 flex gap-2.5 overflow-x-auto no-scrollbar snap-x snap-mandatory">
-                  <div className="min-w-[162px] snap-start bg-white rounded-2xl border border-slate-100 shadow-xs p-3.5 shrink-0">
-                    <p className="text-[10px] font-black uppercase tracking-wider text-slate-400">Encaissé</p>
-                    <p className="text-sm font-black text-slate-900 tabular-nums mt-1 truncate">
-                      {singleCurrency
-                        ? formatHajjMoney(payeByCurrency[singleCurrency], singleCurrency, { compact: true })
-                        : (encaisseMulti[0] || '0 F')}
+                <section className="px-5 py-3.5 space-y-2.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-[10px] font-black uppercase tracking-wider text-slate-400">
+                      Statistiques
                     </p>
-                    {!singleCurrency && encaisseMulti.slice(1).map((line, idx) => (
-                      <p key={idx} className="text-[11px] font-bold text-slate-500 tabular-nums truncate">{line}</p>
-                    ))}
-                    <p className="text-[10px] font-semibold text-slate-400 mt-0.5 truncate">
-                      {singleCurrency
-                        ? `sur ${formatHajjMoney(packageByCurrency[singleCurrency], singleCurrency, { compact: true })}`
-                        : 'Séparé par devise'}
-                    </p>
-                    {pctEncaisse !== null && (
-                      <div className="mt-2 h-1 bg-slate-100 rounded-full overflow-hidden">
-                        <div className="h-full bg-blue-600 rounded-full" style={{ width: `${pctEncaisse}%` }} />
+                    <span className="text-[10px] font-bold text-slate-400 tabular-nums">
+                      {singleCurrency ? HAJJ_CURRENCY_MAP[singleCurrency].shortLabel : 'Multi-devises'}
+                      {selectedYear !== 'all' ? ` • ${selectedYear}` : ''}
+                    </span>
+                  </div>
+
+                  <div className="-mx-5 px-5 flex gap-2.5 overflow-x-auto no-scrollbar snap-x snap-mandatory">
+                    <div className="min-w-[162px] snap-start bg-slate-50/80 rounded-2xl border border-blue-950/15 p-3.5 shrink-0">
+                      <p className="text-[10px] font-black uppercase tracking-wider text-slate-400">Encaissé</p>
+                      <p className="text-sm font-black text-slate-900 tabular-nums mt-1 truncate">
+                        {singleCurrency
+                          ? formatHajjMoney(payeByCurrency[singleCurrency], singleCurrency, { compact: true })
+                          : (encaisseMulti[0] || '0 F')}
+                      </p>
+                      {!singleCurrency && encaisseMulti.slice(1).map((line, idx) => (
+                        <p key={idx} className="text-[11px] font-bold text-slate-500 tabular-nums truncate">{line}</p>
+                      ))}
+                      <p className="text-[10px] font-semibold text-slate-400 mt-0.5 truncate">
+                        {singleCurrency
+                          ? `sur ${formatHajjMoney(packageByCurrency[singleCurrency], singleCurrency, { compact: true })}`
+                          : 'Séparé par devise'}
+                      </p>
+                      {pctEncaisse !== null && (
+                        <div className="mt-2 h-1 bg-slate-200/70 rounded-full overflow-hidden">
+                          <div className="h-full bg-blue-600 rounded-full" style={{ width: `${pctEncaisse}%` }} />
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="min-w-[150px] snap-start bg-slate-50/80 rounded-2xl border border-blue-950/15 p-3.5 shrink-0">
+                      <p className="text-[10px] font-black uppercase tracking-wider text-slate-400">Reste dû</p>
+                      <p className="text-sm font-black text-slate-900 tabular-nums mt-1 truncate">
+                        {singleCurrency
+                          ? formatHajjMoney(resteByCurrency[singleCurrency], singleCurrency, { compact: true })
+                          : (resteMulti[0] || '0 F')}
+                      </p>
+                      {!singleCurrency && resteMulti.slice(1).map((line, idx) => (
+                        <p key={idx} className="text-[11px] font-bold text-slate-700 tabular-nums truncate">{line}</p>
+                      ))}
+                      <p className="text-[10px] font-semibold text-slate-400 mt-0.5">
+                        {pelerinsFiltrés.filter(p => getPaiementStatut(p) !== 'complet').length} en cours
+                      </p>
+                    </div>
+
+                    <div className="min-w-[125px] snap-start bg-slate-50/80 rounded-2xl border border-blue-950/15 p-3.5 shrink-0">
+                      <p className="text-[10px] font-black uppercase tracking-wider text-slate-400">Soldés</p>
+                      <p className="text-sm font-black text-emerald-700 tabular-nums mt-1">
+                        {nbComplets} <span className="text-[11px] font-bold text-slate-400">({pctComplets}%)</span>
+                      </p>
+                      <div className="mt-2.5 h-1 bg-slate-200/70 rounded-full overflow-hidden">
+                        <div className="h-full bg-emerald-500 rounded-full" style={{ width: `${pctComplets}%` }} />
                       </div>
-                    )}
-                  </div>
+                    </div>
 
-                  <div className="min-w-[150px] snap-start bg-white rounded-2xl border border-slate-100 shadow-xs p-3.5 shrink-0">
-                    <p className="text-[10px] font-black uppercase tracking-wider text-slate-400">Reste dû</p>
-                    <p className="text-sm font-black text-slate-900 tabular-nums mt-1 truncate">
-                      {singleCurrency
-                        ? formatHajjMoney(resteByCurrency[singleCurrency], singleCurrency, { compact: true })
-                        : (resteMulti[0] || '0 F')}
-                    </p>
-                    {!singleCurrency && resteMulti.slice(1).map((line, idx) => (
-                      <p key={idx} className="text-[11px] font-bold text-slate-700 tabular-nums truncate">{line}</p>
-                    ))}
-                    <p className="text-[10px] font-semibold text-slate-400 mt-0.5">
-                      {pelerinsFiltrés.filter(p => getPaiementStatut(p) !== 'complet').length} en cours
-                    </p>
-                  </div>
-
-                  <div className="min-w-[125px] snap-start bg-white rounded-2xl border border-slate-100 shadow-xs p-3.5 shrink-0">
-                    <p className="text-[10px] font-black uppercase tracking-wider text-slate-400">Soldés</p>
-                    <p className="text-sm font-black text-emerald-700 tabular-nums mt-1">
-                      {nbComplets} <span className="text-[11px] font-bold text-slate-400">({pctComplets}%)</span>
-                    </p>
-                    <div className="mt-2.5 h-1 bg-slate-100 rounded-full overflow-hidden">
-                      <div className="h-full bg-emerald-500 rounded-full" style={{ width: `${pctComplets}%` }} />
+                    <div className="min-w-[125px] snap-start bg-slate-50/80 rounded-2xl border border-blue-950/15 p-3.5 shrink-0">
+                      <p className="text-[10px] font-black uppercase tracking-wider text-slate-400">Gouv</p>
+                      <p className="text-sm font-black text-slate-900 tabular-nums mt-1">
+                        {nbGouv}/{pelerinsFiltrés.length}
+                      </p>
+                      <div className="mt-2.5 h-1 bg-slate-200/70 rounded-full overflow-hidden">
+                        <div className="h-full bg-blue-600 rounded-full" style={{ width: `${pctGouv}%` }} />
+                      </div>
                     </div>
                   </div>
-
-                  <div className="min-w-[125px] snap-start bg-white rounded-2xl border border-slate-100 shadow-xs p-3.5 shrink-0">
-                    <p className="text-[10px] font-black uppercase tracking-wider text-slate-400">Gouv</p>
-                    <p className="text-sm font-black text-slate-900 tabular-nums mt-1">
-                      {nbGouv}/{pelerinsFiltrés.length}
-                    </p>
-                    <div className="mt-2.5 h-1 bg-slate-100 rounded-full overflow-hidden">
-                      <div className="h-full bg-blue-600 rounded-full" style={{ width: `${pctGouv}%` }} />
-                    </div>
-                  </div>
-                </div>
+                </section>
               )
             })()}
 
-            {/* Pills rapides statut paiement + tri sur 1 seule ligne (sans scrollbar) */}
-            <div className="-mx-5 px-5 flex items-center gap-2 overflow-x-auto no-scrollbar">
+            {/* Sous-section C : Filtres de statut & filtres avancés actifs */}
+            <section className="px-5 py-3 space-y-2.5">
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-[10px] font-black uppercase tracking-wider text-slate-400">
+                  Filtres
+                </p>
+                {hasActiveFilters && (
+                  <button
+                    type="button"
+                    onClick={clearAllFilters}
+                    className="text-[11px] font-bold text-rose-600 flex items-center gap-0.5 active:scale-95 transition cursor-pointer"
+                  >
+                    <X size={12} /> Effacer tout
+                  </button>
+                )}
+              </div>
+
+              <div className="-mx-5 px-5 flex items-center gap-2 overflow-x-auto no-scrollbar">
+                {(['all', 'complet', 'partiel', 'non_paye'] as PaiementStatut[]).map(s => {
+                  const labels = { all: 'Tous', complet: 'Soldés', partiel: 'Partiels', non_paye: 'Non payés' }
+                  const active = statutPaiementFilter === s
+                  return (
+                    <button
+                      key={s}
+                      type="button"
+                      onClick={() => setStatutPaiementFilter(s)}
+                      className={`h-8 px-3.5 rounded-full text-xs font-bold whitespace-nowrap shrink-0 transition active:scale-95 cursor-pointer ${
+                        active
+                          ? 'bg-slate-900 text-white shadow-xs'
+                          : 'bg-slate-100/90 text-slate-600 border border-slate-200/70'
+                      }`}
+                    >
+                      {labels[s]}
+                    </button>
+                  )
+                })}
+              </div>
+
+              {/* Pills supprimables des filtres avancés actifs (1 tap pour retirer) */}
+              {(plateformeFilter !== 'all' || hotelFilter !== 'all' || !!selectedFilterValue) && (
+                <div className="-mx-5 px-5 flex items-center gap-2 overflow-x-auto no-scrollbar">
+                  {plateformeFilter !== 'all' && (
+                    <button
+                      type="button"
+                      onClick={() => setPlateformeFilter('all')}
+                      className="h-7 px-2.5 rounded-full bg-blue-50 text-blue-700 border border-blue-200/80 text-[11px] font-bold whitespace-nowrap shrink-0 flex items-center gap-1 active:scale-95 transition cursor-pointer"
+                    >
+                      <span>
+                        Plateforme : {plateformeFilter === 'gouv' ? 'Gouv' : plateformeFilter === 'nusuk' ? 'Nusuk' : plateformeFilter === 'both' ? 'Les deux' : 'Aucune'}
+                      </span>
+                      <X size={12} />
+                    </button>
+                  )}
+                  {hotelFilter !== 'all' && (
+                    <button
+                      type="button"
+                      onClick={() => setHotelFilter('all')}
+                      className="h-7 px-2.5 rounded-full bg-blue-50 text-blue-700 border border-blue-200/80 text-[11px] font-bold whitespace-nowrap shrink-0 flex items-center gap-1 active:scale-95 transition cursor-pointer"
+                    >
+                      <span>Hôtel : {hotelFilter}</span>
+                      <X size={12} />
+                    </button>
+                  )}
+                  {selectedFilterValue && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedFilterValue(null)
+                        setActiveFilterType(null)
+                      }}
+                      className="h-7 px-2.5 rounded-full bg-blue-50 text-blue-700 border border-blue-200/80 text-[11px] font-bold whitespace-nowrap shrink-0 flex items-center gap-1 active:scale-95 transition cursor-pointer"
+                    >
+                      <span>
+                        {activeFilterType === 'date' ? 'Inscription'
+                          : activeFilterType === 'date_depart' ? 'Départ'
+                          : activeFilterType === 'date_retour' ? 'Retour'
+                          : activeFilterType === 'reference' ? 'Réf.'
+                          : activeFilterType === 'agence' ? 'Agence'
+                          : activeFilterType === 'phone' ? 'Tél.'
+                          : 'Filtre'} : {selectedFilterValue}
+                      </span>
+                      <X size={12} />
+                    </button>
+                  )}
+                </div>
+              )}
+            </section>
+          </div>
+
+          {/* 3. ZONE LISTE DES PÈLERINS (rupture nette sur fond gris doux #F1F5F9) */}
+          <div className="px-5 pt-4 space-y-3">
+            {/* En-tête de section Liste + Tri */}
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2 min-w-0">
+                <p className="text-[11px] font-black uppercase tracking-wider text-slate-500">
+                  Liste des pèlerins
+                </p>
+                <span className="px-2 py-0.5 rounded-full bg-white border border-blue-950/10 text-[10px] font-black text-slate-600 tabular-nums">
+                  {hasActiveFilters ? `${pelerinsFiltrés.length}/${pelerins.length}` : pelerins.length}
+                </span>
+              </div>
+
               <button
                 type="button"
                 onClick={() => setSortOrder(prev => prev === 'desc' ? 'asc' : 'desc')}
-                className="h-8 px-3 rounded-full bg-white border border-slate-200/90 text-slate-700 text-xs font-bold whitespace-nowrap shrink-0 flex items-center gap-1.5 active:scale-95 transition cursor-pointer"
+                className="h-7 px-2.5 rounded-full bg-white border border-blue-950/15 text-slate-700 text-[11px] font-bold whitespace-nowrap shrink-0 flex items-center gap-1 active:scale-95 transition cursor-pointer"
               >
                 {sortOrder === 'desc' ? (
                   <>
-                    <ArrowDown size={12} className="text-blue-600" />
+                    <ArrowDown size={11} className="text-blue-600" />
                     <span>Récents</span>
                   </>
                 ) : (
                   <>
-                    <ArrowUp size={12} className="text-emerald-600" />
+                    <ArrowUp size={11} className="text-emerald-600" />
                     <span>Premiers</span>
                   </>
                 )}
               </button>
-
-              {(['all', 'complet', 'partiel', 'non_paye'] as PaiementStatut[]).map(s => {
-                const labels = { all: 'Tous', complet: 'Soldés', partiel: 'Partiels', non_paye: 'Non payés' }
-                const active = statutPaiementFilter === s
-                return (
-                  <button
-                    key={s}
-                    type="button"
-                    onClick={() => setStatutPaiementFilter(s)}
-                    className={`h-8 px-3.5 rounded-full text-xs font-bold whitespace-nowrap shrink-0 transition active:scale-95 cursor-pointer ${
-                      active
-                        ? 'bg-slate-900 text-white shadow-xs'
-                        : 'bg-white text-slate-600 border border-slate-200/90'
-                    }`}
-                  >
-                    {labels[s]}
-                  </button>
-                )
-              })}
-
-              {hasActiveFilters && (
-                <button
-                  type="button"
-                  onClick={clearAllFilters}
-                  className="h-8 px-3 rounded-full bg-rose-50 text-rose-600 border border-rose-200/80 text-xs font-black whitespace-nowrap shrink-0 flex items-center gap-1 active:scale-95 transition cursor-pointer"
-                >
-                  <X size={12} /> Effacer
-                </button>
-              )}
             </div>
 
             {/* Liste des dossiers mobile épurée */}
             {loading ? (
-              <div className="py-20 flex flex-col items-center justify-center text-slate-400 font-bold text-xs gap-3">
-                <Loader2 className="animate-spin text-blue-600" size={26} />
-                <span>Chargement des dossiers…</span>
+              <div className="space-y-3" aria-label="Chargement des dossiers">
+                {Array.from({ length: 5 }).map((_, idx) => (
+                  <div
+                    key={idx}
+                    className="bg-white rounded-2xl border border-blue-950/15 p-4 space-y-3 animate-pulse"
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className="w-12 h-12 rounded-2xl bg-slate-100 shrink-0" />
+                      <div className="flex-1 space-y-2 min-w-0">
+                        <div className="flex items-center justify-between gap-3">
+                          <div className="h-4 w-36 bg-slate-100 rounded-md" />
+                          <div className="h-3.5 w-12 bg-slate-100 rounded-md" />
+                        </div>
+                        <div className="h-3 w-44 bg-slate-100 rounded-md" />
+                      </div>
+                    </div>
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between">
+                        <div className="h-3.5 w-32 bg-slate-100 rounded-md" />
+                        <div className="h-3.5 w-20 bg-slate-100 rounded-md" />
+                      </div>
+                      <div className="w-28 h-1.5 bg-slate-100 rounded-full" />
+                    </div>
+                    <div className="pt-2 border-t border-slate-100 flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        <div className="h-3 w-10 bg-slate-100 rounded" />
+                        <div className="h-3 w-12 bg-slate-100 rounded" />
+                      </div>
+                      <div className="h-8 w-20 bg-slate-100 rounded-xl" />
+                    </div>
+                  </div>
+                ))}
               </div>
             ) : pelerinsFiltrés.length === 0 ? (
               <div className="bg-white rounded-3xl border border-dashed border-slate-200 py-14 px-6 text-center space-y-3">
@@ -1474,7 +1799,7 @@ export default function ListePelerins() {
               </div>
             ) : (
               <div className="space-y-3">
-                {pelerinsFiltrés.map((p) => {
+                {mobileVisiblePelerins.map((p) => {
                   const statut = getPaiementStatut(p)
                   const isSelected = selectedIds.has(p.id)
                   const photoUrl = p.photo_url ? getPassportPublicUrl(p.photo_url) : null
@@ -1485,13 +1810,26 @@ export default function ListePelerins() {
                   return (
                     <div
                       key={p.id}
+                      onTouchStart={(e) => startCardLongPress(p.id, e)}
+                      onTouchMove={moveCardLongPress}
+                      onTouchEnd={cancelCardLongPress}
+                      onTouchCancel={cancelCardLongPress}
                       onClick={() => {
-                        if (selectMode) toggleSelect(p.id)
+                        if (longPressTriggeredRef.current) {
+                          longPressTriggeredRef.current = false
+                          return
+                        }
+                        if (selectMode) {
+                          toggleSelect(p.id)
+                        } else {
+                          handlePersistScroll()
+                          router.push(`/hajj/pelerin?id=${p.id}`)
+                        }
                       }}
-                      className={`bg-white rounded-3xl border p-4 space-y-3.5 transition ${
+                      className={`bg-white rounded-2xl border p-4 space-y-2.5 transition-colors select-none cursor-pointer active:bg-slate-50/80 ${
                         isSelected
-                          ? 'border-blue-600 ring-2 ring-blue-500/15 bg-blue-50/20'
-                          : 'border-slate-100 shadow-xs'
+                          ? 'border-blue-600 ring-1 ring-blue-600/20 bg-blue-50/20'
+                          : 'border-blue-950/15'
                       }`}
                     >
                       {/* Ligne 1 : Avatar + Identité + Statut */}
@@ -1499,6 +1837,7 @@ export default function ListePelerins() {
                         {selectMode && (
                           <button
                             type="button"
+                            onTouchStart={(e) => e.stopPropagation()}
                             onClick={(e) => {
                               e.stopPropagation()
                               toggleSelect(p.id)
@@ -1582,9 +1921,9 @@ export default function ListePelerins() {
                         </div>
                       </div>
 
-                      {/* Ligne 3 : Plateformes & Actions pouce */}
+                      {/* Ligne 3 : Plateformes & Aperçu discret + indicateur d'ouverture */}
                       <div className="pt-2 border-t border-slate-100 flex items-center justify-between gap-2">
-                        <div className="flex items-center gap-2 text-[11px] font-bold">
+                        <div className="flex items-center gap-2.5 text-[11px] font-bold">
                           <span className={`inline-flex items-center gap-1.5 ${p.sur_plateforme_gouv ? 'text-emerald-700' : 'text-slate-400'}`}>
                             <span className={`w-1.5 h-1.5 rounded-full ${p.sur_plateforme_gouv ? 'bg-emerald-500' : 'bg-slate-300'}`} />
                             Gouv
@@ -1598,41 +1937,50 @@ export default function ListePelerins() {
                         <div className="flex items-center gap-2">
                           <button
                             type="button"
+                            onTouchStart={(e) => e.stopPropagation()}
                             onClick={(e) => {
                               e.stopPropagation()
                               setQuickViewPelerin(p)
                             }}
-                            className="h-9 px-3.5 rounded-xl bg-slate-100 active:bg-slate-200 text-slate-700 text-xs font-bold flex items-center gap-1.5 transition cursor-pointer"
+                            className="h-8 px-3 rounded-xl bg-slate-100 active:bg-slate-200 text-slate-700 text-xs font-bold flex items-center gap-1.5 transition cursor-pointer"
                           >
-                            <Eye size={14} />
+                            <Eye size={13} />
                             <span>Aperçu</span>
                           </button>
-
-                          <Link
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              handlePersistScroll()
-                            }}
-                            href={`/hajj/pelerin?id=${p.id}`}
-                            className="h-9 px-3.5 rounded-xl bg-slate-900 active:bg-blue-600 text-white text-xs font-black flex items-center gap-1 transition"
-                          >
-                            <span>Dossier</span>
-                            <ChevronRight size={14} />
-                          </Link>
+                          <ChevronRight size={16} className="text-slate-400 shrink-0" />
                         </div>
                       </div>
                     </div>
                   )
                 })}
 
-                <p className="text-center text-xs font-semibold text-slate-400 pt-2">
-                  {pelerinsFiltrés.length} pèlerin{pelerinsFiltrés.length > 1 ? 's' : ''} affiché
-                  {pelerinsFiltrés.length > 1 ? 's' : ''}
-                  {hasActiveFilters && ` sur ${pelerins.length}`}
+                {mobileVisibleCount < pelerinsFiltrés.length && (
+                  <div ref={loadMoreRef} className="py-3 flex justify-center">
+                    <Loader2 size={18} className="animate-spin text-slate-400" />
+                  </div>
+                )}
+
+                <p className="text-center text-xs font-semibold text-slate-400 pt-1">
+                  {mobileVisiblePelerins.length < pelerinsFiltrés.length
+                    ? `${mobileVisiblePelerins.length} sur ${pelerinsFiltrés.length} pèlerins affichés`
+                    : `${pelerinsFiltrés.length} pèlerin${pelerinsFiltrés.length > 1 ? 's' : ''} affiché${pelerinsFiltrés.length > 1 ? 's' : ''}`}
+                  {hasActiveFilters && ` (sur ${pelerins.length})`}
                 </p>
               </div>
             )}
           </div>
+
+          {/* Bouton flottant discret "Retour en haut" (mobile uniquement) */}
+          {showScrollTop && !selectMode && !anyMobileOverlayOpen && (
+            <button
+              type="button"
+              aria-label="Retour en haut"
+              onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
+              className="fixed right-4 bottom-24 z-30 w-11 h-11 rounded-full bg-slate-900/90 text-white shadow-lg border border-white/10 flex items-center justify-center active:scale-90 transition cursor-pointer animate-in fade-in zoom-in-90 duration-150"
+            >
+              <ArrowUp size={18} strokeWidth={2.5} />
+            </button>
+          )}
 
           {/* Barre flottante sélection multiple mobile */}
           {selectMode && !anyMobileOverlayOpen && (
@@ -2425,27 +2773,33 @@ export default function ListePelerins() {
           >
             <div
               onClick={(e) => e.stopPropagation()}
-              className="w-full bg-white rounded-t-[2rem] shadow-2xl px-5 pt-3 pb-[max(1.5rem,env(safe-area-inset-bottom))] space-y-3.5 animate-in slide-in-from-bottom duration-200"
+              style={sheetDragY > 0 ? { transform: `translateY(${sheetDragY}px)`, transition: 'none' } : undefined}
+              className="w-full bg-white rounded-t-[2rem] shadow-2xl px-5 pt-3 pb-[max(1.5rem,env(safe-area-inset-bottom))] space-y-3.5 animate-in slide-in-from-bottom duration-200 transition-transform"
             >
-              <div className="w-12 h-1.5 bg-slate-200 rounded-full mx-auto" />
+              <div
+                {...getSheetDragHandlers(() => setMobileExportSheetOpen(false))}
+                className="space-y-3 touch-none"
+              >
+                <div className="w-12 h-1.5 bg-slate-200 rounded-full mx-auto" />
 
-              <div className="flex items-center justify-between pt-1">
-                <div>
-                  <h3 className="text-base font-black text-slate-900">Exporter les dossiers</h3>
-                  <p className="text-xs font-semibold text-slate-500">
-                    {selectedIds.size > 0
-                      ? `${selectedIds.size} sélectionné(s)`
-                      : `${pelerinsFiltrés.length} pèlerin${pelerinsFiltrés.length > 1 ? 's' : ''}`}
-                  </p>
+                <div className="flex items-center justify-between pt-1">
+                  <div>
+                    <h3 className="text-base font-black text-slate-900">Exporter les dossiers</h3>
+                    <p className="text-xs font-semibold text-slate-500">
+                      {selectedIds.size > 0
+                        ? `${selectedIds.size} sélectionné(s)`
+                        : `${pelerinsFiltrés.length} pèlerin${pelerinsFiltrés.length > 1 ? 's' : ''}`}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setMobileExportSheetOpen(false)}
+                    aria-label="Fermer"
+                    className="w-9 h-9 rounded-full bg-slate-100 text-slate-500 flex items-center justify-center active:scale-90 transition cursor-pointer"
+                  >
+                    <X size={18} />
+                  </button>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => setMobileExportSheetOpen(false)}
-                  aria-label="Fermer"
-                  className="w-9 h-9 rounded-full bg-slate-100 text-slate-500 flex items-center justify-center active:scale-90 transition cursor-pointer"
-                >
-                  <X size={18} />
-                </button>
               </div>
 
               <div className="space-y-2.5">
@@ -2528,9 +2882,13 @@ export default function ListePelerins() {
           >
             <div
               onClick={(e) => e.stopPropagation()}
-              className="w-full bg-white rounded-t-[2rem] shadow-2xl max-h-[88dvh] flex flex-col animate-in slide-in-from-bottom duration-200"
+              style={sheetDragY > 0 ? { transform: `translateY(${sheetDragY}px)`, transition: 'none' } : undefined}
+              className="w-full bg-white rounded-t-[2rem] shadow-2xl max-h-[88dvh] flex flex-col animate-in slide-in-from-bottom duration-200 transition-transform"
             >
-              <div className="px-5 pt-3 pb-3.5 border-b border-slate-100 shrink-0">
+              <div
+                {...getSheetDragHandlers(() => setMobileFilterSheetOpen(false))}
+                className="px-5 pt-3 pb-3.5 border-b border-slate-100 shrink-0 touch-none"
+              >
                 <div className="w-12 h-1.5 bg-slate-200 rounded-full mx-auto mb-3" />
                 <div className="flex items-center justify-between">
                   <div>
