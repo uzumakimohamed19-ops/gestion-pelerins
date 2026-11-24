@@ -1,8 +1,8 @@
 // Fichier public/sw.js
-const CACHE_NAME = 'hajj-v3'; // Invalide le cache qui servait offline.html
+const CACHE_NAME = 'hajj-v4'; // Inclut le support complet Web Push (Android & iOS PWA)
 
 // 1. Initialisation du cache PWA sans écran offline de remplacement.
-self.addEventListener('install', (event) => {
+self.addEventListener('install', () => {
   self.skipWaiting();
 });
 
@@ -15,7 +15,7 @@ self.addEventListener('activate', (event) => {
           .filter((name) => name !== CACHE_NAME)
           .map((name) => caches.delete(name))
       );
-    }).then(() => clients.claim())
+    }).then(() => self.clients.claim())
   );
 });
 
@@ -90,4 +90,64 @@ self.addEventListener('fetch', (event) => {
       })
     );
   }
+});
+
+// 3. Réception des notifications Push Web (Android & iOS 16.4+ PWA)
+self.addEventListener('push', (event) => {
+  let data = {
+    title: 'Agence Pro',
+    body: 'Nouveau point de suivi disponible sur votre espace.',
+    url: '/hajj/dashboard',
+    icon: '/icon-192x192.png',
+    badge: '/icon-192x192.png',
+    tag: 'agencepro-digest',
+  };
+
+  if (event.data) {
+    try {
+      const parsed = event.data.json();
+      data = { ...data, ...parsed };
+    } catch {
+      const text = event.data.text();
+      if (text) data.body = text;
+    }
+  }
+
+  const options = {
+    body: data.body,
+    icon: data.icon || '/icon-192x192.png',
+    badge: data.badge || '/icon-192x192.png',
+    tag: data.tag || 'agencepro-digest',
+    renotify: true,
+    vibrate: [120, 60, 120],
+    data: {
+      url: data.url || '/hajj/dashboard',
+    },
+  };
+
+  event.waitUntil(self.registration.showNotification(data.title, options));
+});
+
+// 4. Ouverture ciblée de la PWA au clic sur une notification
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  const targetUrl = (event.notification.data && event.notification.data.url) || '/hajj/dashboard';
+
+  event.waitUntil(
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((windowClients) => {
+      for (const client of windowClients) {
+        if ('focus' in client) {
+          client.focus();
+          if ('navigate' in client) {
+            return client.navigate(targetUrl).catch(() => client);
+          }
+          return client;
+        }
+      }
+      if (self.clients.openWindow) {
+        return self.clients.openWindow(targetUrl);
+      }
+      return undefined;
+    })
+  );
 });

@@ -22,10 +22,13 @@ import {
   Plus,
   Globe,
   LockKeyhole,
-  BedDouble
+  BedDouble,
+  Bell
 } from 'lucide-react'
 import { useWorkProfile } from '@/lib/ProfileContext'
 import { useQuery } from '@powersync/react'
+import PushNotificationSheet from '@/components/PushNotificationSheet'
+import { getCurrentBrowserSubscription } from '@/lib/pushClient'
 
 // Rayon (en px) de la courbe concave "inverted border radius"
 const CONCAVE_R = 20
@@ -56,6 +59,12 @@ export default function Navbar() {
   const [userName, setUserName] = useState<string>('')
   const [role, setRole] = useState<string>('staff')
   const [isMenuOpen, setIsMenuOpen] = useState(false)
+  const [pushSheetOpen, setPushSheetOpen] = useState(false)
+  const [pushActive, setPushActive] = useState(false)
+
+  useEffect(() => {
+    void getCurrentBrowserSubscription().then((sub) => setPushActive(Boolean(sub)))
+  }, [])
 
   // États pour la gestion du scroll du bouton mobile
   const [isButtonVisible, setIsButtonVisible] = useState(true)
@@ -322,6 +331,20 @@ export default function Navbar() {
         {/* Section Bas : Profil & Déconnexion */}
         <div className="pt-4 border-t border-white/25 space-y-2 shrink-0">
           <button
+            onClick={() => setPushSheetOpen(true)}
+            className="w-full flex items-center justify-between gap-2 px-3 py-2.5 rounded-2xl bg-white/15 border border-white/25 text-sm font-black text-white hover:bg-white/25 transition-all cursor-pointer"
+            title="Notifications Push"
+          >
+            <span className="flex items-center gap-2">
+              <Bell size={17} />
+              <span>Notifications</span>
+            </span>
+            <span
+              className={`w-2 h-2 rounded-full ${pushActive ? 'bg-emerald-300' : 'bg-white/40'}`}
+            />
+          </button>
+
+          <button
             onClick={handleLock}
             className="w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-2xl bg-white/15 border border-white/25 text-sm font-black text-white hover:bg-white/25 transition-all cursor-pointer"
             title="Verrouiller"
@@ -465,6 +488,28 @@ export default function Navbar() {
               )
             })}
 
+            {/* Bouton Notifications Push */}
+            <button
+              type="button"
+              onClick={() => {
+                setIsMenuOpen(false)
+                setPushSheetOpen(true)
+              }}
+              className="flex items-center justify-between gap-2 px-4 py-3.5 rounded-2xl bg-slate-900 text-white border border-slate-800 col-span-2 active:scale-[0.98] transition-transform cursor-pointer"
+            >
+              <span className="flex items-center gap-2.5">
+                <Bell size={18} className={pushActive ? 'text-emerald-400' : 'text-blue-300'} />
+                <span className="text-xs font-black tracking-wide">Notifications Push</span>
+              </span>
+              <span
+                className={`text-[10px] font-black px-2 py-0.5 rounded-full ${
+                  pushActive ? 'bg-emerald-500/20 text-emerald-300' : 'bg-white/15 text-slate-200'
+                }`}
+              >
+                {pushActive ? 'Activées' : 'Configurer'}
+              </span>
+            </button>
+
             {/* Bouton de verrouillage */}
             <button
               onClick={handleLock}
@@ -490,6 +535,12 @@ export default function Navbar() {
       </div>
 
       <div className="hidden lg:block h-20" />
+
+      <PushNotificationSheet
+        open={pushSheetOpen}
+        onClose={() => setPushSheetOpen(false)}
+        onStatusChange={setPushActive}
+      />
     </>
   )
 }

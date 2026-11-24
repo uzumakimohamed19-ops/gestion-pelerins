@@ -9,6 +9,7 @@ import AppCacheGuard from '@/components/AppCacheGuard'
 import AuthGuard from '@/components/AuthGuard'
 import ProfileProvider, { ProfileRouteGuard } from '@/lib/ProfileContext'
 import AppUpdateBanner from '@/components/AppUpdateBanner'
+import PushActivityTracker from '@/components/PushActivityTracker'
 
 export const metadata = {
   title: 'Agence Pro',
@@ -120,6 +121,7 @@ export default function RootLayout({
                   </main>
 
                   <PwaInstaller />
+                  <PushActivityTracker />
                 </UIProvider>
               </ProfileRouteGuard>
             </AuthGuard>

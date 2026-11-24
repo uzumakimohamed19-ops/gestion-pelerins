@@ -8,9 +8,11 @@ import {
   Users, FileCheck, FileWarning, ArrowRight, Wallet,
   ShieldCheck, Globe, X, TrendingUp, AlertCircle,
   Download, Search, UserPlus, AlertTriangle, Filter, ChevronRight, FileSpreadsheet, Building2,
-  Eye, EyeOff, FileText, Calendar, CheckCircle2
+  Eye, EyeOff, FileText, Calendar, CheckCircle2, Bell
 } from 'lucide-react'
 import Link from 'next/link'
+import PushNotificationSheet from '@/components/PushNotificationSheet'
+import { getCurrentBrowserSubscription } from '@/lib/pushClient'
 import { YearSelector } from '@/components/YearSelector'
 import { HajjCurrencyTabs } from '@/components/HajjCurrencySelector'
 import {
@@ -468,9 +470,15 @@ export default function Dashboard() {
   const [pdfConfirmOpen, setPdfConfirmOpen] = useState(false)
   const [pdfExportTarget, setPdfExportTarget] = useState<{ items: Pelerin[]; title: string } | null>(null)
   const [nomAgence, setNomAgence] = useState('')
+  const [pushSheetOpen, setPushSheetOpen] = useState(false)
+  const [pushActive, setPushActive] = useState(false)
   const [touchStartY, setTouchStartY] = useState<number | null>(null)
   const [dragOffset, setDragOffset] = useState(0)
   const dateDuJour = new Date().toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' })
+
+  useEffect(() => {
+    void getCurrentBrowserSubscription().then((sub) => setPushActive(Boolean(sub)))
+  }, [])
 
   useEffect(() => {
     if (!canViewAmounts) setShowAmount(false)
@@ -760,6 +768,12 @@ export default function Dashboard() {
         count={pdfExportTarget?.items.length || 0}
       />
 
+      <PushNotificationSheet
+        open={pushSheetOpen}
+        onClose={() => setPushSheetOpen(false)}
+        onStatusChange={setPushActive}
+      />
+
       {/* 📱 ───────────────────────────────────────────────────────────────────
           AFFICHAGE MOBILE ORIGINAL
           ────────────────────────────────────────────────────────────────────── */}
@@ -786,12 +800,27 @@ export default function Dashboard() {
                 </h2>
               </div>
             </div>
-            <Link
-              href="/hajj/ajouter-pelerin"
-              className="bg-white text-blue-600 px-3 py-1.5 rounded-full font-bold text-[11px] flex items-center gap-1 shadow-sm active:scale-95 transition-transform shrink-0"
-            >
-              <UserPlus size={12} /> Ajouter
-            </Link>
+            <div className="flex items-center gap-1.5 shrink-0">
+              <button
+                type="button"
+                onClick={() => setPushSheetOpen(true)}
+                aria-label="Notifications Push"
+                className="relative w-8 h-8 rounded-full bg-white/15 border border-white/25 text-white flex items-center justify-center active:scale-90 transition cursor-pointer"
+              >
+                <Bell size={15} />
+                <span
+                  className={`absolute top-1.5 right-1.5 w-1.5 h-1.5 rounded-full ${
+                    pushActive ? 'bg-emerald-300' : 'bg-amber-300'
+                  }`}
+                />
+              </button>
+              <Link
+                href="/hajj/ajouter-pelerin"
+                className="bg-white text-blue-600 px-3 py-1.5 rounded-full font-bold text-[11px] flex items-center gap-1 shadow-sm active:scale-95 transition-transform shrink-0"
+              >
+                <UserPlus size={12} /> Ajouter
+              </Link>
+            </div>
           </div>
 
           <div className="flex justify-between items-end mt-7 relative z-10 gap-3">
