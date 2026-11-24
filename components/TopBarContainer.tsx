@@ -29,6 +29,10 @@ function rgbToHex(r: number, g: number, b: number): string {
   return `#${toHex(r)}${toHex(g)}${toHex(b)}`
 }
 
+function getLuminance(r: number, g: number, b: number): number {
+  return (0.299 * r + 0.587 * g + 0.114 * b) / 255
+}
+
 /**
  * Résout n'importe quelle couleur CSS moderne (Tailwind v4 oklch/oklab/color,
  * rgb/rgba, hsl, #hex) en composantes RGBA exactes via un canvas 1×1 natif.
@@ -69,11 +73,6 @@ function compositeOver(top: RGB, bottom: RGB): RGB {
   }
 }
 
-function isDarkColor(r: number, g: number, b: number): boolean {
-  const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255
-  return luminance < 0.58
-}
-
 function getSafeAreaTopPx(): number {
   if (typeof window === 'undefined') return 0
   const probe = document.querySelector<HTMLElement>('[data-status-bar-guard="true"]')
@@ -84,12 +83,39 @@ function getSafeAreaTopPx(): number {
   return 0
 }
 
-function getRouteFallbackColor(pathname: string | null): string {
+function isAppDarkMode(pathname: string | null): boolean {
+  if (typeof document === 'undefined') return false
   const clean = (pathname || '/').replace(/\/+$/, '') || '/'
-  const isGlobalDark =
-    typeof document !== 'undefined' && document.documentElement.classList.contains('dark')
-  const isAgenceDark =
-    typeof window !== 'undefined' && localStorage.getItem('compta_theme_dark') === 'true'
+  if (clean.startsWith('/agence')) {
+    return typeof window !== 'undefined' && localStorage.getItem('compta_theme_dark') === 'true'
+  }
+  return document.documentElement.classList.contains('dark')
+}
+
+function isSystemDarkMode(): boolean {
+  if (typeof window === 'undefined' || !window.matchMedia) return false
+  return window.matchMedia('(prefers-color-scheme: dark)').matches
+}
+
+/**
+ * Couleur de fond réelle du CORPS de la page (jamais le bleu de l'en-tête),
+ * afin d'éviter toute bande bleue parasite en bas de page lors du scroll.
+ */
+function getPageBodyBg(pathname: string | null): string {
+  const clean = (pathname || '/').replace(/\/+$/, '') || '/'
+  const appDark = isAppDarkMode(pathname)
+  if (clean.startsWith('/agence')) {
+    return appDark ? '#000000' : '#fbfbfb'
+  }
+  if (appDark) {
+    return '#202124'
+  }
+  return '#f8fafc'
+}
+
+function getRouteFallbackHeaderColor(pathname: string | null): string {
+  const clean = (pathname || '/').replace(/\/+$/, '') || '/'
+  const appDark = isAppDarkMode(pathname)
   const isMobileViewport = typeof window !== 'undefined' && window.innerWidth < 768
 
   if (clean === '/hajj' || clean === '/hajj/dashboard' || clean === '/hajj/dash') {
@@ -99,13 +125,13 @@ function getRouteFallbackColor(pathname: string | null): string {
     return '#2563eb'
   }
   if (clean === '/agence' || clean === '/agence/dashboard') {
-    return isAgenceDark ? '#161618' : '#1e293b'
+    return appDark ? '#161618' : '#1e293b'
   }
-  if (clean.startsWith('/agence') && isAgenceDark) {
+  if (clean.startsWith('/agence') && appDark) {
     return '#000000'
   }
-  if (isGlobalDark) {
-    return '#202124'
+  if (appDark) {
+    return '#303134'
   }
   return '#ffffff'
 }
@@ -163,43 +189,65 @@ function detectVisibleHeaderColor(fallbackHex: string): string {
 
 export default function TopBarContainer() {
   const pathname = usePathname()
-  const lastAppliedRef = useRef<{ color: string; isDark: boolean } | null>(null)
+  const lastAppliedRef = useRef<{ statusColor: string; bodyBg: string; isDark: boolean } | null>(null)
   const timerRef = useRef<number | null>(null)
 
   useEffect(() => {
     if (typeof window === 'undefined') return
 
-    const applyColor = (hex: string) => {
-      const parsed = parseAnyCssColor(hex) ?? { r: 255, g: 255, b: 255, a: 1 }
-      const normalizedHex = rgbToHex(parsed.r, parsed.g, parsed.b)
-      const isDark = isDarkColor(parsed.r, parsed.g, parsed.b)
+    const applyColors = (rawHeaderHex: string) => {
+      const parsedHeader = parseAnyCssColor(rawHeaderHex) ?? { r: 255, g: 255, b: 255, a: 1 }
+      const headerLuminance = getLuminance(parsedHeader.r, parsedHeader.g, parsedHeader.b)
+      const sysDark = isSystemDarkMode()
+      const appDark = isAppDarkMode(pathname)
+
+      // 🛡️ GARDE-FOU CONTRASTE MODE SOMBRE SMARTPHONE :
+      // Si l'appareil est en mode sombre (prefers-color-scheme: dark) mais que la page active
+      // a un en-tête très clair/blanc (ex: État Général, Dossiers...), certains smartphones
+      // Android/MIUI/Samsung/iOS conservent des icônes système blanches qui deviennent invisibles
+      // sur un fond blanc. On bascule alors la barre de statut en ardoise sombre (#0f172a)
+      // avec icônes blanches garantissant 100 % de lisibilité.
+      let statusColor = rgbToHex(parsedHeader.r, parsedHeader.g, parsedHeader.b)
+      let isDarkBar = headerLuminance < 0.58
+
+      if (sysDark && !appDark && headerLuminance >= 0.82) {
+        statusColor = '#0f172a'
+        isDarkBar = true
+      }
+
+      // 🛡️ FOND DU CORPS DE PAGE SÉPARÉ DE L'EN-TÊTE :
+      // html et body prennent TOUJOURS le fond neutre du corps de page (#f8fafc ou sombre),
+      // jamais la couleur bleue de l'en-tête → aucune bande bleue en bas de page !
+      const bodyBg = getPageBodyBg(pathname)
 
       if (
         lastAppliedRef.current &&
-        lastAppliedRef.current.color === normalizedHex &&
-        lastAppliedRef.current.isDark === isDark
+        lastAppliedRef.current.statusColor === statusColor &&
+        lastAppliedRef.current.bodyBg === bodyBg &&
+        lastAppliedRef.current.isDark === isDarkBar
       ) {
         return
       }
-      lastAppliedRef.current = { color: normalizedHex, isDark }
+      lastAppliedRef.current = { statusColor, bodyBg, isDark: isDarkBar }
 
-      // 1. Variable CSS consommée par les barres safe-area (Hajj & Agence)
-      document.documentElement.style.setProperty('--status-bar-bg', normalizedHex)
+      // 1. Variable CSS consommée uniquement par la bande haute safe-area (top: 0)
+      document.documentElement.style.setProperty('--status-bar-bg', statusColor)
 
-      // 2. Teinte du document (encoche iOS & rebond overscroll)
-      document.documentElement.style.setProperty('background-color', normalizedHex, 'important')
-      document.body.style.setProperty('background-color', normalizedHex, 'important')
+      // 2. Fond neutre du document (jamais le bleu de l'en-tête -> pied de page propre)
+      document.documentElement.style.colorScheme = appDark ? 'dark' : 'light'
+      document.documentElement.style.setProperty('background-color', bodyBg, 'important')
+      document.body.style.setProperty('background-color', bodyBg, 'important')
 
       // 3. Balise <meta name="theme-color"> unique et propre (Chrome Android / Safari iOS)
       const metas = Array.from(document.querySelectorAll('meta[name="theme-color"]'))
       if (metas.length === 0) {
         const meta = document.createElement('meta')
         meta.name = 'theme-color'
-        meta.content = normalizedHex
+        meta.content = statusColor
         document.head.appendChild(meta)
       } else {
         metas[0].removeAttribute('media')
-        metas[0].setAttribute('content', normalizedHex)
+        metas[0].setAttribute('content', statusColor)
         for (let i = 1; i < metas.length; i++) {
           metas[i].remove()
         }
@@ -212,7 +260,7 @@ export default function TopBarContainer() {
         appleMeta.setAttribute('name', 'apple-mobile-web-app-status-bar-style')
         document.head.appendChild(appleMeta)
       }
-      appleMeta.setAttribute('content', isDark ? 'black-translucent' : 'default')
+      appleMeta.setAttribute('content', isDarkBar ? 'black-translucent' : 'default')
 
       // 5. Barre de statut native Capacitor (Android & iOS)
       if (Capacitor.isNativePlatform()) {
@@ -221,12 +269,12 @@ export default function TopBarContainer() {
           try {
             if (platform === 'android') {
               await StatusBar.setOverlaysWebView({ overlay: false })
-              await StatusBar.setBackgroundColor({ color: normalizedHex })
+              await StatusBar.setBackgroundColor({ color: statusColor })
             }
-            // Style.Dark => icônes blanches (fond sombre/coloré)
-            // Style.Light => icônes noires (fond clair/blanc)
+            // Style.Dark => icônes blanches (fond sombre/bleu)
+            // Style.Light => icônes noires (fond clair en mode clair)
             await StatusBar.setStyle({
-              style: isDark ? Style.Dark : Style.Light,
+              style: isDarkBar ? Style.Dark : Style.Light,
             })
           } catch {
             // ignore on unsupported environments
@@ -236,9 +284,9 @@ export default function TopBarContainer() {
     }
 
     const syncFromDom = () => {
-      const fallback = getRouteFallbackColor(pathname)
+      const fallback = getRouteFallbackHeaderColor(pathname)
       const detected = detectVisibleHeaderColor(fallback)
-      applyColor(detected)
+      applyColors(detected)
     }
 
     const scheduleSync = (delay = 60) => {
@@ -249,15 +297,14 @@ export default function TopBarContainer() {
       }, delay)
     }
 
-    // Application immédiate basée sur la route (0ms, zéro flash au changement de page)
-    applyColor(getRouteFallbackColor(pathname))
+    // Application immédiate basée sur la route (0ms, zéro flash)
+    applyColors(getRouteFallbackHeaderColor(pathname))
 
-    // Puis détection réelle de l'en-tête peint (+ revérification après chargement async)
+    // Détection réelle de l'en-tête peint (+ revérification après chargement async)
     const rafId = requestAnimationFrame(syncFromDom)
     const t1 = window.setTimeout(syncFromDom, 150)
     const t2 = window.setTimeout(syncFromDom, 450)
 
-    // Observer les changements d'UI (dark mode, ouverture de modales/overlays, fin de chargement)
     const htmlObserver = new MutationObserver(() => scheduleSync(40))
     htmlObserver.observe(document.documentElement, {
       attributes: true,
@@ -270,6 +317,13 @@ export default function TopBarContainer() {
       subtree: true,
     })
 
+    const mq = window.matchMedia?.('(prefers-color-scheme: dark)')
+    const onSystemThemeChange = () => {
+      lastAppliedRef.current = null
+      scheduleSync(30)
+    }
+    mq?.addEventListener?.('change', onSystemThemeChange)
+
     const onVisibility = () => {
       if (document.visibilityState === 'visible') {
         lastAppliedRef.current = null
@@ -278,7 +332,10 @@ export default function TopBarContainer() {
     }
 
     const onResize = () => scheduleSync(80)
-    const onThemeEvent = () => scheduleSync(40)
+    const onThemeEvent = () => {
+      lastAppliedRef.current = null
+      scheduleSync(40)
+    }
 
     window.addEventListener('resize', onResize, { passive: true })
     window.addEventListener('theme-change', onThemeEvent)
@@ -292,6 +349,7 @@ export default function TopBarContainer() {
       window.clearTimeout(t2)
       htmlObserver.disconnect()
       bodyObserver.disconnect()
+      mq?.removeEventListener?.('change', onSystemThemeChange)
       window.removeEventListener('resize', onResize)
       window.removeEventListener('theme-change', onThemeEvent)
       window.removeEventListener('storage', onThemeEvent)
