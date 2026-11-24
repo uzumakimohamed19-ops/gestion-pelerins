@@ -378,9 +378,8 @@ function TargetPicker({
                 key={id}
                 type="button"
                 onClick={() => setStatut(id)}
-                className={`px-3 py-1 rounded-full text-[11px] font-bold border transition-colors cursor-pointer ${
-                  statut === id ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-600 border-slate-200'
-                }`}
+                className={`px-3 py-1 rounded-full text-[11px] font-bold border transition-colors cursor-pointer ${statut === id ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-600 border-slate-200'
+                  }`}
               >
                 {label}
               </button>
@@ -414,14 +413,12 @@ function TargetPicker({
                 key={id}
                 type="button"
                 onClick={() => (mode === 'groupe' ? toggle(id) : onConfirmIds([id]))}
-                className={`w-full text-left p-2.5 sm:p-3 rounded-xl border flex items-center gap-2.5 sm:gap-3 transition-colors cursor-pointer ${
-                  checked ? 'bg-blue-50 border-blue-300' : 'bg-white border-slate-200 active:bg-slate-50'
-                }`}
+                className={`w-full text-left p-2.5 sm:p-3 rounded-xl border flex items-center gap-2.5 sm:gap-3 transition-colors cursor-pointer ${checked ? 'bg-blue-50 border-blue-300' : 'bg-white border-slate-200 active:bg-slate-50'
+                  }`}
               >
                 <div
-                  className={`w-5 h-5 sm:w-6 sm:h-6 shrink-0 flex items-center justify-center border-2 ${
-                    mode === 'groupe' ? 'rounded-lg' : 'rounded-full'
-                  } ${checked ? 'bg-blue-600 border-blue-600 text-white' : 'border-slate-300 text-transparent'}`}
+                  className={`w-5 h-5 sm:w-6 sm:h-6 shrink-0 flex items-center justify-center border-2 ${mode === 'groupe' ? 'rounded-lg' : 'rounded-full'
+                    } ${checked ? 'bg-blue-600 border-blue-600 text-white' : 'border-slate-300 text-transparent'}`}
                 >
                   <Check size={13} strokeWidth={3} />
                 </div>
@@ -461,9 +458,8 @@ function TargetPicker({
                   key={x.valeur}
                   type="button"
                   onClick={() => onConfirmValue(x.valeur)}
-                  className={`w-full text-left p-3 rounded-xl border flex items-center justify-between gap-3 cursor-pointer ${
-                    checked ? 'bg-blue-50 border-blue-300' : 'bg-white border-slate-200 active:bg-slate-50'
-                  }`}
+                  className={`w-full text-left p-3 rounded-xl border flex items-center justify-between gap-3 cursor-pointer ${checked ? 'bg-blue-50 border-blue-300' : 'bg-white border-slate-200 active:bg-slate-50'
+                    }`}
                 >
                   <div className="min-w-0">
                     <p className="font-bold text-xs sm:text-sm text-slate-900 truncate">
@@ -482,8 +478,8 @@ function TargetPicker({
 
         {((isPelerinMode && visible.length === 0) ||
           (!isPelerinMode && list.filter(x => x.valeur.toLowerCase().includes(q)).length === 0)) && (
-          <div className="text-center py-10 text-xs text-slate-400 font-bold">Aucun résultat.</div>
-        )}
+            <div className="text-center py-10 text-xs text-slate-400 font-bold">Aucun résultat.</div>
+          )}
       </div>
     </Sheet>
   )
@@ -562,9 +558,9 @@ export default function ComptabiliteHajj() {
     return selectedYear === 'all'
       ? raw
       : raw.filter(p => {
-          if (p.campagne === undefined || p.campagne === null) return false
-          return Number(p.campagne) === Number(selectedYear)
-        })
+        if (p.campagne === undefined || p.campagne === null) return false
+        return Number(p.campagne) === Number(selectedYear)
+      })
   }
 
   const { data: rawPelerins, isLoading: pelerinsLoading } = useQuery<any>(`
@@ -672,19 +668,19 @@ export default function ComptabiliteHajj() {
       const key = `${r.d.id}:${r.montant}`
       if (syncingRef.current.has(key)) return
       syncingRef.current.add(key)
-      ;(async () => {
-        try {
-          const { data: upd, error } = await supabase
-            .from('depenses_hajj')
-            .update({ montant: r.montant })
-            .eq('id', r.d.id)
-            .select('id')
-          requireSupabaseRows(upd, error, 'mise à jour dynamique de la dépense Hajj')
-          await db.execute('UPDATE depenses_hajj SET montant = ? WHERE id = ?', [r.montant, r.d.id])
-        } catch {
-          syncingRef.current.delete(key)
-        }
-      })()
+        ; (async () => {
+          try {
+            const { data: upd, error } = await supabase
+              .from('depenses_hajj')
+              .update({ montant: r.montant })
+              .eq('id', r.d.id)
+              .select('id')
+            requireSupabaseRows(upd, error, 'mise à jour dynamique de la dépense Hajj')
+            await db.execute('UPDATE depenses_hajj SET montant = ? WHERE id = ?', [r.montant, r.d.id])
+          } catch {
+            syncingRef.current.delete(key)
+          }
+        })()
     })
   }, [rows, loading, pelerinsLoading, depensesLoading])
 
@@ -1137,9 +1133,8 @@ export default function ComptabiliteHajj() {
           key={id}
           type="button"
           onClick={() => setFilterType(id as 'all' | TypeCible)}
-          className={`px-3 py-1.5 rounded-full text-[11px] font-bold border transition-colors cursor-pointer ${
-            filterType === id ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
-          }`}
+          className={`px-3 py-1.5 rounded-full text-[11px] font-bold border transition-colors cursor-pointer ${filterType === id ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+            }`}
         >
           {label}
         </button>
@@ -1152,9 +1147,8 @@ export default function ComptabiliteHajj() {
       <button
         type="button"
         onClick={() => setFilterNature('all')}
-        className={`px-3 py-1.5 rounded-full text-[11px] font-bold border transition-colors cursor-pointer ${
-          effectiveNature === 'all' ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
-        }`}
+        className={`px-3 py-1.5 rounded-full text-[11px] font-bold border transition-colors cursor-pointer ${effectiveNature === 'all' ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+          }`}
       >
         Toutes natures
       </button>
@@ -1163,9 +1157,8 @@ export default function ComptabiliteHajj() {
           key={n.libelle}
           type="button"
           onClick={() => setFilterNature(effectiveNature === n.libelle ? 'all' : n.libelle)}
-          className={`px-3 py-1.5 rounded-full text-[11px] font-bold border transition-colors cursor-pointer ${
-            effectiveNature === n.libelle ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
-          }`}
+          className={`px-3 py-1.5 rounded-full text-[11px] font-bold border transition-colors cursor-pointer ${effectiveNature === n.libelle ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+            }`}
         >
           {n.libelle} <span className="opacity-70">({n.count})</span>
         </button>
@@ -1207,9 +1200,8 @@ export default function ComptabiliteHajj() {
           key={id}
           type="button"
           onClick={() => setViewMode(id)}
-          className={`py-2 rounded-lg text-[11px] sm:text-xs font-black flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
-            viewMode === id ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-500'
-          }`}
+          className={`py-2 rounded-lg text-[11px] sm:text-xs font-black flex items-center justify-center gap-1.5 transition-all cursor-pointer ${viewMode === id ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-500'
+            }`}
         >
           <Icon size={13} /> <span className="truncate">{label}</span>
         </button>
@@ -1473,15 +1465,13 @@ export default function ComptabiliteHajj() {
                   key={cur.code}
                   type="button"
                   onClick={() => handleSelectDevise(cur.code)}
-                  className={`h-10 rounded-xl text-xs font-black flex items-center justify-center gap-1.5 transition-all active:scale-[0.98] cursor-pointer ${
-                    active ? 'bg-white text-blue-700 shadow-sm' : 'text-blue-100'
-                  }`}
+                  className={`h-10 rounded-xl text-xs font-black flex items-center justify-center gap-1.5 transition-all active:scale-[0.98] cursor-pointer ${active ? 'bg-white text-blue-700 shadow-sm' : 'text-blue-100'
+                    }`}
                 >
                   <span>{cur.shortLabel}</span>
                   <span
-                    className={`text-[10px] px-1.5 py-0.5 rounded-full tabular-nums ${
-                      active ? 'bg-blue-50 text-blue-700' : 'bg-white/15 text-white'
-                    }`}
+                    className={`text-[10px] px-1.5 py-0.5 rounded-full tabular-nums ${active ? 'bg-blue-50 text-blue-700' : 'bg-white/15 text-white'
+                      }`}
                   >
                     {count}
                   </span>
@@ -1528,16 +1518,14 @@ export default function ComptabiliteHajj() {
             <button
               type="button"
               onClick={() => setTab('depenses')}
-              className={`h-10 rounded-xl text-xs font-black flex items-center justify-center gap-2 transition-all active:scale-[0.98] cursor-pointer ${
-                tab === 'depenses' ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-600'
-              }`}
+              className={`h-10 rounded-xl text-xs font-black flex items-center justify-center gap-2 transition-all active:scale-[0.98] cursor-pointer ${tab === 'depenses' ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-600'
+                }`}
             >
               <Receipt size={15} className={tab === 'depenses' ? 'text-blue-600' : 'text-slate-400'} />
               <span>Dépenses</span>
               <span
-                className={`text-[10px] px-1.5 py-0.5 rounded-full tabular-nums ${
-                  tab === 'depenses' ? 'bg-blue-50 text-blue-700' : 'bg-slate-300/80 text-slate-600'
-                }`}
+                className={`text-[10px] px-1.5 py-0.5 rounded-full tabular-nums ${tab === 'depenses' ? 'bg-blue-50 text-blue-700' : 'bg-slate-300/80 text-slate-600'
+                  }`}
               >
                 {depenses.length}
               </span>
@@ -1545,9 +1533,8 @@ export default function ComptabiliteHajj() {
             <button
               type="button"
               onClick={() => setTab('apercu')}
-              className={`h-10 rounded-xl text-xs font-black flex items-center justify-center gap-2 transition-all active:scale-[0.98] cursor-pointer ${
-                tab === 'apercu' ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-600'
-              }`}
+              className={`h-10 rounded-xl text-xs font-black flex items-center justify-center gap-2 transition-all active:scale-[0.98] cursor-pointer ${tab === 'apercu' ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-600'
+                }`}
             >
               <LayoutDashboard size={15} className={tab === 'apercu' ? 'text-blue-600' : 'text-slate-400'} />
               <span>Vue d'ensemble</span>
@@ -1724,11 +1711,10 @@ export default function ComptabiliteHajj() {
                                         </p>
                                       </div>
                                       <span
-                                        className={`text-[11px] font-black px-2.5 py-1 rounded-full shrink-0 tabular-nums ${
-                                          solde
+                                        className={`text-[11px] font-black px-2.5 py-1 rounded-full shrink-0 tabular-nums ${solde
                                             ? 'bg-emerald-50 text-emerald-700'
                                             : 'bg-amber-50 text-amber-700'
-                                        }`}
+                                          }`}
                                       >
                                         {solde ? 'Soldé' : `-${fmt(restant)} ${curShort}`}
                                       </span>
@@ -1843,9 +1829,8 @@ export default function ComptabiliteHajj() {
                     key={id}
                     type="button"
                     onClick={() => setViewMode(id)}
-                    className={`h-9 rounded-xl text-xs font-black flex items-center justify-center gap-1.5 transition-all active:scale-[0.98] cursor-pointer ${
-                      viewMode === id ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-500'
-                    }`}
+                    className={`h-9 rounded-xl text-xs font-black flex items-center justify-center gap-1.5 transition-all active:scale-[0.98] cursor-pointer ${viewMode === id ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-500'
+                      }`}
                   >
                     <Icon size={13} />
                     <span>{label}</span>
@@ -1859,11 +1844,10 @@ export default function ComptabiliteHajj() {
                   <button
                     type="button"
                     onClick={() => setFilterNature('all')}
-                    className={`h-9 px-3.5 rounded-full text-xs font-bold whitespace-nowrap shrink-0 transition active:scale-95 cursor-pointer ${
-                      effectiveNature === 'all'
+                    className={`h-9 px-3.5 rounded-full text-xs font-bold whitespace-nowrap shrink-0 transition active:scale-95 cursor-pointer ${effectiveNature === 'all'
                         ? 'bg-slate-900 text-white shadow-xs'
                         : 'bg-white text-slate-600 border border-slate-200/80'
-                    }`}
+                      }`}
                   >
                     Toutes
                   </button>
@@ -1874,11 +1858,10 @@ export default function ComptabiliteHajj() {
                         key={n.libelle}
                         type="button"
                         onClick={() => setFilterNature(active ? 'all' : n.libelle)}
-                        className={`h-9 px-3.5 rounded-full text-xs font-bold whitespace-nowrap shrink-0 transition active:scale-95 cursor-pointer ${
-                          active
+                        className={`h-9 px-3.5 rounded-full text-xs font-bold whitespace-nowrap shrink-0 transition active:scale-95 cursor-pointer ${active
                             ? 'bg-blue-600 text-white shadow-xs'
                             : 'bg-white text-slate-600 border border-slate-200/80'
-                        }`}
+                          }`}
                       >
                         {n.libelle}{' '}
                         <span className={active ? 'text-blue-200' : 'text-slate-400'}>
@@ -2024,9 +2007,8 @@ export default function ComptabiliteHajj() {
                               </p>
                               <ChevronDown
                                 size={16}
-                                className={`text-slate-400 transition-transform ${
-                                  collapsed ? '' : 'rotate-180'
-                                }`}
+                                className={`text-slate-400 transition-transform ${collapsed ? '' : 'rotate-180'
+                                  }`}
                               />
                             </div>
                           </div>
@@ -2115,11 +2097,10 @@ export default function ComptabiliteHajj() {
                               -{fmt(cout)} {curShort}
                             </p>
                             <span
-                              className={`inline-block mt-1 text-[10px] font-black px-2 py-0.5 rounded-full tabular-nums ${
-                                net >= 0
+                              className={`inline-block mt-1 text-[10px] font-black px-2 py-0.5 rounded-full tabular-nums ${net >= 0
                                   ? 'bg-emerald-50 text-emerald-700'
                                   : 'bg-rose-50 text-rose-700'
-                              }`}
+                                }`}
                             >
                               {net > 0 ? '+' : ''}
                               {fmt(net)} {curShort}
@@ -2174,486 +2155,483 @@ export default function ComptabiliteHajj() {
       {/* =================================================================== */}
       <div className="hidden md:block w-full min-w-0 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 md:py-8 pb-24 overflow-x-hidden text-slate-800">
 
-      {/* HEADER RESPONSIVE (Sélecteur d'année masqué sur mobile) */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4 md:mb-5">
-        <div className="min-w-0">
-          <h1 className="text-xl sm:text-2xl md:text-3xl font-black text-slate-900 tracking-tight leading-tight flex items-center gap-2 flex-wrap">
-            <span>Comptabilité & Dépenses</span>
-            <span className={`text-xs px-2.5 py-1 rounded-xl border font-black uppercase ${HAJJ_CURRENCY_MAP[selectedDevise].badgeClass}`}>
-              {HAJJ_CURRENCY_MAP[selectedDevise].label}
-            </span>
-          </h1>
-          <p className="text-xs sm:text-sm text-slate-500 font-medium mt-0.5">
-            Comptabilité séparée par devise — aucun mélange entre FCFA, Euro et Dollar.
-          </p>
-        </div>
-        <div className="flex w-full sm:w-auto items-center justify-end gap-2 shrink-0">
-          <div className="hidden md:block">
-            <YearSelector />
+        {/* HEADER RESPONSIVE (Sélecteur d'année masqué sur mobile) */}
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4 md:mb-5">
+          <div className="min-w-0">
+            <h1 className="text-xl sm:text-2xl md:text-3xl font-black text-slate-900 tracking-tight leading-tight flex items-center gap-2 flex-wrap">
+              <span>Comptabilité & Dépenses</span>
+              <span className={`text-xs px-2.5 py-1 rounded-xl border font-black uppercase ${HAJJ_CURRENCY_MAP[selectedDevise].badgeClass}`}>
+                {HAJJ_CURRENCY_MAP[selectedDevise].label}
+              </span>
+            </h1>
+            <p className="text-xs sm:text-sm text-slate-500 font-medium mt-0.5">
+              Comptabilité séparée par devise — aucun mélange entre FCFA, Euro et Dollar.
+            </p>
           </div>
-          <button
-            type="button"
-            onClick={() => {
-              setTab('depenses')
-              openNew()
-            }}
-            className="inline-flex w-full sm:w-auto justify-center items-center gap-1.5 px-3.5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 active:scale-95 text-white text-xs font-black shadow-sm transition-all cursor-pointer shrink-0"
-          >
-            <Plus size={16} /> <span>Nouvelle dépense ({curSymbol})</span>
-          </button>
-        </div>
-      </div>
-
-      {/* SÉLECTEUR DE DEVISE STRICT (FCFA | EUR | USD) */}
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-        <HajjCurrencyTabs
-          value={selectedDevise}
-          onChange={(next) => {
-            setSelectedDevise(next)
-            setExpandedAgence(null)
-            setExpandedDepense(null)
-            setExpandedPelerin(null)
-            setDetailId(null)
-            resetFilters()
-          }}
-          counts={deviseCounts}
-        />
-        <span className="text-[11px] font-bold text-slate-400">
-          {data.length} pèlerin(s) en {HAJJ_CURRENCY_MAP[selectedDevise].label}
-        </span>
-      </div>
-
-      {/* BARRE D'ONGLETS UNIFIÉE (MOBILE & BUREAU) */}
-      <div className="grid grid-cols-2 gap-1.5 p-1.5 bg-slate-200/80 rounded-2xl mb-5 max-w-lg">
-        <button
-          type="button"
-          onClick={() => setTab('apercu')}
-          className={`py-2.5 px-3 rounded-xl text-xs font-black flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
-            tab === 'apercu' ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-600 hover:text-slate-900'
-          }`}
-        >
-          <LayoutDashboard size={15} className={tab === 'apercu' ? 'text-blue-600' : 'text-slate-500'} />
-          <span>Vue d'ensemble</span>
-        </button>
-        <button
-          type="button"
-          onClick={() => setTab('depenses')}
-          className={`py-2.5 px-3 rounded-xl text-xs font-black flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
-            tab === 'depenses' ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-600 hover:text-slate-900'
-          }`}
-        >
-          <Receipt size={15} className={tab === 'depenses' ? 'text-rose-600' : 'text-slate-500'} />
-          <span>Dépenses</span>
-          <span className={`text-[10px] px-1.5 py-0.2 rounded-md ${tab === 'depenses' ? 'bg-blue-600 text-white' : 'bg-slate-300 text-slate-700'}`}>
-            {depenses.length}
-          </span>
-        </button>
-      </div>
-
-      {loading ? (
-        <div className="flex items-center justify-center py-28">
-          <div className="w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full animate-spin" />
-        </div>
-      ) : tab === 'apercu' ? (
-        <>
-          {/* ---- CARDS RÉSUMÉ DE TRÉSORERIE ---- */}
-          <div className="grid grid-cols-2 lg:grid-cols-5 gap-2.5 sm:gap-3.5 mb-6">
-            <div className="bg-blue-600 p-4 rounded-2xl text-white shadow-xs col-span-2 lg:col-span-1 flex flex-col justify-between">
-              <div className="flex justify-between items-center mb-1.5">
-                <span className="text-[10px] font-black uppercase tracking-wider text-blue-100">Encaissé Total</span>
-                <div className="p-1.5 bg-white/15 rounded-xl"><Wallet size={16} /></div>
-              </div>
-              <div>
-                <h3 className="text-xl sm:text-2xl font-black tabular-nums">{fmt(totalEncaisse)} <span className="text-xs font-bold text-blue-200">{curShort}</span></h3>
-                <p className="text-[10px] text-blue-100 font-medium mt-0.5">Sur {fmt(totalAttendu)} {curShort} attendus</p>
-              </div>
+          <div className="flex w-full sm:w-auto items-center justify-end gap-2 shrink-0">
+            <div className="hidden md:block">
+              <YearSelector />
             </div>
-
             <button
               type="button"
-              onClick={() => setTab('depenses')}
-              className="text-left bg-white p-3.5 sm:p-4 rounded-2xl border border-slate-200 shadow-xs flex flex-col justify-between active:bg-slate-50 cursor-pointer"
+              onClick={() => {
+                setTab('depenses')
+                openNew()
+              }}
+              className="inline-flex w-full sm:w-auto justify-center items-center gap-1.5 px-3.5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 active:scale-95 text-white text-xs font-black shadow-sm transition-all cursor-pointer shrink-0"
             >
-              <div className="flex justify-between items-center mb-1.5">
-                <span className="text-[10px] font-black uppercase tracking-wider text-slate-400">Total Dépensé</span>
-                <div className="p-1.5 bg-amber-50 text-amber-600 rounded-xl"><DollarSign size={16} /></div>
-              </div>
-              <div>
-                <h3 className="text-base sm:text-xl font-black text-slate-900 tabular-nums">{fmt(totalDepenses)} <span className="text-xs font-bold text-slate-400">{curShort}</span></h3>
-                <p className="text-[10px] text-slate-400 font-medium mt-0.5">{depenses.length} écriture(s)</p>
-              </div>
+              <Plus size={16} /> <span>Nouvelle dépense ({curSymbol})</span>
             </button>
+          </div>
+        </div>
 
-            <div className="bg-white p-3.5 sm:p-4 rounded-2xl border border-slate-200 shadow-xs flex flex-col justify-between">
-              <div className="flex justify-between items-center mb-1.5">
-                <span className="text-[10px] font-black uppercase tracking-wider text-slate-400">Bénéfice Réel</span>
-                <div className={`p-1.5 rounded-xl ${beneficeReel >= 0 ? 'bg-emerald-50 text-emerald-600' : 'bg-rose-50 text-rose-600'}`}>
-                  <Landmark size={16} />
+        {/* SÉLECTEUR DE DEVISE STRICT (FCFA | EUR | USD) */}
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+          <HajjCurrencyTabs
+            value={selectedDevise}
+            onChange={(next) => {
+              setSelectedDevise(next)
+              setExpandedAgence(null)
+              setExpandedDepense(null)
+              setExpandedPelerin(null)
+              setDetailId(null)
+              resetFilters()
+            }}
+            counts={deviseCounts}
+          />
+          <span className="text-[11px] font-bold text-slate-400">
+            {data.length} pèlerin(s) en {HAJJ_CURRENCY_MAP[selectedDevise].label}
+          </span>
+        </div>
+
+        {/* BARRE D'ONGLETS UNIFIÉE (MOBILE & BUREAU) */}
+        <div className="grid grid-cols-2 gap-1.5 p-1.5 bg-slate-200/80 rounded-2xl mb-5 max-w-lg">
+          <button
+            type="button"
+            onClick={() => setTab('apercu')}
+            className={`py-2.5 px-3 rounded-xl text-xs font-black flex items-center justify-center gap-1.5 transition-all cursor-pointer ${tab === 'apercu' ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-600 hover:text-slate-900'
+              }`}
+          >
+            <LayoutDashboard size={15} className={tab === 'apercu' ? 'text-blue-600' : 'text-slate-500'} />
+            <span>Vue d'ensemble</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setTab('depenses')}
+            className={`py-2.5 px-3 rounded-xl text-xs font-black flex items-center justify-center gap-1.5 transition-all cursor-pointer ${tab === 'depenses' ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-600 hover:text-slate-900'
+              }`}
+          >
+            <Receipt size={15} className={tab === 'depenses' ? 'text-rose-600' : 'text-slate-500'} />
+            <span>Dépenses</span>
+            <span className={`text-[10px] px-1.5 py-0.2 rounded-md ${tab === 'depenses' ? 'bg-blue-600 text-white' : 'bg-slate-300 text-slate-700'}`}>
+              {depenses.length}
+            </span>
+          </button>
+        </div>
+
+        {loading ? (
+          <div className="flex items-center justify-center py-28">
+            <div className="w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full animate-spin" />
+          </div>
+        ) : tab === 'apercu' ? (
+          <>
+            {/* ---- CARDS RÉSUMÉ DE TRÉSORERIE ---- */}
+            <div className="grid grid-cols-2 lg:grid-cols-5 gap-2.5 sm:gap-3.5 mb-6">
+              <div className="bg-blue-600 p-4 rounded-2xl text-white shadow-xs col-span-2 lg:col-span-1 flex flex-col justify-between">
+                <div className="flex justify-between items-center mb-1.5">
+                  <span className="text-[10px] font-black uppercase tracking-wider text-blue-100">Encaissé Total</span>
+                  <div className="p-1.5 bg-white/15 rounded-xl"><Wallet size={16} /></div>
+                </div>
+                <div>
+                  <h3 className="text-xl sm:text-2xl font-black tabular-nums">{fmt(totalEncaisse)} <span className="text-xs font-bold text-blue-200">{curShort}</span></h3>
+                  <p className="text-[10px] text-blue-100 font-medium mt-0.5">Sur {fmt(totalAttendu)} {curShort} attendus</p>
                 </div>
               </div>
-              <div>
-                <h3 className={`text-base sm:text-xl font-black tabular-nums ${beneficeReel >= 0 ? 'text-emerald-700' : 'text-rose-700'}`}>
-                  {beneficeReel > 0 ? '+' : ''}{fmt(beneficeReel)} <span className="text-xs font-bold text-slate-400">{curShort}</span>
-                </h3>
-                <p className="text-[10px] text-slate-400 font-medium mt-0.5">Encaissé moins sorties</p>
-              </div>
-            </div>
 
-            <div className="bg-white p-3.5 sm:p-4 rounded-2xl border border-slate-200 shadow-xs flex flex-col justify-between">
-              <div className="flex justify-between items-center mb-1.5">
-                <span className="text-[10px] font-black uppercase tracking-wider text-slate-400">Reste à Recouvrer</span>
-                <div className="p-1.5 bg-slate-100 text-slate-600 rounded-xl"><CreditCard size={16} /></div>
-              </div>
-              <div>
-                <h3 className="text-base sm:text-xl font-black text-amber-700 tabular-nums">{fmt(totalRestant)} <span className="text-xs font-bold text-slate-400">{curShort}</span></h3>
-                <p className="text-[10px] text-slate-400 font-medium mt-0.5">{enAttente.length} dossier(s) incomplet(s)</p>
-              </div>
-            </div>
-
-            <div className="bg-white p-3.5 sm:p-4 rounded-2xl border border-slate-200 shadow-xs flex flex-col justify-between">
-              <div className="flex justify-between items-center mb-1.5">
-                <span className="text-[10px] font-black uppercase tracking-wider text-slate-400">Recouvrement</span>
-                <div className="p-1.5 bg-blue-50 text-blue-600 rounded-xl"><TrendingUp size={16} /></div>
-              </div>
-              <div>
-                <h3 className="text-base sm:text-xl font-black text-slate-900 tabular-nums">{tauxRecouvrement}%</h3>
-                <div className="mt-1.5 h-1.5 bg-slate-100 rounded-full overflow-hidden">
-                  <div className="h-full bg-blue-600 rounded-full transition-all" style={{ width: `${tauxRecouvrement}%` }} />
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* ---- APERÇU DES DÉPENSES PAR NATURE ---- */}
-          <div className="bg-white rounded-2xl border border-slate-200 shadow-xs p-4 sm:p-6 mb-5">
-            <div className="flex items-center justify-between gap-3 mb-4">
-              <div className="flex items-center gap-2">
-                <div className="p-2 bg-amber-50 rounded-xl text-amber-600"><Receipt size={16} /></div>
-                <h2 className="text-xs sm:text-sm font-black text-slate-900 uppercase tracking-wide">Dépenses par nature</h2>
-              </div>
-              <button type="button" onClick={() => setTab('depenses')} className="text-xs font-black text-blue-600 active:text-blue-800 py-1 cursor-pointer">
-                Gérer les dépenses →
-              </button>
-            </div>
-            {natures.length === 0 ? (
-              <p className="text-xs text-slate-400 font-bold text-center py-6">Aucune dépense enregistrée.</p>
-            ) : (
-              renderNatureBars(5)
-            )}
-          </div>
-
-          {/* ---- PAR PACKAGE ---- */}
-          <div className="bg-white rounded-2xl border border-slate-200 shadow-xs p-4 sm:p-6 mb-5">
-            <div className="flex items-center gap-2 mb-4">
-              <div className="p-2 bg-blue-50 rounded-xl text-blue-600"><Package size={16} /></div>
-              <h2 className="text-xs sm:text-sm font-black text-slate-900 uppercase tracking-wide">Recouvrement par Forfait / Package</h2>
-            </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-              {Object.entries(packages).map(([nom, pkg]) => {
-                const taux = pkg.attendu > 0 ? Math.round((pkg.encaisse / pkg.attendu) * 100) : 0
-                return (
-                  <div key={nom} className="p-3.5 bg-slate-50 border border-slate-200/80 rounded-xl flex flex-col justify-between">
-                    <div>
-                      <div className="flex items-center justify-between gap-2 mb-1.5">
-                        <span className="font-bold text-slate-900 text-xs truncate">{nom}</span>
-                        <span className="text-[10px] font-bold text-slate-500 bg-white border border-slate-200 px-1.5 py-0.5 rounded shrink-0">
-                          {pkg.count} pèlerin(s)
-                        </span>
-                      </div>
-                      <div className="flex justify-between text-xs mb-1">
-                        <span className="text-emerald-700 font-bold">{fmt(pkg.encaisse)} {curShort}</span>
-                        <span className="text-slate-400">/ {fmt(pkg.attendu)} {curShort}</span>
-                      </div>
-                      <div className="h-1.5 bg-slate-200 rounded-full overflow-hidden">
-                        <div className="h-full bg-blue-600 rounded-full" style={{ width: `${taux}%` }} />
-                      </div>
-                    </div>
-                    <div className="flex justify-between items-center text-[10px] font-bold text-slate-400 mt-2">
-                      <span>Reste : {fmt(pkg.attendu - pkg.encaisse)} {curShort}</span>
-                      <span>{taux}%</span>
-                    </div>
-                  </div>
-                )
-              })}
-            </div>
-          </div>
-
-          {/* ---- PAR AGENCE / PARTENAIRE ---- */}
-          <div className="bg-white rounded-2xl border border-slate-200 shadow-xs p-4 sm:p-6">
-            <div className="flex items-center gap-2 mb-4">
-              <div className="p-2 bg-blue-50 rounded-xl text-blue-600"><BarChart2 size={16} /></div>
-              <h2 className="text-xs sm:text-sm font-black text-slate-900 uppercase tracking-wide">Situation par Agence & Partenaire</h2>
-            </div>
-            <div className="space-y-2">
-              {Object.entries(agences).sort((a, b) => b[1].encaisse - a[1].encaisse).map(([nom, agc]) => {
-                const taux = agc.attendu > 0 ? Math.round((agc.encaisse / agc.attendu) * 100) : 0
-                const isOpen = expandedAgence === nom
-                return (
-                  <div key={nom} className="border border-slate-200 rounded-xl overflow-hidden">
-                    <button
-                      onClick={() => setExpandedAgence(isOpen ? null : nom)}
-                      className="w-full p-3.5 bg-slate-50 hover:bg-slate-100 active:bg-slate-100 transition-colors flex items-center justify-between text-left cursor-pointer"
-                    >
-                      <div className="min-w-0 pr-2">
-                        <p className="font-bold text-slate-900 text-xs sm:text-sm truncate">{nom}</p>
-                        <p className="text-[10px] text-slate-400 font-medium">{agc.pelerins.length} pèlerin(s)</p>
-                      </div>
-                      <div className="flex items-center gap-2.5 shrink-0">
-                        <div className="text-right">
-                          <p className="text-xs font-black text-emerald-700">{fmt(agc.encaisse)} {curSymbol}</p>
-                          <p className="text-[10px] text-slate-400">{taux}% recouvré</p>
-                        </div>
-                        {isOpen ? <ChevronUp size={16} className="text-slate-400" /> : <ChevronDown size={16} className="text-slate-400" />}
-                      </div>
-                    </button>
-
-                    {isOpen && (
-                      <div className="p-3 sm:p-4 border-t border-slate-200 bg-white">
-                        <div className="space-y-1.5">
-                          {agc.pelerins.map((p, i) => {
-                            const restant = (Number(p.prix_package) || 0) - (Number(p.total_paye) || 0)
-                            const solde = restant <= 0
-                            return (
-                              <div key={p.id || i} className="flex items-center justify-between gap-2 p-2.5 bg-slate-50 rounded-lg text-xs">
-                                <div className="min-w-0">
-                                  <p className="font-bold text-slate-800 truncate">{p.prenom} {p.nom_complet || p.nom}</p>
-                                  <p className="text-[10px] text-slate-400 font-mono truncate">{p.num_passeport || 'Sans passeport'}</p>
-                                </div>
-                                <div className="text-right shrink-0">
-                                  <span className={`text-[10px] font-bold px-2 py-0.5 rounded ${solde ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}`}>
-                                    {solde ? 'Soldé' : `Reste: ${fmt(restant)} ${curShort}`}
-                                  </span>
-                                </div>
-                              </div>
-                            )
-                          })}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                )
-              })}
-            </div>
-          </div>
-        </>
-      ) : (
-        <>
-          {/* ======================= ONGLET DÉPENSES ======================= */}
-
-          {/* Stats en grille 2x2 propre sur mobile et 4 colonnes sur PC */}
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-3 mb-4 sm:mb-5">
-            <div className="bg-white p-3.5 sm:p-4 rounded-2xl border border-slate-200 shadow-xs">
-              <span className="text-[10px] font-black uppercase tracking-wider text-slate-400">Total dépensé</span>
-              <h3 className="text-base sm:text-xl font-black text-rose-600 tabular-nums mt-1">-{fmt(totalDepenses)} <span className="text-xs text-slate-400">{curShort}</span></h3>
-            </div>
-            <div className="bg-white p-3.5 sm:p-4 rounded-2xl border border-slate-200 shadow-xs">
-              <span className="text-[10px] font-black uppercase tracking-wider text-slate-400">Écritures</span>
-              <h3 className="text-base sm:text-xl font-black text-slate-900 tabular-nums mt-1">{depenses.length}</h3>
-            </div>
-            <div className="bg-white p-3.5 sm:p-4 rounded-2xl border border-slate-200 shadow-xs">
-              <span className="text-[10px] font-black uppercase tracking-wider text-slate-400">Coût moyen / pèlerin</span>
-              <h3 className="text-base sm:text-xl font-black text-slate-900 tabular-nums mt-1">
-                {fmt(data.length ? totalDepenses / data.length : 0)} <span className="text-xs text-slate-400">{curShort}</span>
-              </h3>
-            </div>
-            <div className="bg-white p-3.5 sm:p-4 rounded-2xl border border-slate-200 shadow-xs">
-              <span className="text-[10px] font-black uppercase tracking-wider text-slate-400">Bénéfice réel</span>
-              <h3 className={`text-base sm:text-xl font-black tabular-nums mt-1 ${beneficeReel >= 0 ? 'text-emerald-700' : 'text-rose-700'}`}>
-                {beneficeReel > 0 ? '+' : ''}{fmt(beneficeReel)} <span className="text-xs text-slate-400">{curShort}</span>
-              </h3>
-            </div>
-          </div>
-
-          {/* Répartition par nature (repliable sur mobile) */}
-          {natures.length > 0 && (
-            <div className="bg-white rounded-2xl border border-slate-200 shadow-xs p-4 sm:p-5 mb-4 sm:mb-5">
               <button
                 type="button"
-                onClick={() => setShowNatureBars(v => !v)}
-                className="w-full flex items-center justify-between md:cursor-default cursor-pointer"
+                onClick={() => setTab('depenses')}
+                className="text-left bg-white p-3.5 sm:p-4 rounded-2xl border border-slate-200 shadow-xs flex flex-col justify-between active:bg-slate-50 cursor-pointer"
               >
-                <h2 className="text-xs font-black text-slate-900 uppercase tracking-wide">Répartition par nature</h2>
-                <span className="flex items-center gap-2">
-                  {effectiveNature !== 'all' && (
-                    <span
-                      role="button"
-                      onClick={e => {
-                        e.stopPropagation()
-                        setFilterNature('all')
-                      }}
-                      className="text-[11px] font-bold text-blue-600 py-0.5"
-                    >
-                      Tout afficher
+                <div className="flex justify-between items-center mb-1.5">
+                  <span className="text-[10px] font-black uppercase tracking-wider text-slate-400">Total Dépensé</span>
+                  <div className="p-1.5 bg-amber-50 text-amber-600 rounded-xl"><DollarSign size={16} /></div>
+                </div>
+                <div>
+                  <h3 className="text-base sm:text-xl font-black text-slate-900 tabular-nums">{fmt(totalDepenses)} <span className="text-xs font-bold text-slate-400">{curShort}</span></h3>
+                  <p className="text-[10px] text-slate-400 font-medium mt-0.5">{depenses.length} écriture(s)</p>
+                </div>
+              </button>
+
+              <div className="bg-white p-3.5 sm:p-4 rounded-2xl border border-slate-200 shadow-xs flex flex-col justify-between">
+                <div className="flex justify-between items-center mb-1.5">
+                  <span className="text-[10px] font-black uppercase tracking-wider text-slate-400">Bénéfice Réel</span>
+                  <div className={`p-1.5 rounded-xl ${beneficeReel >= 0 ? 'bg-emerald-50 text-emerald-600' : 'bg-rose-50 text-rose-600'}`}>
+                    <Landmark size={16} />
+                  </div>
+                </div>
+                <div>
+                  <h3 className={`text-base sm:text-xl font-black tabular-nums ${beneficeReel >= 0 ? 'text-emerald-700' : 'text-rose-700'}`}>
+                    {beneficeReel > 0 ? '+' : ''}{fmt(beneficeReel)} <span className="text-xs font-bold text-slate-400">{curShort}</span>
+                  </h3>
+                  <p className="text-[10px] text-slate-400 font-medium mt-0.5">Encaissé moins sorties</p>
+                </div>
+              </div>
+
+              <div className="bg-white p-3.5 sm:p-4 rounded-2xl border border-slate-200 shadow-xs flex flex-col justify-between">
+                <div className="flex justify-between items-center mb-1.5">
+                  <span className="text-[10px] font-black uppercase tracking-wider text-slate-400">Reste à Recouvrer</span>
+                  <div className="p-1.5 bg-slate-100 text-slate-600 rounded-xl"><CreditCard size={16} /></div>
+                </div>
+                <div>
+                  <h3 className="text-base sm:text-xl font-black text-amber-700 tabular-nums">{fmt(totalRestant)} <span className="text-xs font-bold text-slate-400">{curShort}</span></h3>
+                  <p className="text-[10px] text-slate-400 font-medium mt-0.5">{enAttente.length} dossier(s) incomplet(s)</p>
+                </div>
+              </div>
+
+              <div className="bg-white p-3.5 sm:p-4 rounded-2xl border border-slate-200 shadow-xs flex flex-col justify-between">
+                <div className="flex justify-between items-center mb-1.5">
+                  <span className="text-[10px] font-black uppercase tracking-wider text-slate-400">Recouvrement</span>
+                  <div className="p-1.5 bg-blue-50 text-blue-600 rounded-xl"><TrendingUp size={16} /></div>
+                </div>
+                <div>
+                  <h3 className="text-base sm:text-xl font-black text-slate-900 tabular-nums">{tauxRecouvrement}%</h3>
+                  <div className="mt-1.5 h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                    <div className="h-full bg-blue-600 rounded-full transition-all" style={{ width: `${tauxRecouvrement}%` }} />
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* ---- APERÇU DES DÉPENSES PAR NATURE ---- */}
+            <div className="bg-white rounded-2xl border border-slate-200 shadow-xs p-4 sm:p-6 mb-5">
+              <div className="flex items-center justify-between gap-3 mb-4">
+                <div className="flex items-center gap-2">
+                  <div className="p-2 bg-amber-50 rounded-xl text-amber-600"><Receipt size={16} /></div>
+                  <h2 className="text-xs sm:text-sm font-black text-slate-900 uppercase tracking-wide">Dépenses par nature</h2>
+                </div>
+                <button type="button" onClick={() => setTab('depenses')} className="text-xs font-black text-blue-600 active:text-blue-800 py-1 cursor-pointer">
+                  Gérer les dépenses →
+                </button>
+              </div>
+              {natures.length === 0 ? (
+                <p className="text-xs text-slate-400 font-bold text-center py-6">Aucune dépense enregistrée.</p>
+              ) : (
+                renderNatureBars(5)
+              )}
+            </div>
+
+            {/* ---- PAR PACKAGE ---- */}
+            <div className="bg-white rounded-2xl border border-slate-200 shadow-xs p-4 sm:p-6 mb-5">
+              <div className="flex items-center gap-2 mb-4">
+                <div className="p-2 bg-blue-50 rounded-xl text-blue-600"><Package size={16} /></div>
+                <h2 className="text-xs sm:text-sm font-black text-slate-900 uppercase tracking-wide">Recouvrement par Forfait / Package</h2>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                {Object.entries(packages).map(([nom, pkg]) => {
+                  const taux = pkg.attendu > 0 ? Math.round((pkg.encaisse / pkg.attendu) * 100) : 0
+                  return (
+                    <div key={nom} className="p-3.5 bg-slate-50 border border-slate-200/80 rounded-xl flex flex-col justify-between">
+                      <div>
+                        <div className="flex items-center justify-between gap-2 mb-1.5">
+                          <span className="font-bold text-slate-900 text-xs truncate">{nom}</span>
+                          <span className="text-[10px] font-bold text-slate-500 bg-white border border-slate-200 px-1.5 py-0.5 rounded shrink-0">
+                            {pkg.count} pèlerin(s)
+                          </span>
+                        </div>
+                        <div className="flex justify-between text-xs mb-1">
+                          <span className="text-emerald-700 font-bold">{fmt(pkg.encaisse)} {curShort}</span>
+                          <span className="text-slate-400">/ {fmt(pkg.attendu)} {curShort}</span>
+                        </div>
+                        <div className="h-1.5 bg-slate-200 rounded-full overflow-hidden">
+                          <div className="h-full bg-blue-600 rounded-full" style={{ width: `${taux}%` }} />
+                        </div>
+                      </div>
+                      <div className="flex justify-between items-center text-[10px] font-bold text-slate-400 mt-2">
+                        <span>Reste : {fmt(pkg.attendu - pkg.encaisse)} {curShort}</span>
+                        <span>{taux}%</span>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+
+            {/* ---- PAR AGENCE / PARTENAIRE ---- */}
+            <div className="bg-white rounded-2xl border border-slate-200 shadow-xs p-4 sm:p-6">
+              <div className="flex items-center gap-2 mb-4">
+                <div className="p-2 bg-blue-50 rounded-xl text-blue-600"><BarChart2 size={16} /></div>
+                <h2 className="text-xs sm:text-sm font-black text-slate-900 uppercase tracking-wide">Situation par Agence & Partenaire</h2>
+              </div>
+              <div className="space-y-2">
+                {Object.entries(agences).sort((a, b) => b[1].encaisse - a[1].encaisse).map(([nom, agc]) => {
+                  const taux = agc.attendu > 0 ? Math.round((agc.encaisse / agc.attendu) * 100) : 0
+                  const isOpen = expandedAgence === nom
+                  return (
+                    <div key={nom} className="border border-slate-200 rounded-xl overflow-hidden">
+                      <button
+                        onClick={() => setExpandedAgence(isOpen ? null : nom)}
+                        className="w-full p-3.5 bg-slate-50 hover:bg-slate-100 active:bg-slate-100 transition-colors flex items-center justify-between text-left cursor-pointer"
+                      >
+                        <div className="min-w-0 pr-2">
+                          <p className="font-bold text-slate-900 text-xs sm:text-sm truncate">{nom}</p>
+                          <p className="text-[10px] text-slate-400 font-medium">{agc.pelerins.length} pèlerin(s)</p>
+                        </div>
+                        <div className="flex items-center gap-2.5 shrink-0">
+                          <div className="text-right">
+                            <p className="text-xs font-black text-emerald-700">{fmt(agc.encaisse)} {curSymbol}</p>
+                            <p className="text-[10px] text-slate-400">{taux}% recouvré</p>
+                          </div>
+                          {isOpen ? <ChevronUp size={16} className="text-slate-400" /> : <ChevronDown size={16} className="text-slate-400" />}
+                        </div>
+                      </button>
+
+                      {isOpen && (
+                        <div className="p-3 sm:p-4 border-t border-slate-200 bg-white">
+                          <div className="space-y-1.5">
+                            {agc.pelerins.map((p, i) => {
+                              const restant = (Number(p.prix_package) || 0) - (Number(p.total_paye) || 0)
+                              const solde = restant <= 0
+                              return (
+                                <div key={p.id || i} className="flex items-center justify-between gap-2 p-2.5 bg-slate-50 rounded-lg text-xs">
+                                  <div className="min-w-0">
+                                    <p className="font-bold text-slate-800 truncate">{p.prenom} {p.nom_complet || p.nom}</p>
+                                    <p className="text-[10px] text-slate-400 font-mono truncate">{p.num_passeport || 'Sans passeport'}</p>
+                                  </div>
+                                  <div className="text-right shrink-0">
+                                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded ${solde ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}`}>
+                                      {solde ? 'Soldé' : `Reste: ${fmt(restant)} ${curShort}`}
+                                    </span>
+                                  </div>
+                                </div>
+                              )
+                            })}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          </>
+        ) : (
+          <>
+            {/* ======================= ONGLET DÉPENSES ======================= */}
+
+            {/* Stats en grille 2x2 propre sur mobile et 4 colonnes sur PC */}
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-3 mb-4 sm:mb-5">
+              <div className="bg-white p-3.5 sm:p-4 rounded-2xl border border-slate-200 shadow-xs">
+                <span className="text-[10px] font-black uppercase tracking-wider text-slate-400">Total dépensé</span>
+                <h3 className="text-base sm:text-xl font-black text-rose-600 tabular-nums mt-1">-{fmt(totalDepenses)} <span className="text-xs text-slate-400">{curShort}</span></h3>
+              </div>
+              <div className="bg-white p-3.5 sm:p-4 rounded-2xl border border-slate-200 shadow-xs">
+                <span className="text-[10px] font-black uppercase tracking-wider text-slate-400">Écritures</span>
+                <h3 className="text-base sm:text-xl font-black text-slate-900 tabular-nums mt-1">{depenses.length}</h3>
+              </div>
+              <div className="bg-white p-3.5 sm:p-4 rounded-2xl border border-slate-200 shadow-xs">
+                <span className="text-[10px] font-black uppercase tracking-wider text-slate-400">Coût moyen / pèlerin</span>
+                <h3 className="text-base sm:text-xl font-black text-slate-900 tabular-nums mt-1">
+                  {fmt(data.length ? totalDepenses / data.length : 0)} <span className="text-xs text-slate-400">{curShort}</span>
+                </h3>
+              </div>
+              <div className="bg-white p-3.5 sm:p-4 rounded-2xl border border-slate-200 shadow-xs">
+                <span className="text-[10px] font-black uppercase tracking-wider text-slate-400">Bénéfice réel</span>
+                <h3 className={`text-base sm:text-xl font-black tabular-nums mt-1 ${beneficeReel >= 0 ? 'text-emerald-700' : 'text-rose-700'}`}>
+                  {beneficeReel > 0 ? '+' : ''}{fmt(beneficeReel)} <span className="text-xs text-slate-400">{curShort}</span>
+                </h3>
+              </div>
+            </div>
+
+            {/* Répartition par nature (repliable sur mobile) */}
+            {natures.length > 0 && (
+              <div className="bg-white rounded-2xl border border-slate-200 shadow-xs p-4 sm:p-5 mb-4 sm:mb-5">
+                <button
+                  type="button"
+                  onClick={() => setShowNatureBars(v => !v)}
+                  className="w-full flex items-center justify-between md:cursor-default cursor-pointer"
+                >
+                  <h2 className="text-xs font-black text-slate-900 uppercase tracking-wide">Répartition par nature</h2>
+                  <span className="flex items-center gap-2">
+                    {effectiveNature !== 'all' && (
+                      <span
+                        role="button"
+                        onClick={e => {
+                          e.stopPropagation()
+                          setFilterNature('all')
+                        }}
+                        className="text-[11px] font-bold text-blue-600 py-0.5"
+                      >
+                        Tout afficher
+                      </span>
+                    )}
+                    <ChevronDown size={16} className={`md:hidden text-slate-400 transition-transform ${showNatureBars ? 'rotate-180' : ''}`} />
+                  </span>
+                </button>
+                <div className={`${showNatureBars ? 'block' : 'hidden'} md:block mt-3.5`}>{renderNatureBars()}</div>
+              </div>
+            )}
+
+            {/* Barre d'outils unifiée & responsive */}
+            <div className="bg-white rounded-2xl border border-slate-200 shadow-xs p-3.5 sm:p-4 mb-4 space-y-3">
+              <div className="flex gap-2">
+                {searchBox}
+                <button
+                  type="button"
+                  onClick={() => setShowFilters(true)}
+                  className="md:hidden relative w-11 shrink-0 rounded-xl bg-slate-50 border border-slate-200 active:bg-slate-100 text-slate-700 flex items-center justify-center cursor-pointer"
+                  aria-label="Filtrer et trier"
+                >
+                  <SlidersHorizontal size={16} />
+                  {activeFilterCount > 0 && (
+                    <span className="absolute -top-1.5 -right-1.5 min-w-[17px] h-[17px] px-1 rounded-full bg-blue-600 text-white text-[9px] font-black flex items-center justify-center">
+                      {activeFilterCount}
                     </span>
                   )}
-                  <ChevronDown size={16} className={`md:hidden text-slate-400 transition-transform ${showNatureBars ? 'rotate-180' : ''}`} />
-                </span>
-              </button>
-              <div className={`${showNatureBars ? 'block' : 'hidden'} md:block mt-3.5`}>{renderNatureBars()}</div>
-            </div>
-          )}
+                </button>
+                <button
+                  type="button"
+                  onClick={openNew}
+                  className="hidden md:inline-flex items-center gap-1.5 px-4 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-black cursor-pointer shrink-0"
+                >
+                  <Plus size={15} /> Nouvelle dépense
+                </button>
+              </div>
 
-          {/* Barre d'outils unifiée & responsive */}
-          <div className="bg-white rounded-2xl border border-slate-200 shadow-xs p-3.5 sm:p-4 mb-4 space-y-3">
-            <div className="flex gap-2">
-              {searchBox}
-              <button
-                type="button"
-                onClick={() => setShowFilters(true)}
-                className="md:hidden relative w-11 shrink-0 rounded-xl bg-slate-50 border border-slate-200 active:bg-slate-100 text-slate-700 flex items-center justify-center cursor-pointer"
-                aria-label="Filtrer et trier"
-              >
-                <SlidersHorizontal size={16} />
-                {activeFilterCount > 0 && (
-                  <span className="absolute -top-1.5 -right-1.5 min-w-[17px] h-[17px] px-1 rounded-full bg-blue-600 text-white text-[9px] font-black flex items-center justify-center">
-                    {activeFilterCount}
-                  </span>
+              {viewSwitch}
+
+              <div className="hidden md:flex gap-2">
+                {sortSelect}
+                <button
+                  type="button"
+                  onClick={exportCsv}
+                  disabled={filteredRows.length === 0}
+                  className="px-3.5 rounded-xl bg-slate-50 border border-slate-200 hover:bg-slate-100 text-slate-700 text-xs font-black flex items-center gap-1.5 disabled:opacity-40 cursor-pointer"
+                  title="Exporter en CSV"
+                >
+                  <Download size={14} /> CSV
+                </button>
+              </div>
+
+              <div className="hidden md:block space-y-2">
+                {renderTypeChips()}
+                {natures.length > 0 && renderNatureChips()}
+              </div>
+
+              {natures.length > 0 && (
+                <div className="md:hidden pt-1">
+                  {renderNatureChips()}
+                </div>
+              )}
+            </div>
+
+            {/* Résumé du résultat */}
+            <div className="flex items-center justify-between px-1 mb-3 text-xs font-bold text-slate-500">
+              <span>
+                {filteredRows.length} écriture(s)
+                {hasActiveFilter && (
+                  <button type="button" onClick={resetFilters} className="ml-2 text-blue-600 underline cursor-pointer">
+                    Réinitialiser
+                  </button>
                 )}
-              </button>
-              <button
-                type="button"
-                onClick={openNew}
-                className="hidden md:inline-flex items-center gap-1.5 px-4 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-black cursor-pointer shrink-0"
-              >
-                <Plus size={15} /> Nouvelle dépense
-              </button>
+              </span>
+              <span className="text-rose-700 font-black tabular-nums">-{fmt(filteredTotal)} {curSymbol}</span>
             </div>
 
-            {viewSwitch}
-
-            <div className="hidden md:flex gap-2">
-              {sortSelect}
-              <button
-                type="button"
-                onClick={exportCsv}
-                disabled={filteredRows.length === 0}
-                className="px-3.5 rounded-xl bg-slate-50 border border-slate-200 hover:bg-slate-100 text-slate-700 text-xs font-black flex items-center gap-1.5 disabled:opacity-40 cursor-pointer"
-                title="Exporter en CSV"
-              >
-                <Download size={14} /> CSV
-              </button>
-            </div>
-
-            <div className="hidden md:block space-y-2">
-              {renderTypeChips()}
-              {natures.length > 0 && renderNatureChips()}
-            </div>
-
-            {natures.length > 0 && (
-              <div className="md:hidden pt-1">
-                {renderNatureChips()}
+            {/* Contenu selon la vue */}
+            {filteredRows.length === 0 ? (
+              <div className="text-center py-14 text-xs text-slate-400 font-bold border-2 border-dashed border-slate-200 rounded-2xl bg-white">
+                {depenses.length === 0 ? `Aucune dépense en ${HAJJ_CURRENCY_MAP[selectedDevise].label} enregistrée pour le moment.` : 'Aucune dépense ne correspond aux critères.'}
+              </div>
+            ) : viewMode === 'liste' ? (
+              renderRowList(filteredRows)
+            ) : viewMode === 'nature' ? (
+              <div className="space-y-3">
+                {groupedByNature.map(g => {
+                  const collapsed = collapsedNatures.includes(g.libelle)
+                  const pct = filteredTotal > 0 ? Math.round((g.total / filteredTotal) * 100) : 0
+                  return (
+                    <div key={g.libelle} className="bg-white border border-slate-200 rounded-2xl overflow-hidden">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setCollapsedNatures(c => (c.includes(g.libelle) ? c.filter(x => x !== g.libelle) : [...c, g.libelle]))
+                        }
+                        className="w-full p-3.5 sm:p-4 text-left active:bg-slate-50 cursor-pointer"
+                      >
+                        <div className="flex items-center justify-between gap-3">
+                          <div className="min-w-0">
+                            <p className="font-black text-slate-900 text-xs sm:text-sm truncate">{g.libelle}</p>
+                            <p className="text-[11px] text-slate-400 font-medium">{g.rows.length} écriture(s) • {pct}% du total</p>
+                          </div>
+                          <div className="flex items-center gap-2 shrink-0">
+                            <p className="text-xs sm:text-sm font-black text-rose-600 tabular-nums">-{fmt(g.total)} {curShort}</p>
+                            <ChevronDown size={16} className={`text-slate-400 transition-transform ${collapsed ? '' : 'rotate-180'}`} />
+                          </div>
+                        </div>
+                        <div className="mt-2 h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                          <div className="h-full bg-amber-500 rounded-full" style={{ width: `${pct}%` }} />
+                        </div>
+                      </button>
+                      {!collapsed && (
+                        <div className={isMobile ? 'border-t border-slate-100' : ''}>{renderRowList(g.rows, true)}</div>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+            ) : (
+              <div className="space-y-2.5">
+                <p className="text-[11px] text-slate-400 font-medium px-1">
+                  {perPelerin.length} pèlerin(s) concerné(s). Le coût correspond à la somme des quote-parts des dépenses affichées.
+                </p>
+                {perPelerin.map(({ p, cout, lignes }) => {
+                  const k = String(p.id)
+                  const open = expandedPelerin === k
+                  const paye = Number(p.total_paye) || 0
+                  const net = paye - cout
+                  return (
+                    <div key={k} className="bg-white border border-slate-200 rounded-2xl overflow-hidden">
+                      <button
+                        type="button"
+                        onClick={() => setExpandedPelerin(open ? null : k)}
+                        className="w-full p-3.5 text-left flex items-center gap-3 active:bg-slate-50 cursor-pointer"
+                      >
+                        <div className="min-w-0 flex-1">
+                          <p className="font-bold text-slate-900 text-xs sm:text-sm truncate">{pName(p)}</p>
+                          <p className="text-[10px] sm:text-[11px] text-slate-400 font-mono truncate">{p.num_passeport || 'Sans passeport'}</p>
+                          <p className="text-[11px] text-slate-500 font-semibold mt-0.5">
+                            Payé {fmt(paye)} {curShort} • {lignes.length} charge(s)
+                          </p>
+                        </div>
+                        <div className="text-right shrink-0">
+                          <p className="text-xs sm:text-sm font-black text-rose-600 tabular-nums">-{fmt(cout)} {curShort}</p>
+                          <span
+                            className={`inline-block mt-1 text-[10px] font-bold px-2 py-0.5 rounded-md tabular-nums ${net >= 0 ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700'
+                              }`}
+                          >
+                            Marge {net > 0 ? '+' : ''}{fmt(net)} {curShort}
+                          </span>
+                        </div>
+                        <ChevronDown size={14} className={`text-slate-300 shrink-0 transition-transform ${open ? 'rotate-180' : ''}`} />
+                      </button>
+                      {open && (
+                        <div className="border-t border-slate-100 bg-slate-50/70 p-3.5 space-y-1.5">
+                          {lignes.map((l, i) => (
+                            <div key={`${l.id}-${i}`} className="flex items-center justify-between text-xs bg-white border border-slate-200 rounded-lg px-3 py-2">
+                              <span className="font-semibold text-slate-700 truncate pr-2">{l.libelle}</span>
+                              <span className="font-black text-rose-600 tabular-nums shrink-0">-{fmt(l.part)} {curShort}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
               </div>
             )}
-          </div>
-
-          {/* Résumé du résultat */}
-          <div className="flex items-center justify-between px-1 mb-3 text-xs font-bold text-slate-500">
-            <span>
-              {filteredRows.length} écriture(s)
-              {hasActiveFilter && (
-                <button type="button" onClick={resetFilters} className="ml-2 text-blue-600 underline cursor-pointer">
-                  Réinitialiser
-                </button>
-              )}
-            </span>
-            <span className="text-rose-700 font-black tabular-nums">-{fmt(filteredTotal)} {curSymbol}</span>
-          </div>
-
-          {/* Contenu selon la vue */}
-          {filteredRows.length === 0 ? (
-            <div className="text-center py-14 text-xs text-slate-400 font-bold border-2 border-dashed border-slate-200 rounded-2xl bg-white">
-              {depenses.length === 0 ? `Aucune dépense en ${HAJJ_CURRENCY_MAP[selectedDevise].label} enregistrée pour le moment.` : 'Aucune dépense ne correspond aux critères.'}
-            </div>
-          ) : viewMode === 'liste' ? (
-            renderRowList(filteredRows)
-          ) : viewMode === 'nature' ? (
-            <div className="space-y-3">
-              {groupedByNature.map(g => {
-                const collapsed = collapsedNatures.includes(g.libelle)
-                const pct = filteredTotal > 0 ? Math.round((g.total / filteredTotal) * 100) : 0
-                return (
-                  <div key={g.libelle} className="bg-white border border-slate-200 rounded-2xl overflow-hidden">
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setCollapsedNatures(c => (c.includes(g.libelle) ? c.filter(x => x !== g.libelle) : [...c, g.libelle]))
-                      }
-                      className="w-full p-3.5 sm:p-4 text-left active:bg-slate-50 cursor-pointer"
-                    >
-                      <div className="flex items-center justify-between gap-3">
-                        <div className="min-w-0">
-                          <p className="font-black text-slate-900 text-xs sm:text-sm truncate">{g.libelle}</p>
-                          <p className="text-[11px] text-slate-400 font-medium">{g.rows.length} écriture(s) • {pct}% du total</p>
-                        </div>
-                        <div className="flex items-center gap-2 shrink-0">
-                          <p className="text-xs sm:text-sm font-black text-rose-600 tabular-nums">-{fmt(g.total)} {curShort}</p>
-                          <ChevronDown size={16} className={`text-slate-400 transition-transform ${collapsed ? '' : 'rotate-180'}`} />
-                        </div>
-                      </div>
-                      <div className="mt-2 h-1.5 bg-slate-100 rounded-full overflow-hidden">
-                        <div className="h-full bg-amber-500 rounded-full" style={{ width: `${pct}%` }} />
-                      </div>
-                    </button>
-                    {!collapsed && (
-                      <div className={isMobile ? 'border-t border-slate-100' : ''}>{renderRowList(g.rows, true)}</div>
-                    )}
-                  </div>
-                )
-              })}
-            </div>
-          ) : (
-            <div className="space-y-2.5">
-              <p className="text-[11px] text-slate-400 font-medium px-1">
-                {perPelerin.length} pèlerin(s) concerné(s). Le coût correspond à la somme des quote-parts des dépenses affichées.
-              </p>
-              {perPelerin.map(({ p, cout, lignes }) => {
-                const k = String(p.id)
-                const open = expandedPelerin === k
-                const paye = Number(p.total_paye) || 0
-                const net = paye - cout
-                return (
-                  <div key={k} className="bg-white border border-slate-200 rounded-2xl overflow-hidden">
-                    <button
-                      type="button"
-                      onClick={() => setExpandedPelerin(open ? null : k)}
-                      className="w-full p-3.5 text-left flex items-center gap-3 active:bg-slate-50 cursor-pointer"
-                    >
-                      <div className="min-w-0 flex-1">
-                        <p className="font-bold text-slate-900 text-xs sm:text-sm truncate">{pName(p)}</p>
-                        <p className="text-[10px] sm:text-[11px] text-slate-400 font-mono truncate">{p.num_passeport || 'Sans passeport'}</p>
-                        <p className="text-[11px] text-slate-500 font-semibold mt-0.5">
-                          Payé {fmt(paye)} {curShort} • {lignes.length} charge(s)
-                        </p>
-                      </div>
-                      <div className="text-right shrink-0">
-                        <p className="text-xs sm:text-sm font-black text-rose-600 tabular-nums">-{fmt(cout)} {curShort}</p>
-                        <span
-                          className={`inline-block mt-1 text-[10px] font-bold px-2 py-0.5 rounded-md tabular-nums ${
-                            net >= 0 ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700'
-                          }`}
-                        >
-                          Marge {net > 0 ? '+' : ''}{fmt(net)} {curShort}
-                        </span>
-                      </div>
-                      <ChevronDown size={14} className={`text-slate-300 shrink-0 transition-transform ${open ? 'rotate-180' : ''}`} />
-                    </button>
-                    {open && (
-                      <div className="border-t border-slate-100 bg-slate-50/70 p-3.5 space-y-1.5">
-                        {lignes.map((l, i) => (
-                          <div key={`${l.id}-${i}`} className="flex items-center justify-between text-xs bg-white border border-slate-200 rounded-lg px-3 py-2">
-                            <span className="font-semibold text-slate-700 truncate pr-2">{l.libelle}</span>
-                            <span className="font-black text-rose-600 tabular-nums shrink-0">-{fmt(l.part)} {curShort}</span>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                )
-              })}
-            </div>
-          )}
-        </>
-      )}
+          </>
+        )}
       </div>
 
       {/* ===================== FILTRES (mobile) ===================== */}
@@ -2817,9 +2795,8 @@ export default function ComptabiliteHajj() {
                     key={id}
                     type="button"
                     onClick={() => changeType(id)}
-                    className={`p-3 rounded-2xl border text-left transition-all cursor-pointer ${id === 'global' ? 'col-span-2' : ''} ${
-                      active ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-slate-700 border-slate-200 active:bg-slate-100'
-                    }`}
+                    className={`p-3 rounded-2xl border text-left transition-all cursor-pointer ${id === 'global' ? 'col-span-2' : ''} ${active ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-slate-700 border-slate-200 active:bg-slate-100'
+                      }`}
                   >
                     <div className="flex items-center justify-between">
                       <m.icon size={15} className={active ? 'text-white' : 'text-slate-500'} />
@@ -2898,9 +2875,8 @@ export default function ComptabiliteHajj() {
                 <button
                   type="button"
                   onClick={() => setDynamique(false)}
-                  className={`p-3 rounded-2xl border text-left transition-all cursor-pointer ${
-                    !dynamique ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-700 border-slate-200 active:bg-slate-100'
-                  }`}
+                  className={`p-3 rounded-2xl border text-left transition-all cursor-pointer ${!dynamique ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-700 border-slate-200 active:bg-slate-100'
+                    }`}
                 >
                   <p className="text-xs font-black">Figée</p>
                   <p className={`text-[10px] font-semibold mt-1 leading-snug ${!dynamique ? 'text-slate-300' : 'text-slate-400'}`}>
@@ -2910,9 +2886,8 @@ export default function ComptabiliteHajj() {
                 <button
                   type="button"
                   onClick={() => setDynamique(true)}
-                  className={`p-3 rounded-2xl border text-left transition-all cursor-pointer ${
-                    dynamique ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-slate-700 border-slate-200 active:bg-slate-100'
-                  }`}
+                  className={`p-3 rounded-2xl border text-left transition-all cursor-pointer ${dynamique ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-slate-700 border-slate-200 active:bg-slate-100'
+                    }`}
                 >
                   <p className="text-xs font-black flex items-center gap-1.5">
                     <RefreshCw size={12} /> Dynamique
@@ -3014,9 +2989,8 @@ export default function ComptabiliteHajj() {
                   <div className="pt-1.5 border-t border-blue-200/60 flex justify-between items-center text-blue-900 font-bold">
                     <span>Ancien total : {fmt(editingRow.montant)} {curShort}</span>
                     <span
-                      className={`font-black tabular-nums ${
-                        deltaEdition === 0 ? 'text-slate-500' : deltaEdition > 0 ? 'text-rose-600' : 'text-emerald-600'
-                      }`}
+                      className={`font-black tabular-nums ${deltaEdition === 0 ? 'text-slate-500' : deltaEdition > 0 ? 'text-rose-600' : 'text-emerald-600'
+                        }`}
                     >
                       {deltaEdition === 0 ? 'Inchangé' : `${deltaEdition > 0 ? '+' : ''}${fmt(deltaEdition)} ${curShort}`}
                     </span>
@@ -3067,18 +3041,16 @@ export default function ComptabiliteHajj() {
                 type="button"
                 disabled={!addPelerinsAvailable}
                 onClick={() => setAddMode('pelerins')}
-                className={`py-2.5 rounded-xl text-xs font-black flex items-center justify-center gap-1.5 transition-all disabled:opacity-40 cursor-pointer ${
-                  addMode === 'pelerins' ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-500'
-                }`}
+                className={`py-2.5 rounded-xl text-xs font-black flex items-center justify-center gap-1.5 transition-all disabled:opacity-40 cursor-pointer ${addMode === 'pelerins' ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-500'
+                  }`}
               >
                 <UserPlus size={14} /> Des pèlerins
               </button>
               <button
                 type="button"
                 onClick={() => setAddMode('montant')}
-                className={`py-2.5 rounded-xl text-xs font-black flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
-                  addMode === 'montant' ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-500'
-                }`}
+                className={`py-2.5 rounded-xl text-xs font-black flex items-center justify-center gap-1.5 transition-all cursor-pointer ${addMode === 'montant' ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-500'
+                  }`}
               >
                 <Plus size={14} /> Un montant
               </button>

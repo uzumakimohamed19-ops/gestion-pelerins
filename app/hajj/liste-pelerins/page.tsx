@@ -341,21 +341,6 @@ export default function ListePelerins() {
   // Tiroirs natifs dédiés à la version mobile
   const [mobileFilterSheetOpen, setMobileFilterSheetOpen] = useState(false)
   const [mobileExportSheetOpen, setMobileExportSheetOpen] = useState(false)
-  const [isMobileScrolled, setIsMobileScrolled] = useState(false)
-
-  useEffect(() => {
-    const handleScroll = () => {
-      const y = window.scrollY || 0
-      setIsMobileScrolled(prev => {
-        if (!prev && y > 40) return true
-        if (prev && y < 12) return false
-        return prev
-      })
-    }
-    handleScroll()
-    window.addEventListener('scroll', handleScroll, { passive: true })
-    return () => window.removeEventListener('scroll', handleScroll)
-  }, [])
 
   const anyMobileOverlayOpen = Boolean(
     quickViewPelerin ||
@@ -1204,28 +1189,19 @@ export default function ListePelerins() {
         {/* 📱 VERSION MOBILE NATIVE — EN-TÊTE BLANC PUR (`md:hidden`)          */}
         {/* =================================================================== */}
         <div className="md:hidden pb-32">
-          {/* 1. EN-TÊTE BLANC ÉPURÉ QUI SE RÉDUIT AU SCROLL (Style iOS Contacts) */}
-          <div
-            className={`bg-white/95 backdrop-blur-md border-b border-slate-100 px-5 sticky top-0 z-30 transition-all duration-200 ${
-              isMobileScrolled
-                ? 'pt-2.5 pb-2.5 shadow-sm'
-                : 'pt-5 pb-3.5 shadow-[0_1px_8px_rgba(15,23,42,0.03)]'
-            }`}
-          >
+          {/* 1. EN-TÊTE BLANC COMPACT, FIXE ET ULTRA-FLUIDE (zéro saccade au scroll) */}
+          <div className="bg-white/95 backdrop-blur-md border-b border-slate-100 px-5 pt-3.5 pb-3 sticky top-0 z-30 shadow-[0_1px_6px_rgba(15,23,42,0.04)]">
             <div className="flex items-center justify-between gap-3">
               <div className="min-w-0 flex items-baseline gap-2">
-                <h1
-                  className={`font-black text-slate-900 tracking-tight leading-none transition-all duration-200 ${
-                    isMobileScrolled ? 'text-lg' : 'text-2xl'
-                  }`}
-                >
+                <h1 className="text-xl font-black text-slate-900 tracking-tight leading-none">
                   Dossiers
                 </h1>
-                {isMobileScrolled && (
-                  <span className="text-[11px] font-bold text-slate-400 tabular-nums">
-                    {pelerinsFiltrés.length}
-                  </span>
-                )}
+                <span className="text-xs font-bold text-slate-400 tabular-nums truncate">
+                  {hasActiveFilters
+                    ? `${pelerinsFiltrés.length}/${pelerins.length}`
+                    : `${pelerins.length}`}
+                  {selectedYear !== 'all' ? ` • ${selectedYear}` : ''}
+                </span>
               </div>
 
               <div className="flex items-center gap-1.5 shrink-0">
@@ -1233,73 +1209,56 @@ export default function ListePelerins() {
                   type="button"
                   onClick={handleToggleSelectMode}
                   aria-label="Sélection multiple"
-                  className={`rounded-full flex items-center justify-center transition-all active:scale-90 cursor-pointer ${
-                    isMobileScrolled ? 'w-9 h-9' : 'w-10 h-10'
-                  } ${
+                  className={`w-9 h-9 rounded-full flex items-center justify-center transition active:scale-90 cursor-pointer ${
                     selectMode
                       ? 'bg-slate-900 text-white shadow-xs'
                       : 'bg-slate-100 text-slate-700'
                   }`}
                 >
-                  <CheckSquare size={isMobileScrolled ? 16 : 18} />
+                  <CheckSquare size={17} />
                 </button>
 
                 <button
                   type="button"
                   onClick={() => setMobileExportSheetOpen(true)}
                   aria-label="Exporter"
-                  className={`rounded-full bg-slate-100 text-slate-700 flex items-center justify-center transition-all active:scale-90 cursor-pointer ${
-                    isMobileScrolled ? 'w-9 h-9' : 'w-10 h-10'
-                  }`}
+                  className="w-9 h-9 rounded-full bg-slate-100 text-slate-700 flex items-center justify-center transition active:scale-90 cursor-pointer"
                 >
-                  <Download size={isMobileScrolled ? 16 : 18} />
+                  <Download size={17} />
                 </button>
 
                 <Link
                   href="/hajj/ajouter-pelerin"
                   aria-label="Nouveau pèlerin"
-                  className={`rounded-full bg-slate-900 text-white shadow-sm flex items-center justify-center transition-all active:scale-90 ${
-                    isMobileScrolled ? 'w-9 h-9' : 'w-10 h-10'
-                  }`}
+                  className="w-9 h-9 rounded-full bg-slate-900 text-white shadow-sm flex items-center justify-center transition active:scale-90"
                 >
-                  <Plus size={isMobileScrolled ? 18 : 20} strokeWidth={2.5} />
+                  <Plus size={19} strokeWidth={2.5} />
                 </Link>
               </div>
             </div>
 
-            {!isMobileScrolled && (
-              <p className="text-xs font-semibold text-slate-400 mt-1 truncate">
-                {hasActiveFilters
-                  ? `${pelerinsFiltrés.length} sur ${pelerins.length} pèlerins`
-                  : `${pelerins.length} pèlerin${pelerins.length > 1 ? 's' : ''}`}
-                {selectedYear !== 'all' ? ` • ${selectedYear}` : ''}
-              </p>
-            )}
-
-            {/* Barre de recherche spacieuse + bouton Filtres */}
-            <div className={`flex items-center gap-2 transition-all duration-200 ${isMobileScrolled ? 'mt-2' : 'mt-3.5'}`}>
+            {/* Barre de recherche bleu pastel + bouton Filtres bleu pastel */}
+            <div className="mt-2.5 flex items-center gap-2">
               <div className="relative flex-1 min-w-0">
                 <Search
                   size={16}
-                  className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none"
+                  className="absolute left-3.5 top-1/2 -translate-y-1/2 text-blue-500 pointer-events-none"
                 />
                 <input
                   type="text"
                   placeholder="Nom, passeport, tél, agence…"
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
-                  className={`w-full pl-10 pr-9 rounded-2xl bg-slate-100/90 border border-transparent focus:bg-white focus:border-slate-300 text-sm font-semibold text-slate-900 outline-none transition-all ${
-                    isMobileScrolled ? 'h-10' : 'h-11'
-                  }`}
+                  className="w-full h-10 pl-10 pr-9 rounded-2xl bg-blue-50/90 border border-blue-200/70 focus:bg-blue-50/50 focus:border-blue-400 text-sm font-semibold text-slate-900 placeholder:text-blue-400 outline-none transition"
                 />
                 {searchTerm && (
                   <button
                     type="button"
                     onClick={() => setSearchTerm('')}
                     aria-label="Effacer"
-                    className="absolute right-2 top-1/2 -translate-y-1/2 w-7 h-7 rounded-full bg-slate-200/80 text-slate-500 flex items-center justify-center"
+                    className="absolute right-2 top-1/2 -translate-y-1/2 w-6 h-6 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center"
                   >
-                    <X size={14} />
+                    <X size={13} />
                   </button>
                 )}
               </div>
@@ -1308,70 +1267,83 @@ export default function ListePelerins() {
                 type="button"
                 onClick={() => setMobileFilterSheetOpen(true)}
                 aria-label="Filtres avancés"
-                className={`relative shrink-0 rounded-2xl flex items-center justify-center transition-all active:scale-95 cursor-pointer ${
-                  isMobileScrolled ? 'w-10 h-10' : 'w-11 h-11'
-                } ${
+                className={`relative w-10 h-10 shrink-0 rounded-2xl border flex items-center justify-center transition active:scale-95 cursor-pointer ${
                   activeFilterCount > 0
-                    ? 'bg-slate-900 text-white shadow-xs'
-                    : 'bg-slate-100/90 text-slate-700'
+                    ? 'bg-blue-600 text-white border-blue-600 shadow-xs'
+                    : 'bg-blue-50/90 text-blue-600 border-blue-200/70'
                 }`}
               >
                 <SlidersHorizontal size={17} />
                 {activeFilterCount > 0 && (
-                  <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 rounded-full bg-blue-600 text-white text-[10px] font-black flex items-center justify-center shadow-xs">
+                  <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 rounded-full bg-slate-900 text-white text-[10px] font-black flex items-center justify-center shadow-xs">
                     {activeFilterCount}
                   </span>
                 )}
               </button>
             </div>
+          </div>
 
-            {/* Sélecteur de devise 1 ligne fluide (sans scrollbar, replié au scroll) */}
-            <div
-              className={`-mx-5 px-5 flex items-center gap-1.5 overflow-x-auto no-scrollbar transition-all duration-200 ${
-                isMobileScrolled
-                  ? 'max-h-0 opacity-0 mt-0 overflow-hidden pointer-events-none'
-                  : 'max-h-12 opacity-100 mt-3'
-              }`}
-            >
+          {/* 2. CORPS DE PAGE AÉRÉ (devises + KPI + filtres défilent naturellement au scroll) */}
+          <div className="px-5 pt-3.5 space-y-3.5">
+            {/* Sélecteur de devise pastel (disparaît naturellement au scroll) */}
+            <div className="-mx-5 px-5 flex items-center gap-2 overflow-x-auto no-scrollbar">
               <button
                 type="button"
                 onClick={() => setDeviseFilter('ALL')}
-                className={`h-8 px-3 rounded-full text-xs font-bold whitespace-nowrap shrink-0 flex items-center gap-1.5 transition active:scale-95 cursor-pointer ${
+                className={`h-8 px-3.5 rounded-full text-xs font-black border whitespace-nowrap shrink-0 flex items-center gap-1.5 transition active:scale-95 cursor-pointer ${
                   deviseFilter === 'ALL'
-                    ? 'bg-slate-900 text-white'
-                    : 'bg-slate-100 text-slate-600'
+                    ? 'bg-indigo-600 text-white border-indigo-600 shadow-xs'
+                    : 'bg-indigo-50 text-indigo-700 border-indigo-200/80'
                 }`}
               >
                 <span>Toutes</span>
-                <span className={`text-[10px] tabular-nums ${deviseFilter === 'ALL' ? 'text-slate-300' : 'text-slate-400'}`}>
+                <span className={`text-[10px] tabular-nums ${deviseFilter === 'ALL' ? 'text-indigo-200' : 'text-indigo-500'}`}>
                   {pelerins.length}
                 </span>
               </button>
+
               {HAJJ_CURRENCIES.map(cur => {
                 const active = deviseFilter === cur.code
+                const palette =
+                  cur.code === 'FCFA'
+                    ? {
+                        idle: 'bg-emerald-50 text-emerald-700 border-emerald-200/80',
+                        active: 'bg-emerald-600 text-white border-emerald-600 shadow-xs',
+                        countIdle: 'text-emerald-500',
+                        countActive: 'text-emerald-100',
+                      }
+                    : cur.code === 'EUR'
+                    ? {
+                        idle: 'bg-sky-50 text-sky-700 border-sky-200/80',
+                        active: 'bg-sky-600 text-white border-sky-600 shadow-xs',
+                        countIdle: 'text-sky-500',
+                        countActive: 'text-sky-100',
+                      }
+                    : {
+                        idle: 'bg-amber-50 text-amber-700 border-amber-200/80',
+                        active: 'bg-amber-600 text-white border-amber-600 shadow-xs',
+                        countIdle: 'text-amber-600/80',
+                        countActive: 'text-amber-100',
+                      }
+
                 return (
                   <button
                     key={cur.code}
                     type="button"
                     onClick={() => setDeviseFilter(cur.code)}
-                    className={`h-8 px-3 rounded-full text-xs font-bold whitespace-nowrap shrink-0 flex items-center gap-1.5 transition active:scale-95 cursor-pointer ${
-                      active
-                        ? 'bg-slate-900 text-white'
-                        : 'bg-slate-100 text-slate-600'
+                    className={`h-8 px-3.5 rounded-full text-xs font-black border whitespace-nowrap shrink-0 flex items-center gap-1.5 transition active:scale-95 cursor-pointer ${
+                      active ? palette.active : palette.idle
                     }`}
                   >
                     <span>{cur.shortLabel}</span>
-                    <span className={`text-[10px] tabular-nums ${active ? 'text-slate-300' : 'text-slate-400'}`}>
+                    <span className={`text-[10px] tabular-nums ${active ? palette.countActive : palette.countIdle}`}>
                       {deviseCounts[cur.code] ?? 0}
                     </span>
                   </button>
                 )
               })}
             </div>
-          </div>
 
-          {/* 2. CORPS DE PAGE AÉRÉ */}
-          <div className="px-5 pt-4 space-y-4">
             {/* Ruban KPI horizontal compact & élégant (sans scrollbar) */}
             {!loading && pelerinsFiltrés.length > 0 && (() => {
               const singleCurrency = deviseFilter !== 'ALL' ? deviseFilter : (activeCurrenciesInFiltered.length === 1 ? activeCurrenciesInFiltered[0].code : null)
