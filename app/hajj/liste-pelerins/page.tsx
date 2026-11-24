@@ -341,6 +341,21 @@ export default function ListePelerins() {
   // Tiroirs natifs dédiés à la version mobile
   const [mobileFilterSheetOpen, setMobileFilterSheetOpen] = useState(false)
   const [mobileExportSheetOpen, setMobileExportSheetOpen] = useState(false)
+  const [isMobileScrolled, setIsMobileScrolled] = useState(false)
+
+  useEffect(() => {
+    const handleScroll = () => {
+      const y = window.scrollY || 0
+      setIsMobileScrolled(prev => {
+        if (!prev && y > 40) return true
+        if (prev && y < 12) return false
+        return prev
+      })
+    }
+    handleScroll()
+    window.addEventListener('scroll', handleScroll, { passive: true })
+    return () => window.removeEventListener('scroll', handleScroll)
+  }, [])
 
   const anyMobileOverlayOpen = Boolean(
     quickViewPelerin ||
@@ -614,16 +629,16 @@ export default function ListePelerins() {
 
   const pelerinsFiltrés = useMemo(() => {
     return pelerins.filter(p => {
-      const q = searchTerm.toLowerCase()
+      const q = (searchTerm || '').trim().toLowerCase()
       const matchesSearch = !q ||
-        p.nom_complet.toLowerCase().includes(q) ||
-        p.num_passeport.toLowerCase().includes(q) ||
-        (p.agences?.nom_agence || '').toLowerCase().includes(q) ||
-        (p.telephone_pelerin || '').includes(q) ||
-        (p.reference || '').toLowerCase().includes(q) ||
-        (p.prenom || '').toLowerCase().includes(q) ||
-        (p.hotel_mecque || '').toLowerCase().includes(q) ||
-        (p.hotel_medine || '').toLowerCase().includes(q)
+        String(p.nom_complet || '').toLowerCase().includes(q) ||
+        String(p.num_passeport || '').toLowerCase().includes(q) ||
+        String(p.agences?.nom_agence || '').toLowerCase().includes(q) ||
+        String(p.telephone_pelerin || '').toLowerCase().includes(q) ||
+        String(p.reference || '').toLowerCase().includes(q) ||
+        String(p.prenom || '').toLowerCase().includes(q) ||
+        String(p.hotel_mecque || '').toLowerCase().includes(q) ||
+        String(p.hotel_medine || '').toLowerCase().includes(q)
 
       if (!matchesSearch) return false
       if (deviseFilter !== 'ALL' && p.devise !== deviseFilter) return false
@@ -1189,59 +1204,83 @@ export default function ListePelerins() {
         {/* 📱 VERSION MOBILE NATIVE — EN-TÊTE BLANC PUR (`md:hidden`)          */}
         {/* =================================================================== */}
         <div className="md:hidden pb-32">
-          {/* 1. EN-TÊTE BLANC ÉPURÉ (Style iOS Contacts / App Native) */}
-          <div className="bg-white border-b border-slate-100 px-5 pt-5 pb-4 sticky top-0 z-30 shadow-[0_1px_8px_rgba(15,23,42,0.03)]">
+          {/* 1. EN-TÊTE BLANC ÉPURÉ QUI SE RÉDUIT AU SCROLL (Style iOS Contacts) */}
+          <div
+            className={`bg-white/95 backdrop-blur-md border-b border-slate-100 px-5 sticky top-0 z-30 transition-all duration-200 ${
+              isMobileScrolled
+                ? 'pt-2.5 pb-2.5 shadow-sm'
+                : 'pt-5 pb-3.5 shadow-[0_1px_8px_rgba(15,23,42,0.03)]'
+            }`}
+          >
             <div className="flex items-center justify-between gap-3">
-              <div className="min-w-0">
-                <h1 className="text-2xl font-black text-slate-900 tracking-tight leading-none">
+              <div className="min-w-0 flex items-baseline gap-2">
+                <h1
+                  className={`font-black text-slate-900 tracking-tight leading-none transition-all duration-200 ${
+                    isMobileScrolled ? 'text-lg' : 'text-2xl'
+                  }`}
+                >
                   Dossiers
                 </h1>
-                <p className="text-xs font-semibold text-slate-400 mt-1 truncate">
-                  {hasActiveFilters
-                    ? `${pelerinsFiltrés.length} sur ${pelerins.length} pèlerins`
-                    : `${pelerins.length} pèlerin${pelerins.length > 1 ? 's' : ''}`}
-                  {selectedYear !== 'all' ? ` • ${selectedYear}` : ''}
-                </p>
+                {isMobileScrolled && (
+                  <span className="text-[11px] font-bold text-slate-400 tabular-nums">
+                    {pelerinsFiltrés.length}
+                  </span>
+                )}
               </div>
 
-              <div className="flex items-center gap-2 shrink-0">
+              <div className="flex items-center gap-1.5 shrink-0">
                 <button
                   type="button"
                   onClick={handleToggleSelectMode}
                   aria-label="Sélection multiple"
-                  className={`w-10 h-10 rounded-full flex items-center justify-center transition active:scale-90 cursor-pointer ${
+                  className={`rounded-full flex items-center justify-center transition-all active:scale-90 cursor-pointer ${
+                    isMobileScrolled ? 'w-9 h-9' : 'w-10 h-10'
+                  } ${
                     selectMode
                       ? 'bg-slate-900 text-white shadow-xs'
                       : 'bg-slate-100 text-slate-700'
                   }`}
                 >
-                  <CheckSquare size={18} />
+                  <CheckSquare size={isMobileScrolled ? 16 : 18} />
                 </button>
 
                 <button
                   type="button"
                   onClick={() => setMobileExportSheetOpen(true)}
                   aria-label="Exporter"
-                  className="w-10 h-10 rounded-full bg-slate-100 text-slate-700 flex items-center justify-center transition active:scale-90 cursor-pointer"
+                  className={`rounded-full bg-slate-100 text-slate-700 flex items-center justify-center transition-all active:scale-90 cursor-pointer ${
+                    isMobileScrolled ? 'w-9 h-9' : 'w-10 h-10'
+                  }`}
                 >
-                  <Download size={18} />
+                  <Download size={isMobileScrolled ? 16 : 18} />
                 </button>
 
                 <Link
                   href="/hajj/ajouter-pelerin"
                   aria-label="Nouveau pèlerin"
-                  className="w-10 h-10 rounded-full bg-slate-900 text-white shadow-sm flex items-center justify-center transition active:scale-90"
+                  className={`rounded-full bg-slate-900 text-white shadow-sm flex items-center justify-center transition-all active:scale-90 ${
+                    isMobileScrolled ? 'w-9 h-9' : 'w-10 h-10'
+                  }`}
                 >
-                  <Plus size={20} strokeWidth={2.5} />
+                  <Plus size={isMobileScrolled ? 18 : 20} strokeWidth={2.5} />
                 </Link>
               </div>
             </div>
 
+            {!isMobileScrolled && (
+              <p className="text-xs font-semibold text-slate-400 mt-1 truncate">
+                {hasActiveFilters
+                  ? `${pelerinsFiltrés.length} sur ${pelerins.length} pèlerins`
+                  : `${pelerins.length} pèlerin${pelerins.length > 1 ? 's' : ''}`}
+                {selectedYear !== 'all' ? ` • ${selectedYear}` : ''}
+              </p>
+            )}
+
             {/* Barre de recherche spacieuse + bouton Filtres */}
-            <div className="mt-4 flex items-center gap-2.5">
+            <div className={`flex items-center gap-2 transition-all duration-200 ${isMobileScrolled ? 'mt-2' : 'mt-3.5'}`}>
               <div className="relative flex-1 min-w-0">
                 <Search
-                  size={17}
+                  size={16}
                   className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none"
                 />
                 <input
@@ -1249,7 +1288,9 @@ export default function ListePelerins() {
                   placeholder="Nom, passeport, tél, agence…"
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
-                  className="w-full h-11 pl-10 pr-9 rounded-2xl bg-slate-100/90 border border-transparent focus:bg-white focus:border-slate-300 text-sm font-semibold text-slate-900 outline-none transition"
+                  className={`w-full pl-10 pr-9 rounded-2xl bg-slate-100/90 border border-transparent focus:bg-white focus:border-slate-300 text-sm font-semibold text-slate-900 outline-none transition-all ${
+                    isMobileScrolled ? 'h-10' : 'h-11'
+                  }`}
                 />
                 {searchTerm && (
                   <button
@@ -1267,7 +1308,9 @@ export default function ListePelerins() {
                 type="button"
                 onClick={() => setMobileFilterSheetOpen(true)}
                 aria-label="Filtres avancés"
-                className={`relative w-11 h-11 shrink-0 rounded-2xl flex items-center justify-center transition active:scale-95 cursor-pointer ${
+                className={`relative shrink-0 rounded-2xl flex items-center justify-center transition-all active:scale-95 cursor-pointer ${
+                  isMobileScrolled ? 'w-10 h-10' : 'w-11 h-11'
+                } ${
                   activeFilterCount > 0
                     ? 'bg-slate-900 text-white shadow-xs'
                     : 'bg-slate-100/90 text-slate-700'
@@ -1282,8 +1325,14 @@ export default function ListePelerins() {
               </button>
             </div>
 
-            {/* Sélecteur de devise 1 ligne fluide */}
-            <div className="mt-3 -mx-5 px-5 flex items-center gap-1.5 overflow-x-auto pb-0.5">
+            {/* Sélecteur de devise 1 ligne fluide (sans scrollbar, replié au scroll) */}
+            <div
+              className={`-mx-5 px-5 flex items-center gap-1.5 overflow-x-auto no-scrollbar transition-all duration-200 ${
+                isMobileScrolled
+                  ? 'max-h-0 opacity-0 mt-0 overflow-hidden pointer-events-none'
+                  : 'max-h-12 opacity-100 mt-3'
+              }`}
+            >
               <button
                 type="button"
                 onClick={() => setDeviseFilter('ALL')}
@@ -1323,7 +1372,7 @@ export default function ListePelerins() {
 
           {/* 2. CORPS DE PAGE AÉRÉ */}
           <div className="px-5 pt-4 space-y-4">
-            {/* Ruban KPI horizontal compact & élégant (ne repousse pas la liste) */}
+            {/* Ruban KPI horizontal compact & élégant (sans scrollbar) */}
             {!loading && pelerinsFiltrés.length > 0 && (() => {
               const singleCurrency = deviseFilter !== 'ALL' ? deviseFilter : (activeCurrenciesInFiltered.length === 1 ? activeCurrenciesInFiltered[0].code : null)
               const encaisseMulti = activeCurrenciesInFiltered.map(c => formatHajjMoney(payeByCurrency[c.code], c.code, { compact: true }))
@@ -1335,7 +1384,7 @@ export default function ListePelerins() {
                 : null
 
               return (
-                <div className="-mx-5 px-5 flex gap-2.5 overflow-x-auto snap-x snap-mandatory pb-1">
+                <div className="-mx-5 px-5 flex gap-2.5 overflow-x-auto no-scrollbar snap-x snap-mandatory">
                   <div className="min-w-[162px] snap-start bg-white rounded-2xl border border-slate-100 shadow-xs p-3.5 shrink-0">
                     <p className="text-[10px] font-black uppercase tracking-wider text-slate-400">Encaissé</p>
                     <p className="text-sm font-black text-slate-900 tabular-nums mt-1 truncate">
@@ -1396,8 +1445,8 @@ export default function ListePelerins() {
               )
             })()}
 
-            {/* Pills rapides statut paiement + tri sur 1 seule ligne */}
-            <div className="-mx-5 px-5 flex items-center gap-2 overflow-x-auto pb-0.5">
+            {/* Pills rapides statut paiement + tri sur 1 seule ligne (sans scrollbar) */}
+            <div className="-mx-5 px-5 flex items-center gap-2 overflow-x-auto no-scrollbar">
               <button
                 type="button"
                 onClick={() => setSortOrder(prev => prev === 'desc' ? 'asc' : 'desc')}

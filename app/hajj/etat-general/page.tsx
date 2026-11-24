@@ -621,7 +621,7 @@ export default function EtatGeneralHajj() {
           </div>
 
           {/* Pills de rentabilité sur 1 seule ligne fluide */}
-          <div className="-mx-5 px-5 flex items-center gap-2 overflow-x-auto pb-0.5">
+          <div className="-mx-5 px-5 flex items-center gap-2 overflow-x-auto no-scrollbar pb-0.5">
             {[
               { id: 'tous', label: `Tous (${pelerinsCalcules.length})` },
               { id: 'positif', label: 'Bénéficiaires' },

@@ -1855,7 +1855,7 @@ export default function ComptabiliteHajj() {
 
               {/* Pills de natures sur 1 seule ligne défilable horizontalement */}
               {natures.length > 0 && (
-                <div className="-mx-5 px-5 flex items-center gap-2 overflow-x-auto pb-1">
+                <div className="-mx-5 px-5 flex items-center gap-2 overflow-x-auto no-scrollbar pb-1">
                   <button
                     type="button"
                     onClick={() => setFilterNature('all')}
