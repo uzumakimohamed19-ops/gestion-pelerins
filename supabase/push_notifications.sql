@@ -91,3 +91,33 @@ alter table public.push_notification_logs enable row level security;
 drop policy if exists push_notification_logs_owner_select on public.push_notification_logs;
 create policy push_notification_logs_owner_select on public.push_notification_logs
 for select using (auth.uid() = user_id);
+
+-- =============================================================================
+-- Configuration globale contrôlée exclusivement par l'administrateur
+-- =============================================================================
+create table if not exists public.push_global_settings (
+  id integer primary key default 1 check (id = 1),
+  global_enabled boolean not null default true,
+  morning_enabled boolean not null default true,
+  evening_enabled boolean not null default true,
+  inactivity_days_threshold integer not null default 2,
+  updated_at timestamptz not null default now()
+);
+
+insert into public.push_global_settings (id, global_enabled, morning_enabled, evening_enabled, inactivity_days_threshold)
+values (1, true, true, true, 2)
+on conflict (id) do nothing;
+
+alter table public.push_global_settings enable row level security;
+
+-- Autoriser aussi le slot 'admin' (broadcast manuel) dans push_notification_logs
+alter table public.push_notification_logs
+  drop constraint if exists push_notification_logs_slot_check;
+
+alter table public.push_notification_logs
+  add constraint push_notification_logs_slot_check
+  check (slot in ('morning', 'evening', 'test', 'admin'));
+
+-- Année de campagne active (dernière année sélectionnée par l'agence)
+alter table public.push_subscriptions
+  add column if not exists active_campagne integer;

@@ -55,6 +55,15 @@ export function YearProvider({ children, scope = 'hajj' }: { children: React.Rea
     setSelectedYearState(year)
     if (typeof window !== 'undefined') {
       try { set(getStorageKey(scope), String(year)) } catch (e) { /* ignore */ }
+      if (scope === 'hajj') {
+        try {
+          window.dispatchEvent(
+            new CustomEvent('agencepro:year-changed', {
+              detail: { scope, year },
+            })
+          )
+        } catch { /* ignore */ }
+      }
     }
   }
 

@@ -63,6 +63,11 @@ export async function POST(request: NextRequest) {
     const eveningEnabled = body?.evening_enabled !== false
     const timezone = String(body?.timezone || 'Africa/Bamako').slice(0, 64)
     const userAgent = body?.user_agent ? String(body.user_agent).slice(0, 240) : null
+    const rawCampagne = body?.active_campagne
+    const activeCampagne =
+      rawCampagne != null && Number.isFinite(Number(rawCampagne)) && Number(rawCampagne) > 2000
+        ? Math.round(Number(rawCampagne))
+        : null
 
     // Récupérer l'agence rattachée au profil utilisateur
     const { data: profile } = await auth.userClient
@@ -73,27 +78,40 @@ export async function POST(request: NextRequest) {
 
     const nowIso = new Date().toISOString()
 
-    const { data, error } = await auth.userClient
+    const basePayload = {
+      user_id: auth.userId,
+      agence_id: profile?.agence_id ?? null,
+      endpoint,
+      p256dh,
+      auth: authKey,
+      platform,
+      user_agent: userAgent,
+      enabled: true,
+      morning_enabled: morningEnabled,
+      evening_enabled: eveningEnabled,
+      timezone,
+      last_seen_at: nowIso,
+    }
+
+    let { data, error } = await auth.userClient
       .from('push_subscriptions')
       .upsert(
-        {
-          user_id: auth.userId,
-          agence_id: profile?.agence_id ?? null,
-          endpoint,
-          p256dh,
-          auth: authKey,
-          platform,
-          user_agent: userAgent,
-          enabled: true,
-          morning_enabled: morningEnabled,
-          evening_enabled: eveningEnabled,
-          timezone,
-          last_seen_at: nowIso,
-        },
+        { ...basePayload, active_campagne: activeCampagne },
         { onConflict: 'endpoint' }
       )
       .select('id, enabled, morning_enabled, evening_enabled, platform')
       .single()
+
+    // Repli si la colonne active_campagne n'a pas encore été ajoutée dans Supabase
+    if (error && (error.code === '42703' || String(error.message || '').includes('active_campagne'))) {
+      const retry = await auth.userClient
+        .from('push_subscriptions')
+        .upsert(basePayload, { onConflict: 'endpoint' })
+        .select('id, enabled, morning_enabled, evening_enabled, platform')
+        .single()
+      data = retry.data
+      error = retry.error
+    }
 
     if (error) {
       console.error('[push/subscribe POST]', error)

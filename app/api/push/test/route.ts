@@ -86,17 +86,23 @@ export async function POST(request: NextRequest) {
       const pelerinIds = pelerins.map((p) => p.id)
       const { data: payRows } = await auth.userClient
         .from('pelerin_payments')
-        .select('id, amount, devise, payment_date, created_at')
+        .select('id, pelerin_id, amount, devise, payment_date, created_at')
         .in('pelerin_id', pelerinIds)
         .gte('payment_date', todayIso)
 
       paymentsToday = (payRows || []) as DigestPaymentRow[]
     }
 
+    const sortedSubs = [...activeSubs].sort((a, b) =>
+      String(a.last_seen_at || '').localeCompare(String(b.last_seen_at || ''))
+    )
+    const recentSub = sortedSubs.at(-1)
+
     const stats = computeAgencyDigestStats({
       pelerins,
       paymentsToday,
-      lastSeenAt: activeSubs[0]?.last_seen_at,
+      preferredCampagne: recentSub?.active_campagne ?? null,
+      lastSeenAt: recentSub?.last_seen_at,
     })
 
     const payload = buildPushDigest({

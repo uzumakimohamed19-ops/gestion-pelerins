@@ -22,7 +22,8 @@ import {
   Building2,
   BarChart3,
   CheckCircle2,
-  AlertTriangle
+  AlertTriangle,
+  Bell
 } from 'lucide-react'
 
 interface SessionRecord {
@@ -526,7 +527,7 @@ export default function AdminHajjControl() {
           )}
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
           <button
             onClick={() => setActiveModal('OPEN_SESSION')}
             className="flex flex-col items-start p-5 rounded-2xl border border-slate-200 bg-gradient-to-br from-emerald-50 to-white hover:border-emerald-500 hover:shadow-md transition text-left space-y-3 group"
@@ -589,6 +590,19 @@ export default function AdminHajjControl() {
             <div>
               <h3 className="font-black text-sm uppercase text-slate-900">Agences 2</h3>
               <p className="text-xs text-slate-500">Ouvrir la vue détaillée des agences et pèlerins GOUV.</p>
+            </div>
+          </Link>
+
+          <Link
+            href="/hajj/admin/notifications"
+            className="flex flex-col items-start p-5 rounded-2xl border border-slate-200 bg-gradient-to-br from-sky-50 to-white hover:border-blue-600 hover:shadow-md transition text-left space-y-3 group"
+          >
+            <div className="p-3 rounded-xl bg-blue-600 text-white group-hover:scale-110 transition">
+              <Bell size={22} />
+            </div>
+            <div>
+              <h3 className="font-black text-sm uppercase text-slate-900">Notifications Push</h3>
+              <p className="text-xs text-slate-500">Piloter les envois matin/soir, appareils abonnés et diffusions.</p>
             </div>
           </Link>
         </div>

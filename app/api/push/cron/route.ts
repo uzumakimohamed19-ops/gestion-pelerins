@@ -7,6 +7,7 @@ import {
   type PushSlot,
 } from '@/lib/pushDigestEngine'
 import {
+  getGlobalPushSettings,
   getSupabaseAdminClient,
   isVapidConfigured,
   sendWebPushNotification,
@@ -54,6 +55,33 @@ async function runPushCron(request: NextRequest) {
     const slotColumn = slot === 'morning' ? 'morning_enabled' : 'evening_enabled'
 
     const admin = getSupabaseAdminClient()
+
+    // Respecter les réglages globaux pilotés par l'administrateur
+    const globalSettings = await getGlobalPushSettings(admin)
+    if (!globalSettings.global_enabled) {
+      return NextResponse.json({
+        ok: true,
+        skipped: true,
+        reason: 'Notifications globalement désactivées par l’administrateur.',
+        slot: slotKey,
+      })
+    }
+    if (slot === 'morning' && !globalSettings.morning_enabled) {
+      return NextResponse.json({
+        ok: true,
+        skipped: true,
+        reason: 'Créneau matin désactivé par l’administrateur.',
+        slot: slotKey,
+      })
+    }
+    if (slot === 'evening' && !globalSettings.evening_enabled) {
+      return NextResponse.json({
+        ok: true,
+        skipped: true,
+        reason: 'Créneau soir désactivé par l’administrateur.',
+        slot: slotKey,
+      })
+    }
 
     const { data: subRows, error: subError } = await admin
       .from('push_subscriptions')
@@ -118,7 +146,7 @@ async function runPushCron(request: NextRequest) {
         const ids = pelerins.map((p) => p.id)
         const { data: payRows } = await admin
           .from('pelerin_payments')
-          .select('id, amount, devise, payment_date, created_at')
+          .select('id, pelerin_id, amount, devise, payment_date, created_at')
           .in('pelerin_id', ids)
           .gte('payment_date', todayIso)
         paymentsToday = (payRows || []) as DigestPaymentRow[]
@@ -153,12 +181,16 @@ async function runPushCron(request: NextRequest) {
         ? await loadAgencyData(agenceId)
         : { agenceName: null, pelerins: [], paymentsToday: [] }
 
-      // Prendre la date d'activité la plus récente parmi tous les appareils de cet utilisateur
-      const latestSeen = userSubs
-        .map((s) => s.last_seen_at)
-        .filter((d): d is string => Boolean(d))
-        .sort()
-        .at(-1) ?? null
+      // Prendre l'appareil le plus récemment ouvert pour la date d'activité ET l'année active sélectionnée
+      const sortedBySeen = [...userSubs].sort((a, b) =>
+        String(a.last_seen_at || '').localeCompare(String(b.last_seen_at || ''))
+      )
+      const mostRecentSub = sortedBySeen.at(-1)
+      const latestSeen = mostRecentSub?.last_seen_at ?? null
+      const preferredCampagne =
+        mostRecentSub?.active_campagne ??
+        sortedBySeen.reverse().find((s) => s.active_campagne != null)?.active_campagne ??
+        null
 
       // Dernière catégorie envoyée à cet utilisateur pour éviter les répétitions
       const { data: lastLog } = await admin
@@ -172,6 +204,7 @@ async function runPushCron(request: NextRequest) {
       const stats = computeAgencyDigestStats({
         pelerins: agencyData.pelerins,
         paymentsToday: agencyData.paymentsToday,
+        preferredCampagne,
         lastSeenAt: latestSeen,
         now,
       })

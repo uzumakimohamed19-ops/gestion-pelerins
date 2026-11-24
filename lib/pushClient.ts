@@ -1,5 +1,6 @@
 'use client'
 
+import { get as idbGet } from 'idb-keyval'
 import { supabase } from '@/lib/supabase'
 
 export type PushPlatform = 'ios-pwa' | 'android-pwa' | 'android-web' | 'desktop' | 'web'
@@ -22,7 +23,11 @@ export interface PushPreferences {
   endpoint: string | null
 }
 
-const VAPID_PUBLIC_KEY = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY || ''
+const VAPID_PUBLIC_KEY = (process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY || '')
+  .trim()
+  .replace(/^['"]|['"]$/g, '')
+  .replace(/\s+/g, '')
+  .replace(/=+$/g, '')
 
 export function urlBase64ToUint8Array(base64String: string): Uint8Array<ArrayBuffer> {
   const padding = '='.repeat((4 - (base64String.length % 4)) % 4)
@@ -90,6 +95,23 @@ export function detectPushEnvironment(): PushEnvironmentInfo {
 async function getAccessToken(): Promise<string | null> {
   const { data } = await supabase.auth.getSession()
   return data.session?.access_token ?? null
+}
+
+/**
+ * Lit l'année de campagne Hajj actuellement sélectionnée dans l'app (`selectedYear_hajj`).
+ * Retourne `null` si l'utilisateur est sur "Toutes les années".
+ */
+export async function getSelectedHajjCampagne(): Promise<number | null> {
+  if (typeof window === 'undefined') return null
+  try {
+    const saved = await idbGet('selectedYear_hajj')
+    if (saved == null) return new Date().getFullYear()
+    if (String(saved) === 'all') return null
+    const parsed = parseInt(String(saved), 10)
+    return Number.isFinite(parsed) && parsed > 2000 ? parsed : new Date().getFullYear()
+  } catch {
+    return new Date().getFullYear()
+  }
 }
 
 async function ensureServiceWorkerReady(): Promise<ServiceWorkerRegistration> {
@@ -209,6 +231,7 @@ export async function subscribeToPush(options?: {
 
   const timezone =
     Intl.DateTimeFormat().resolvedOptions().timeZone || 'Africa/Bamako'
+  const activeCampagne = await getSelectedHajjCampagne()
 
   const res = await fetch('/api/push/subscribe', {
     method: 'POST',
@@ -225,6 +248,7 @@ export async function subscribeToPush(options?: {
       morning_enabled: options?.morning_enabled ?? true,
       evening_enabled: options?.evening_enabled ?? true,
       timezone,
+      active_campagne: activeCampagne,
     }),
   })
 
@@ -318,16 +342,24 @@ export async function sendTestPushNotification(): Promise<{ title: string; body:
 const LAST_PING_STORAGE_KEY = 'agencepro_push_last_ping_ms'
 const PING_THROTTLE_MS = 30 * 60 * 1000 // 30 minutes
 
-export async function pingPushActivityIfNeeded(): Promise<void> {
+export async function pingPushActivityIfNeeded(options?: {
+  force?: boolean
+  activeCampagne?: number | null
+}): Promise<void> {
   if (typeof window === 'undefined' || !navigator.onLine) return
   try {
     const last = Number(localStorage.getItem(LAST_PING_STORAGE_KEY) || '0')
-    if (Date.now() - last < PING_THROTTLE_MS) return
+    if (!options?.force && Date.now() - last < PING_THROTTLE_MS) return
 
     const token = await getAccessToken()
     if (!token) return
 
     const sub = await getCurrentBrowserSubscription()
+    const activeCampagne =
+      options && 'activeCampagne' in options
+        ? options.activeCampagne
+        : await getSelectedHajjCampagne()
+
     localStorage.setItem(LAST_PING_STORAGE_KEY, String(Date.now()))
 
     await fetch('/api/push/ping', {
@@ -336,7 +368,10 @@ export async function pingPushActivityIfNeeded(): Promise<void> {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${token}`,
       },
-      body: JSON.stringify({ endpoint: sub?.endpoint ?? null }),
+      body: JSON.stringify({
+        endpoint: sub?.endpoint ?? null,
+        active_campagne: activeCampagne,
+      }),
     }).catch(() => {})
   } catch {
     // Silencieux : ne jamais perturber l'ouverture de l'app

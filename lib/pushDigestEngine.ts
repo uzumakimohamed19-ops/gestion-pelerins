@@ -30,6 +30,7 @@ export interface DigestPelerinRow {
 
 export interface DigestPaymentRow {
   id: string
+  pelerin_id?: string | null
   amount?: number | null
   devise?: string | null
   payment_date?: string | null
@@ -86,21 +87,34 @@ function isSameUtcDay(dateStr: string | null | undefined, todayIsoDate: string):
 export function computeAgencyDigestStats(params: {
   pelerins: DigestPelerinRow[]
   paymentsToday: DigestPaymentRow[]
+  preferredCampagne?: number | null
   lastSeenAt?: string | null
   now?: Date
 }): AgencyDigestStats {
   const now = params.now ?? new Date()
   const todayIsoDate = now.toISOString().slice(0, 10)
 
-  // Cibler la campagne la plus récente si disponible pour des pourcentages pertinents
+  // Priorité absolue à l'année active sélectionnée par l'agence lors de sa dernière connexion.
+  // Sinon repli sur la campagne la plus récente trouvée dans les dossiers.
+  const validPreferred =
+    params.preferredCampagne != null &&
+    Number.isFinite(Number(params.preferredCampagne)) &&
+    Number(params.preferredCampagne) > 2000
+      ? Number(params.preferredCampagne)
+      : null
+
   const campagnes = params.pelerins
     .map((p) => Number(p.campagne))
     .filter((y) => Number.isFinite(y) && y > 2000)
-  const activeCampagne = campagnes.length > 0 ? Math.max(...campagnes) : null
+
+  const activeCampagne =
+    validPreferred ?? (campagnes.length > 0 ? Math.max(...campagnes) : null)
 
   const scopedPelerins = activeCampagne
     ? params.pelerins.filter((p) => Number(p.campagne) === activeCampagne)
     : params.pelerins
+
+  const scopedPelerinIds = new Set(scopedPelerins.map((p) => String(p.id)))
 
   const total = scopedPelerins.length
   let unpaidCount = 0
@@ -144,11 +158,17 @@ export function computeAgencyDigestStats(params: {
     }
   }
 
-  const todayPayments = params.paymentsToday.filter(
-    (pay) =>
+  // Filtrer strictement les paiements du jour appartenant aux pèlerins de la campagne active
+  const todayPayments = params.paymentsToday.filter((pay) => {
+    const matchesDay =
       isSameUtcDay(pay.payment_date, todayIsoDate) ||
       isSameUtcDay(pay.created_at, todayIsoDate)
-  )
+    if (!matchesDay) return false
+    if (pay.pelerin_id && scopedPelerinIds.size > 0) {
+      return scopedPelerinIds.has(String(pay.pelerin_id))
+    }
+    return scopedPelerinIds.size > 0
+  })
 
   const todayAmountSummary = summarizeByCurrency(
     todayPayments.map((pay) => ({
@@ -198,21 +218,27 @@ export function buildPushDigest(params: {
 }): DigestPayload {
   const { slot, stats, lastCategory } = params
   const now = params.now ?? new Date()
-  const agenceLabel = params.agenceName?.trim() || 'Agence Pro'
+
+  // Titre bien visible : NOM DE L'AGENCE en majuscules
+  const title = (params.agenceName?.trim() || 'AGENCE PRO').toUpperCase()
+  const campagneTag = stats.activeCampagne
+    ? `Campagne ${stats.activeCampagne}`
+    : 'Toutes campagnes'
+
   const dayOfYear = Math.floor(
     (now.getTime() - new Date(now.getFullYear(), 0, 0).getTime()) / (1000 * 60 * 60 * 24)
   )
   const dateTag = now.toISOString().slice(0, 10)
   const tag = `agencepro-${slot}-${dateTag}`
 
-  // Cas 0 pèlerin enregistré
+  // Cas 0 pèlerin enregistré sur la campagne active
   if (stats.total === 0) {
     return {
-      title: `${agenceLabel} — Prêt pour la campagne`,
+      title,
       body:
         stats.inactiveDays >= 2
-          ? `Cela fait ${stats.inactiveDays} jours que vous n'avez pas ouvert l'application. Commencez à enregistrer vos pèlerins.`
-          : `Ajoutez vos premiers pèlerins pour suivre automatiquement les paiements et passeports.`,
+          ? `${campagneTag} • Rappel d’activité\nCela fait ${stats.inactiveDays} jours sans ouverture. Commencez à enregistrer vos pèlerins.`
+          : `${campagneTag} • Démarrage\nAucun pèlerin enregistré pour le moment sur ${campagneTag.toLowerCase()}.`,
       url: '/hajj/ajouter-pelerin',
       category: stats.inactiveDays >= 2 ? 'inactivite' : 'resume',
       tag,
@@ -223,8 +249,8 @@ export function buildPushDigest(params: {
   if (slot === 'evening' || (slot === 'test' && stats.todayAmountSummary)) {
     if (stats.todayAmountSummary && stats.todayPaymentsCount > 0) {
       return {
-        title: `Bilan du jour — ${agenceLabel}`,
-        body: `Vous avez encaissé ${stats.todayAmountSummary} aujourd'hui (${stats.todayPaymentsCount} versement${stats.todayPaymentsCount > 1 ? 's' : ''}). ${stats.paidCompletePct}% des pèlerins sont soldés.`,
+        title,
+        body: `${campagneTag} • Bilan du jour\nVous avez encaissé ${stats.todayAmountSummary} aujourd’hui (${stats.todayPaymentsCount} versement${stats.todayPaymentsCount > 1 ? 's' : ''}) • ${stats.paidCompletePct}% soldés.`,
         url: '/hajj/comptabilite',
         category: 'encaissement_jour',
         tag,
@@ -233,11 +259,11 @@ export function buildPushDigest(params: {
 
     if (stats.inactiveDays >= 2) {
       const details: string[] = []
-      if (stats.unpaidPct > 0) details.push(`${stats.unpaidPct}% ont un solde à régler`)
+      if (stats.unpaidPct > 0) details.push(`${stats.unpaidPct}% ont un solde en attente`)
       if (stats.noPassportPct > 0) details.push(`${stats.noPassportPct}% sans passeport`)
       return {
-        title: `Ça fait ${stats.inactiveDays} jours 👋`,
-        body: `Vous n'avez pas ouvert ${agenceLabel} depuis ${stats.inactiveDays} jours.${details.length > 0 ? ` Point rapide : ${details.join(' et ')}.` : ` Vos ${stats.total} dossiers vous attendent.`}`,
+        title,
+        body: `${campagneTag} • Rappel (${stats.inactiveDays} j sans ouverture)\n${details.length > 0 ? details.join(' • ') : `Vos ${stats.total} dossiers vous attendent.`}`,
         url: '/hajj/dashboard',
         category: 'inactivite',
         tag,
@@ -246,8 +272,8 @@ export function buildPushDigest(params: {
 
     if (stats.todayNewPelerinsCount > 0) {
       return {
-        title: `Point du soir — ${agenceLabel}`,
-        body: `${stats.todayNewPelerinsCount} nouveau${stats.todayNewPelerinsCount > 1 ? 'x' : ''} pèlerin${stats.todayNewPelerinsCount > 1 ? 's' : ''} ajouté${stats.todayNewPelerinsCount > 1 ? 's' : ''} aujourd'hui. Total : ${stats.total} dossiers (${stats.paidCompletePct}% soldés).`,
+        title,
+        body: `${campagneTag} • Point du soir\n${stats.todayNewPelerinsCount} nouveau${stats.todayNewPelerinsCount > 1 ? 'x' : ''} pèlerin${stats.todayNewPelerinsCount > 1 ? 's' : ''} ajouté${stats.todayNewPelerinsCount > 1 ? 's' : ''} aujourd’hui • Total : ${stats.total} (${stats.paidCompletePct}% soldés).`,
         url: '/hajj/liste-pelerins',
         category: 'resume',
         tag,
@@ -256,8 +282,8 @@ export function buildPushDigest(params: {
 
     if (stats.unpaidCount > 0) {
       return {
-        title: `Suivi des encaissements — Soir`,
-        body: `${stats.unpaidPct}% de vos pèlerins (${stats.unpaidCount}/${stats.total}) n'ont pas encore soldé${stats.resteSummary ? ` • Reste à percevoir : ${stats.resteSummary}` : ''}.`,
+        title,
+        body: `${campagneTag} • Suivi des encaissements\n${stats.unpaidPct}% des pèlerins (${stats.unpaidCount}/${stats.total}) n’ont pas soldé${stats.resteSummary ? ` • Reste : ${stats.resteSummary}` : ''}.`,
         url: '/hajj/liste-pelerins',
         category: 'impayes',
         tag,
@@ -265,11 +291,11 @@ export function buildPushDigest(params: {
     }
   }
 
-  // 2. Créneau MATIN (ou TEST) : relance inactivité + rotation intelligente Impayés / Passeports / Plateformes
+  // 2. Créneau MATIN (ou TEST) : inactivité + rotation intelligente Impayés / Passeports / Plateformes
   if (stats.inactiveDays >= 3 && lastCategory !== 'inactivite') {
     return {
-      title: `On vous attend sur ${agenceLabel}`,
-      body: `Cela fait ${stats.inactiveDays} jours que vous n'avez pas ouvert l'app. ${stats.unpaidPct}% des pèlerins n'ont pas soldé et ${stats.noPassportPct}% n'ont pas de passeport.`,
+      title,
+      body: `${campagneTag} • Rappel (${stats.inactiveDays} j sans ouverture)\n${stats.unpaidPct}% n’ont pas encore soldé et ${stats.noPassportPct}% n’ont pas de passeport.`,
       url: '/hajj/dashboard',
       category: 'inactivite',
       tag,
@@ -282,8 +308,8 @@ export function buildPushDigest(params: {
     const zeroNote =
       stats.zeroPaidCount > 0 ? ` dont ${stats.zeroPaidCount} aucun versement` : ''
     candidates.push({
-      title: `Paiements en attente — ${stats.activeCampagne ? `Hajj ${stats.activeCampagne}` : agenceLabel}`,
-      body: `${stats.unpaidPct}% de vos pèlerins (${stats.unpaidCount}/${stats.total}${zeroNote}) n'ont pas encore payé la totalité${stats.resteSummary ? ` • Reste : ${stats.resteSummary}` : ''}.`,
+      title,
+      body: `${campagneTag} • Paiements en attente\n${stats.unpaidPct}% des pèlerins (${stats.unpaidCount}/${stats.total}${zeroNote}) n’ont pas soldé${stats.resteSummary ? ` • Reste : ${stats.resteSummary}` : ''}.`,
       url: '/hajj/liste-pelerins',
       category: 'impayes',
       tag,
@@ -292,8 +318,8 @@ export function buildPushDigest(params: {
 
   if (stats.noPassportCount > 0) {
     candidates.push({
-      title: `Passeports manquants — ${agenceLabel}`,
-      body: `${stats.noPassportPct}% de vos pèlerins (${stats.noPassportCount}/${stats.total}) n'ont pas encore de passeport enregistré. Pensez à compléter leurs dossiers.`,
+      title,
+      body: `${campagneTag} • Passeports manquants\n${stats.noPassportPct}% des pèlerins (${stats.noPassportCount}/${stats.total}) n’ont pas encore de passeport enregistré.`,
       url: '/hajj/liste-pelerins',
       category: 'passeports',
       tag,
@@ -302,8 +328,8 @@ export function buildPushDigest(params: {
 
   if (stats.notGouvCount > 0) {
     candidates.push({
-      title: `Suivi plateforme Gouv`,
-      body: `${stats.notGouvPct}% des pèlerins (${stats.notGouvCount}/${stats.total}) ne sont pas encore enregistrés sur la plateforme Gouv.`,
+      title,
+      body: `${campagneTag} • Plateforme Gouv\n${stats.notGouvPct}% des pèlerins (${stats.notGouvCount}/${stats.total}) ne sont pas encore inscrits sur Gouv.`,
       url: '/hajj/nusuk',
       category: 'plateformes',
       tag,
@@ -311,7 +337,6 @@ export function buildPushDigest(params: {
   }
 
   if (candidates.length > 0) {
-    // Éviter de renvoyer la même catégorie deux fois de suite si d'autres alertes existent
     const filtered =
       candidates.length > 1 && lastCategory
         ? candidates.filter((c) => c.category !== lastCategory)
@@ -320,10 +345,9 @@ export function buildPushDigest(params: {
     return chosen
   }
 
-  // Tout est à jour !
   return {
-    title: `Campagne à jour — ${agenceLabel}`,
-    body: `Bravo ! Vos ${stats.total} dossiers sont complets et soldés à ${stats.paidCompletePct}%.`,
+    title,
+    body: `${campagneTag} • Campagne à jour\nBravo ! Vos ${stats.total} dossiers sont complets et soldés à ${stats.paidCompletePct}%.`,
     url: '/hajj/dashboard',
     category: 'resume',
     tag,

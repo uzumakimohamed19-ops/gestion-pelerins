@@ -1,9 +1,13 @@
 // Fichier public/sw.js
-const CACHE_NAME = 'hajj-v4'; // Inclut le support complet Web Push (Android & iOS PWA)
+const CACHE_NAME = 'hajj-v6'; // Push haute priorité (réveil veille Android/iOS), pastille icône & résilience SW
 
-// 1. Initialisation du cache PWA sans écran offline de remplacement.
-self.addEventListener('install', () => {
-  self.skipWaiting();
+// 1. Initialisation du cache PWA + pré-cache du logo Agence Pro pour les notifications.
+self.addEventListener('install', (event) => {
+  event.waitUntil(
+    caches.open(CACHE_NAME).then((cache) => {
+      return cache.addAll(['/icon-192x192.png']).catch(() => {});
+    }).then(() => self.skipWaiting())
+  );
 });
 
 self.addEventListener('activate', (event) => {
@@ -113,41 +117,87 @@ self.addEventListener('push', (event) => {
     }
   }
 
+  const origin = self.location.origin;
+  const resolveAsset = (path) => {
+    if (!path) return `${origin}/icon-192x192.png`;
+    if (path.startsWith('http://') || path.startsWith('https://')) return path;
+    return `${origin}${path.startsWith('/') ? path : `/${path}`}`;
+  };
+
   const options = {
     body: data.body,
-    icon: data.icon || '/icon-192x192.png',
-    badge: data.badge || '/icon-192x192.png',
+    icon: resolveAsset(data.icon || '/icon-192x192.png'),
+    badge: resolveAsset(data.badge || '/icon-192x192.png'),
     tag: data.tag || 'agencepro-digest',
     renotify: true,
-    vibrate: [120, 60, 120],
+    silent: false,
+    requireInteraction: data.requireInteraction !== false,
+    timestamp: data.timestamp || Date.now(),
+    vibrate: [200, 100, 200],
     data: {
       url: data.url || '/hajj/dashboard',
+      priority: data.priority || 'high',
     },
   };
 
-  event.waitUntil(self.registration.showNotification(data.title, options));
+  event.waitUntil(
+    Promise.all([
+      self.registration.showNotification(data.title, options),
+      // Pastille de notification sur l'icône PWA (iOS 16.4+ & Android) même en veille prolongée
+      self.navigator && typeof self.navigator.setAppBadge === 'function'
+        ? self.navigator.setAppBadge(1).catch(() => {})
+        : Promise.resolve(),
+    ])
+  );
 });
 
-// 4. Ouverture ciblée de la PWA au clic sur une notification
+// 4. Ouverture / réveil ciblé de la PWA au clic sur une notification
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
-  const targetUrl = (event.notification.data && event.notification.data.url) || '/hajj/dashboard';
+  const rawUrl = (event.notification.data && event.notification.data.url) || '/hajj/dashboard';
+  const targetUrl = rawUrl.startsWith('http')
+    ? rawUrl
+    : `${self.location.origin}${rawUrl.startsWith('/') ? rawUrl : `/${rawUrl}`}`;
 
   event.waitUntil(
-    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((windowClients) => {
-      for (const client of windowClients) {
-        if ('focus' in client) {
-          client.focus();
-          if ('navigate' in client) {
-            return client.navigate(targetUrl).catch(() => client);
+    Promise.all([
+      self.navigator && typeof self.navigator.clearAppBadge === 'function'
+        ? self.navigator.clearAppBadge().catch(() => {})
+        : Promise.resolve(),
+      self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((windowClients) => {
+        for (const client of windowClients) {
+          if (client.url.startsWith(self.location.origin) && 'focus' in client) {
+            return client.focus().then(() => {
+              if ('navigate' in client) {
+                return client.navigate(targetUrl).catch(() => client);
+              }
+              return client;
+            });
           }
-          return client;
         }
+        if (self.clients.openWindow) {
+          return self.clients.openWindow(targetUrl);
+        }
+        return undefined;
+      }),
+    ])
+  );
+});
+
+// 5. Auto-renouvellement silencieux si le navigateur fait tourner la clé push pendant une longue veille
+self.addEventListener('pushsubscriptionchange', (event) => {
+  event.waitUntil(
+    (async () => {
+      try {
+        const oldKey = event.oldSubscription?.options?.applicationServerKey;
+        if (!oldKey) return;
+        await self.registration.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey: oldKey,
+        });
+      } catch {
+        // La resynchronisation serveur se fera automatiquement à la prochaine ouverture de l'app
       }
-      if (self.clients.openWindow) {
-        return self.clients.openWindow(targetUrl);
-      }
-      return undefined;
-    })
+    })()
   );
 });
