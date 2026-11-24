@@ -1118,6 +1118,27 @@ export default function RepartitionHotelsPage() {
   const totalEnAttenteVille = Math.max(0, pelerins.length - totalLogesVille)
   const tauxPlacementVille = pelerins.length > 0 ? Math.round((totalLogesVille / pelerins.length) * 100) : 0
 
+  // Pré-indexation O(N) des occupants par chambre pour un scroll mobile 60fps sans recalcul par carte
+  const occupantsByChambreId = useMemo(() => {
+    const map = new Map<string, Pelerin[]>()
+    for (const p of pelerins) {
+      const cid = villeActive === 'Mecque' ? p.chambre_mecque_id : p.chambre_medine_id
+      if (!cid) continue
+      const list = map.get(cid)
+      if (list) list.push(p)
+      else map.set(cid, [p])
+    }
+    return map
+  }, [pelerins, villeActive])
+
+  const roomCountByHotelId = useMemo(() => {
+    const map = new Map<string, number>()
+    for (const c of chambres) {
+      map.set(c.hotel_id, (map.get(c.hotel_id) || 0) + 1)
+    }
+    return map
+  }, [chambres])
+
   const activeAdvancedFilterCount =
     (filtreTrancheAge !== 'tous' ? 1 : 0) +
     (filtreAssocie !== 'tous' ? 1 : 0) +
@@ -1168,7 +1189,7 @@ export default function RepartitionHotelsPage() {
 
   return (
     <div
-      className={`min-h-screen bg-slate-50 text-slate-800 transition-all duration-200 ${
+      className={`min-h-screen bg-slate-50 text-slate-800 ${
         isFullscreen
           ? 'fixed inset-0 z-[100] overflow-y-auto pb-10'
           : 'pb-28 lg:pb-24'
@@ -1225,7 +1246,7 @@ export default function RepartitionHotelsPage() {
           </div>
 
           {/* Sélecteur segmenté natif La Mecque / Médine */}
-          <div className="mt-4 grid grid-cols-2 gap-1 p-1 bg-white/15 border border-white/15 rounded-2xl backdrop-blur-xs relative z-10">
+          <div className="mt-4 grid grid-cols-2 gap-1 p-1 bg-white/15 border border-white/15 rounded-2xl relative z-10">
             <button
               type="button"
               onClick={() => {
@@ -1286,8 +1307,8 @@ export default function RepartitionHotelsPage() {
           </div>
         </div>
 
-        {/* 2. BARRE D'ONGLETS STICKY (CHAMBRES / À LOGER) */}
-        <div className="sticky top-0 z-30 bg-slate-50/95 backdrop-blur-md px-4 py-3 border-b border-slate-200/70">
+        {/* 2. BARRE D'ONGLETS STICKY (sans backdrop-blur coûteux pour un scroll 60fps) */}
+        <div className="sticky top-0 z-30 bg-slate-50 px-4 py-3 border-b border-slate-200/70">
           <div className="grid grid-cols-2 gap-1.5 p-1 bg-slate-200/75 rounded-2xl">
             <button
               type="button"
@@ -1362,11 +1383,11 @@ export default function RepartitionHotelsPage() {
               )}
 
               {/* Puces Hôtels défilables horizontalement au pouce */}
-              <div className="flex items-center gap-2 overflow-x-auto pb-1 -mx-4 px-4 no-scrollbar snap-x">
+              <div className="flex items-center gap-2 overflow-x-auto pb-1 -mx-4 px-4 no-scrollbar">
                 <button
                   type="button"
                   onClick={() => setSelectedHotelId('all')}
-                  className={`h-10 px-4 rounded-2xl text-xs font-black shrink-0 snap-start border transition-all active:scale-95 cursor-pointer ${
+                  className={`h-10 px-4 rounded-2xl text-xs font-black shrink-0 border transition-colors active:scale-95 cursor-pointer ${
                     selectedHotelId === 'all'
                       ? 'bg-slate-900 text-white border-slate-900 shadow-xs'
                       : 'bg-white text-slate-600 border-slate-200'
@@ -1377,13 +1398,13 @@ export default function RepartitionHotelsPage() {
 
                 {hotelsVilleActive.map((h) => {
                   const isActive = selectedHotelId === h.id
-                  const roomCount = chambres.filter((c) => c.hotel_id === h.id).length
+                  const roomCount = roomCountByHotelId.get(h.id) || 0
                   return (
-                    <div key={h.id} className="inline-flex items-center shrink-0 snap-start">
+                    <div key={h.id} className="inline-flex items-center shrink-0">
                       <button
                         type="button"
                         onClick={() => setSelectedHotelId(h.id)}
-                        className={`h-10 px-4 text-xs font-black border transition-all active:scale-95 flex items-center gap-1.5 cursor-pointer ${
+                        className={`h-10 px-4 text-xs font-black border transition-colors active:scale-95 flex items-center gap-1.5 cursor-pointer ${
                           isActive
                             ? 'bg-blue-600 text-white border-blue-600 rounded-l-2xl shadow-xs'
                             : 'bg-white text-slate-700 border-slate-200 rounded-2xl'
@@ -1413,7 +1434,7 @@ export default function RepartitionHotelsPage() {
                 <button
                   type="button"
                   onClick={() => setShowAddHotelModal(true)}
-                  className="h-10 px-3.5 rounded-2xl text-xs font-black shrink-0 snap-start border border-dashed border-blue-300 bg-blue-50/70 text-blue-700 flex items-center gap-1 active:scale-95 transition cursor-pointer"
+                  className="h-10 px-3.5 rounded-2xl text-xs font-black shrink-0 border border-dashed border-blue-300 bg-blue-50/70 text-blue-700 flex items-center gap-1 active:scale-95 transition cursor-pointer"
                 >
                   <Plus size={14} />
                   <span>Hôtel</span>
@@ -1452,11 +1473,7 @@ export default function RepartitionHotelsPage() {
               ) : (
                 <div className="space-y-3.5">
                   {chambresFiltrees.map((chambre) => {
-                    const occupants = pelerins.filter((p) =>
-                      villeActive === 'Mecque'
-                        ? p.chambre_mecque_id === chambre.id
-                        : p.chambre_medine_id === chambre.id
-                    )
+                    const occupants = occupantsByChambreId.get(chambre.id) || []
                     const placesRestantes = Math.max(0, chambre.capacite - occupants.length)
                     const isPlein = placesRestantes === 0
                     const fillPct = chambre.capacite > 0 ? Math.min(100, Math.round((occupants.length / chambre.capacite) * 100)) : 0
@@ -1469,7 +1486,7 @@ export default function RepartitionHotelsPage() {
                     return (
                       <div
                         key={chambre.id}
-                        className={`bg-white rounded-3xl border p-4 shadow-xs transition-all ${
+                        className={`bg-white rounded-3xl border p-4 shadow-xs [content-visibility:auto] [contain-intrinsic-size:auto_220px] ${
                           hasEnoughRoomForBatch
                             ? 'border-emerald-400 ring-2 ring-emerald-500/20'
                             : countSelected > 0 && !hasEnoughRoomForBatch
@@ -1548,7 +1565,7 @@ export default function RepartitionHotelsPage() {
                                       }`}
                                     >
                                       {photoUrl ? (
-                                        <img src={photoUrl} alt={nomOcc} className="w-full h-full object-cover" />
+                                        <img src={photoUrl} alt={nomOcc} loading="lazy" decoding="async" className="w-full h-full object-cover" />
                                       ) : (
                                         <span>{nomOcc.charAt(0).toUpperCase() || 'P'}</span>
                                       )}
@@ -1758,7 +1775,7 @@ export default function RepartitionHotelsPage() {
                         key={p.id}
                         type="button"
                         onClick={() => toggleSelectPelerin(p.id)}
-                        className={`w-full text-left p-3.5 rounded-2xl border transition-all active:scale-[0.98] flex items-center gap-3 min-h-[68px] cursor-pointer ${
+                        className={`w-full text-left p-3.5 rounded-2xl border transition-colors active:scale-[0.98] flex items-center gap-3 min-h-[68px] cursor-pointer [content-visibility:auto] [contain-intrinsic-size:auto_76px] ${
                           isSelected
                             ? 'bg-blue-50/90 border-blue-500 ring-2 ring-blue-500/20 shadow-xs'
                             : 'bg-white border-slate-200/90 shadow-2xs'
@@ -1766,9 +1783,9 @@ export default function RepartitionHotelsPage() {
                       >
                         {/* Coche circulaire native */}
                         <div
-                          className={`w-6 h-6 rounded-full border-2 flex items-center justify-center shrink-0 transition-all ${
+                          className={`w-6 h-6 rounded-full border-2 flex items-center justify-center shrink-0 transition-colors ${
                             isSelected
-                              ? 'bg-blue-600 border-blue-600 text-white scale-105'
+                              ? 'bg-blue-600 border-blue-600 text-white'
                               : 'border-slate-300 bg-white text-transparent'
                           }`}
                         >
@@ -1782,7 +1799,7 @@ export default function RepartitionHotelsPage() {
                           }`}
                         >
                           {photoUrl ? (
-                            <img src={photoUrl} alt={nomCompletAffiche} className="w-full h-full object-cover" />
+                            <img src={photoUrl} alt={nomCompletAffiche} loading="lazy" decoding="async" className="w-full h-full object-cover" />
                           ) : (
                             <span>{nomCompletAffiche.charAt(0).toUpperCase() || 'P'}</span>
                           )}
@@ -1848,7 +1865,7 @@ export default function RepartitionHotelsPage() {
               {/* Barre flottante native au pouce dès que >= 1 pèlerin est sélectionné */}
               {countSelected > 0 && (
                 <div className="fixed left-3 right-3 bottom-24 z-40 animate-in fade-in slide-in-from-bottom-4 duration-200">
-                  <div className="bg-slate-900/95 backdrop-blur-md text-white rounded-3xl p-2.5 pl-4 shadow-2xl border border-white/10 flex items-center justify-between gap-2">
+                  <div className="bg-slate-900 text-white rounded-3xl p-2.5 pl-4 shadow-2xl border border-white/10 flex items-center justify-between gap-2">
                     <div className="flex items-center gap-2 min-w-0">
                       <button
                         type="button"

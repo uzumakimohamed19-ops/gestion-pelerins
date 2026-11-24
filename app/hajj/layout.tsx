@@ -61,12 +61,13 @@ export default function HajjLayout({ children }: { children: React.ReactNode }) 
           style={{ paddingTop: 'env(safe-area-inset-top)' }}
         >
           
-          {/* La barre supérieure mobile (masquée sur PC) */}
+          {/* La barre supérieure mobile (masquée sur PC) — synchronisée automatiquement avec l'en-tête actif */}
           <div 
+            data-status-bar-guard="true"
             className="shadow-none fixed top-0 left-0 w-full z-[9999] pointer-events-none transition-colors duration-200 lg:hidden"
             style={{ 
               height: 'env(safe-area-inset-top)',
-              backgroundColor: isDashboard ? '#2563eb' : '#ffffff'
+              backgroundColor: `var(--status-bar-bg, ${isDashboard ? '#2563eb' : '#ffffff'})`
             }}
           />
 

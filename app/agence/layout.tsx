@@ -58,7 +58,6 @@ export default function AgenceLayout({ children }: { children: React.ReactNode }
         <style dangerouslySetInnerHTML={{
           __html: `
             html, body {
-              background-color: ${isDark ? '#000000' : '#FBFBFB'} !important;
               overscroll-behavior-y: none;
             }
             @media (min-width: 1024px) {
@@ -69,14 +68,15 @@ export default function AgenceLayout({ children }: { children: React.ReactNode }
           `
         }} />
 
-        {/* Barre safe-area en haut (adaptée pour Dashboard & Dark Mode) */}
+        {/* Barre safe-area en haut (synchronisée automatiquement avec l'en-tête actif) */}
         <div 
+          data-status-bar-guard="true"
           className="fixed top-0 left-0 w-full z-[9999] pointer-events-none transition-colors duration-150"
           style={{ 
             height: 'env(safe-area-inset-top)',
-            backgroundColor: isDark 
+            backgroundColor: `var(--status-bar-bg, ${isDark 
               ? (isDashboard ? '#161618' : '#000000') 
-              : (isDashboard ? '#1e293b' : '#ffffff')
+              : (isDashboard ? '#1e293b' : '#ffffff')})`
           }}
         />
 

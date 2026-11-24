@@ -1190,10 +1190,10 @@ export default function ListePelerins() {
         {/* =================================================================== */}
         <div className="md:hidden pb-32">
           {/* 1. EN-TÊTE BLANC COMPACT, FIXE ET ULTRA-FLUIDE (zéro saccade au scroll) */}
-          <div className="bg-white/95 backdrop-blur-md border-b border-slate-100 px-5 pt-3.5 pb-3 sticky top-0 z-30 shadow-[0_1px_6px_rgba(15,23,42,0.04)]">
+          <div className="bg-white border-b border-slate-100 px-5 pt-3.5 pb-3 sticky top-0 z-30 shadow-[0_1px_6px_rgba(15,23,42,0.04)]">
             <div className="flex items-center justify-between gap-3">
               <div className="min-w-0 flex items-baseline gap-2">
-                <h1 className="text-xl font-black text-slate-900 tracking-tight leading-none">
+                <h1 className="text-xl font-black text-blue-600 tracking-tight leading-none">
                   Dossiers
                 </h1>
                 <span className="text-xs font-bold text-slate-400 tabular-nums truncate">
@@ -1237,26 +1237,26 @@ export default function ListePelerins() {
               </div>
             </div>
 
-            {/* Barre de recherche bleu pastel + bouton Filtres bleu pastel */}
+            {/* Barre de recherche neutre + bouton Filtres */}
             <div className="mt-2.5 flex items-center gap-2">
               <div className="relative flex-1 min-w-0">
                 <Search
                   size={16}
-                  className="absolute left-3.5 top-1/2 -translate-y-1/2 text-blue-500 pointer-events-none"
+                  className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none"
                 />
                 <input
                   type="text"
                   placeholder="Nom, passeport, tél, agence…"
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
-                  className="w-full h-10 pl-10 pr-9 rounded-2xl bg-blue-50/90 border border-blue-200/70 focus:bg-blue-50/50 focus:border-blue-400 text-sm font-semibold text-slate-900 placeholder:text-blue-400 outline-none transition"
+                  className="w-full h-10 pl-10 pr-9 rounded-2xl bg-slate-100/90 border border-transparent focus:bg-white focus:border-slate-300 text-sm font-semibold text-slate-900 placeholder:text-slate-400 outline-none transition"
                 />
                 {searchTerm && (
                   <button
                     type="button"
                     onClick={() => setSearchTerm('')}
                     aria-label="Effacer"
-                    className="absolute right-2 top-1/2 -translate-y-1/2 w-6 h-6 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center"
+                    className="absolute right-2 top-1/2 -translate-y-1/2 w-6 h-6 rounded-full bg-slate-200/80 text-slate-500 flex items-center justify-center"
                   >
                     <X size={13} />
                   </button>
@@ -1267,15 +1267,15 @@ export default function ListePelerins() {
                 type="button"
                 onClick={() => setMobileFilterSheetOpen(true)}
                 aria-label="Filtres avancés"
-                className={`relative w-10 h-10 shrink-0 rounded-2xl border flex items-center justify-center transition active:scale-95 cursor-pointer ${
+                className={`relative w-10 h-10 shrink-0 rounded-2xl flex items-center justify-center transition active:scale-95 cursor-pointer ${
                   activeFilterCount > 0
-                    ? 'bg-blue-600 text-white border-blue-600 shadow-xs'
-                    : 'bg-blue-50/90 text-blue-600 border-blue-200/70'
+                    ? 'bg-slate-900 text-white shadow-xs'
+                    : 'bg-slate-100/90 text-slate-700'
                 }`}
               >
                 <SlidersHorizontal size={17} />
                 {activeFilterCount > 0 && (
-                  <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 rounded-full bg-slate-900 text-white text-[10px] font-black flex items-center justify-center shadow-xs">
+                  <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 rounded-full bg-blue-600 text-white text-[10px] font-black flex items-center justify-center shadow-xs">
                     {activeFilterCount}
                   </span>
                 )}
@@ -1285,58 +1285,38 @@ export default function ListePelerins() {
 
           {/* 2. CORPS DE PAGE AÉRÉ (devises + KPI + filtres défilent naturellement au scroll) */}
           <div className="px-5 pt-3.5 space-y-3.5">
-            {/* Sélecteur de devise pastel (disparaît naturellement au scroll) */}
+            {/* Sélecteur de devise sobre (blanc par défaut, bleu au clic) */}
             <div className="-mx-5 px-5 flex items-center gap-2 overflow-x-auto no-scrollbar">
               <button
                 type="button"
                 onClick={() => setDeviseFilter('ALL')}
-                className={`h-8 px-3.5 rounded-full text-xs font-black border whitespace-nowrap shrink-0 flex items-center gap-1.5 transition active:scale-95 cursor-pointer ${
+                className={`h-8 px-3.5 rounded-full text-xs font-bold border whitespace-nowrap shrink-0 flex items-center gap-1.5 transition active:scale-95 cursor-pointer ${
                   deviseFilter === 'ALL'
-                    ? 'bg-indigo-600 text-white border-indigo-600 shadow-xs'
-                    : 'bg-indigo-50 text-indigo-700 border-indigo-200/80'
+                    ? 'bg-blue-600 text-white border-blue-600 shadow-xs'
+                    : 'bg-white text-slate-700 border-slate-200/90'
                 }`}
               >
                 <span>Toutes</span>
-                <span className={`text-[10px] tabular-nums ${deviseFilter === 'ALL' ? 'text-indigo-200' : 'text-indigo-500'}`}>
+                <span className={`text-[10px] tabular-nums ${deviseFilter === 'ALL' ? 'text-blue-100' : 'text-slate-400'}`}>
                   {pelerins.length}
                 </span>
               </button>
 
               {HAJJ_CURRENCIES.map(cur => {
                 const active = deviseFilter === cur.code
-                const palette =
-                  cur.code === 'FCFA'
-                    ? {
-                        idle: 'bg-emerald-50 text-emerald-700 border-emerald-200/80',
-                        active: 'bg-emerald-600 text-white border-emerald-600 shadow-xs',
-                        countIdle: 'text-emerald-500',
-                        countActive: 'text-emerald-100',
-                      }
-                    : cur.code === 'EUR'
-                    ? {
-                        idle: 'bg-sky-50 text-sky-700 border-sky-200/80',
-                        active: 'bg-sky-600 text-white border-sky-600 shadow-xs',
-                        countIdle: 'text-sky-500',
-                        countActive: 'text-sky-100',
-                      }
-                    : {
-                        idle: 'bg-amber-50 text-amber-700 border-amber-200/80',
-                        active: 'bg-amber-600 text-white border-amber-600 shadow-xs',
-                        countIdle: 'text-amber-600/80',
-                        countActive: 'text-amber-100',
-                      }
-
                 return (
                   <button
                     key={cur.code}
                     type="button"
                     onClick={() => setDeviseFilter(cur.code)}
-                    className={`h-8 px-3.5 rounded-full text-xs font-black border whitespace-nowrap shrink-0 flex items-center gap-1.5 transition active:scale-95 cursor-pointer ${
-                      active ? palette.active : palette.idle
+                    className={`h-8 px-3.5 rounded-full text-xs font-bold border whitespace-nowrap shrink-0 flex items-center gap-1.5 transition active:scale-95 cursor-pointer ${
+                      active
+                        ? 'bg-blue-600 text-white border-blue-600 shadow-xs'
+                        : 'bg-white text-slate-700 border-slate-200/90'
                     }`}
                   >
                     <span>{cur.shortLabel}</span>
-                    <span className={`text-[10px] tabular-nums ${active ? palette.countActive : palette.countIdle}`}>
+                    <span className={`text-[10px] tabular-nums ${active ? 'text-blue-100' : 'text-slate-400'}`}>
                       {deviseCounts[cur.code] ?? 0}
                     </span>
                   </button>
@@ -1381,13 +1361,13 @@ export default function ListePelerins() {
 
                   <div className="min-w-[150px] snap-start bg-white rounded-2xl border border-slate-100 shadow-xs p-3.5 shrink-0">
                     <p className="text-[10px] font-black uppercase tracking-wider text-slate-400">Reste dû</p>
-                    <p className="text-sm font-black text-amber-600 tabular-nums mt-1 truncate">
+                    <p className="text-sm font-black text-slate-900 tabular-nums mt-1 truncate">
                       {singleCurrency
                         ? formatHajjMoney(resteByCurrency[singleCurrency], singleCurrency, { compact: true })
                         : (resteMulti[0] || '0 F')}
                     </p>
                     {!singleCurrency && resteMulti.slice(1).map((line, idx) => (
-                      <p key={idx} className="text-[11px] font-bold text-amber-600/80 tabular-nums truncate">{line}</p>
+                      <p key={idx} className="text-[11px] font-bold text-slate-700 tabular-nums truncate">{line}</p>
                     ))}
                     <p className="text-[10px] font-semibold text-slate-400 mt-0.5">
                       {pelerinsFiltrés.filter(p => getPaiementStatut(p) !== 'complet').length} en cours
@@ -1536,7 +1516,7 @@ export default function ListePelerins() {
                         <div className="relative shrink-0">
                           <div className="w-12 h-12 rounded-2xl bg-slate-100 text-slate-700 flex items-center justify-center font-black text-xs overflow-hidden border border-slate-200/70">
                             {photoUrl ? (
-                              <img src={photoUrl} alt={p.nom_complet} className="w-full h-full object-cover" />
+                              <img src={photoUrl} alt={p.nom_complet} loading="lazy" decoding="async" className="w-full h-full object-cover" />
                             ) : (
                               <span>{getInitiales(p)}</span>
                             )}
@@ -1552,12 +1532,12 @@ export default function ListePelerins() {
                               {p.prenom} {p.nom_complet}
                             </h3>
                             <span
-                              className={`text-[10px] font-black px-2 py-0.5 rounded-full shrink-0 ${
+                              className={`text-[11px] font-black shrink-0 ${
                                 statut === 'complet'
-                                  ? 'bg-emerald-50 text-emerald-700'
+                                  ? 'text-emerald-600'
                                   : statut === 'partiel'
-                                  ? 'bg-amber-50 text-amber-700'
-                                  : 'bg-rose-50 text-rose-700'
+                                  ? 'text-amber-600'
+                                  : 'text-rose-600'
                               }`}
                             >
                               {statut === 'complet' ? 'Soldé' : statut === 'partiel' ? 'Partiel' : 'Non payé'}
@@ -1572,7 +1552,7 @@ export default function ListePelerins() {
                         </div>
                       </div>
 
-                      {/* Ligne 2 : Avancement paiement sobre & lisible */}
+                      {/* Ligne 2 : Avancement paiement sobre avec barre miniature */}
                       <div className="space-y-1.5">
                         <div className="flex items-baseline justify-between gap-2 text-xs">
                           <div className="flex items-center gap-1.5 min-w-0">
@@ -1583,17 +1563,22 @@ export default function ListePelerins() {
                               / {formatHajjMoney(p.prix_package, p.devise, { compact: true })}
                             </span>
                           </div>
-                          <span className="text-[11px] font-black text-blue-600 tabular-nums shrink-0">
+                          <span className="text-[11px] font-black text-slate-900 tabular-nums shrink-0">
                             {reste > 0 ? `Reste ${formatHajjMoney(reste, p.devise, { compact: true })}` : `${pct}%`}
                           </span>
                         </div>
-                        <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden">
-                          <div
-                            className={`h-full rounded-full transition-all ${
-                              statut === 'complet' ? 'bg-emerald-500' : 'bg-blue-600'
-                            }`}
-                            style={{ width: `${pct}%` }}
-                          />
+                        <div className="flex items-center gap-2">
+                          <div className="w-28 h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                            <div
+                              className={`h-full rounded-full ${
+                                statut === 'complet' ? 'bg-emerald-500' : 'bg-blue-600'
+                              }`}
+                              style={{ width: `${pct}%` }}
+                            />
+                          </div>
+                          <span className="text-[10px] font-bold text-slate-400 tabular-nums">
+                            {pct}%
+                          </span>
                         </div>
                       </div>
 
