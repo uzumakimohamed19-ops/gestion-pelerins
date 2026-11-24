@@ -391,6 +391,60 @@ export default function ListePelerins() {
     },
   })
 
+  // Cartes Synthèse empilées (mode deck tactile mobile : glisser gauche/droite pour changer)
+  const [heroSlideIndex, setHeroSlideIndex] = useState(0)
+  const [heroDragX, setHeroDragX] = useState(0)
+  const heroTouchStartRef = useRef<{ x: number; y: number } | null>(null)
+  const heroSwipeLockedRef = useRef<'horizontal' | 'vertical' | null>(null)
+  const heroDragXRef = useRef(0)
+
+  const handleHeroDeckTouchStart = (e: React.TouchEvent) => {
+    const t = e.touches[0]
+    if (!t) return
+    heroTouchStartRef.current = { x: t.clientX, y: t.clientY }
+    heroSwipeLockedRef.current = null
+    heroDragXRef.current = 0
+    setHeroDragX(0)
+  }
+
+  const handleHeroDeckTouchMove = (e: React.TouchEvent) => {
+    if (!heroTouchStartRef.current) return
+    const t = e.touches[0]
+    if (!t) return
+    const dx = t.clientX - heroTouchStartRef.current.x
+    const dy = t.clientY - heroTouchStartRef.current.y
+
+    if (!heroSwipeLockedRef.current) {
+      if (Math.abs(dx) > 10 && Math.abs(dx) > Math.abs(dy)) {
+        heroSwipeLockedRef.current = 'horizontal'
+      } else if (Math.abs(dy) > 10) {
+        heroSwipeLockedRef.current = 'vertical'
+        return
+      } else {
+        return
+      }
+    }
+
+    if (heroSwipeLockedRef.current === 'horizontal') {
+      const clamped = Math.max(-130, Math.min(130, dx))
+      heroDragXRef.current = clamped
+      setHeroDragX(clamped)
+    }
+  }
+
+  const handleHeroDeckTouchEnd = () => {
+    const dragged = heroDragXRef.current
+    heroTouchStartRef.current = null
+    heroSwipeLockedRef.current = null
+    heroDragXRef.current = 0
+    setHeroDragX(0)
+    if (dragged < -42) {
+      setHeroSlideIndex(prev => (prev + 1) % 3)
+    } else if (dragged > 42) {
+      setHeroSlideIndex(prev => (prev + 2) % 3)
+    }
+  }
+
   // Bouton flottant "Retour en haut" (mobile uniquement)
   const [showScrollTop, setShowScrollTop] = useState(false)
   useEffect(() => {
@@ -1382,22 +1436,21 @@ export default function ListePelerins() {
         )}
 
         {/* =================================================================== */}
-        {/* 📱 VERSION MOBILE NATIVE — VARIANTE B (PANNEAU HAUT + LISTE)        */}
+        {/* 📱 VERSION MOBILE NATIVE — APPROCHE ÉTAT GÉNÉRAL (`md:hidden`)      */}
         {/* =================================================================== */}
-        <div className="md:hidden pb-32 bg-[#F1F5F9] min-h-screen">
-          {/* 1. EN-TÊTE BLANC COMPACT, FIXE ET ULTRA-FLUIDE (zéro saccade au scroll) */}
-          <div className="bg-white border-b border-slate-200/80 px-5 pt-3.5 pb-3 sticky top-0 z-30 shadow-[0_1px_4px_rgba(15,23,42,0.03)]">
+        <div className="md:hidden pb-32 bg-slate-50 min-h-screen">
+          {/* 1. EN-TÊTE BLANC ÉPURÉ & COLLANT (z-40 pour que tout défile proprement dessous) */}
+          <div className="bg-white border-b border-slate-100 px-5 pt-4 pb-3.5 sticky top-0 z-40 shadow-[0_1px_8px_rgba(15,23,42,0.03)]">
             <div className="flex items-center justify-between gap-3">
-              <div className="min-w-0 flex items-baseline gap-2">
-                <h1 className="text-xl font-black text-blue-600 tracking-tight leading-none">
+              <div className="min-w-0">
+                <h1 className="text-2xl font-black text-blue-600 tracking-tight leading-none">
                   Dossiers
                 </h1>
-                <span className="text-xs font-bold text-slate-400 tabular-nums truncate">
-                  {hasActiveFilters
-                    ? `${pelerinsFiltrés.length}/${pelerins.length}`
-                    : `${pelerins.length}`}
-                  {selectedYear !== 'all' ? ` • ${selectedYear}` : ''}
-                </span>
+                <p className="text-xs font-semibold text-slate-400 mt-1 truncate">
+                  {selectedYear === 'all' ? 'Toutes campagnes' : `Campagne ${selectedYear}`} •{' '}
+                  {hasActiveFilters ? `${pelerinsFiltrés.length}/${pelerins.length}` : pelerins.length}{' '}
+                  pèlerin{pelerins.length > 1 ? 's' : ''}
+                </p>
               </div>
 
               <div className="flex items-center gap-1.5 shrink-0">
@@ -1432,29 +1485,369 @@ export default function ListePelerins() {
                 </Link>
               </div>
             </div>
+          </div>
 
-            {/* Barre de recherche neutre + bouton Filtres */}
-            <div className="mt-2.5 flex items-center gap-2">
+          {/* 2. CORPS DE PAGE AÉRÉ (z-0 isolé pour passer strictement sous l'en-tête fixe au scroll) */}
+          <div className="relative z-0 px-5 pt-4 space-y-4">
+            {/* Sélecteur de devise en 4 segments style Apple (teintes iOS douces au repos, vives au clic) */}
+            <div className="grid grid-cols-4 gap-1.5">
+              <button
+                type="button"
+                onClick={() => setDeviseFilter('ALL')}
+                className={`h-9 rounded-xl text-xs font-black border flex items-center justify-center gap-1 transition active:scale-[0.97] cursor-pointer ${
+                  deviseFilter === 'ALL'
+                    ? 'bg-[#007AFF] text-white border-[#007AFF] shadow-[0_3px_10px_-3px_rgba(0,122,255,0.55)]'
+                    : 'bg-[#007AFF]/10 text-[#0066D6] border-[#007AFF]/20'
+                }`}
+              >
+                <span>Tous</span>
+                <span className={`text-[10px] tabular-nums ${deviseFilter === 'ALL' ? 'text-white/80' : 'text-[#0066D6]/70'}`}>
+                  {pelerins.length}
+                </span>
+              </button>
+
+              {HAJJ_CURRENCIES.map(cur => {
+                const active = deviseFilter === cur.code
+                const applePalette =
+                  cur.code === 'FCFA'
+                    ? {
+                        active: 'bg-[#248A3D] text-white border-[#248A3D] shadow-[0_3px_10px_-3px_rgba(36,138,61,0.55)]',
+                        idle: 'bg-[#34C759]/12 text-[#1D7A36] border-[#34C759]/25',
+                        countIdle: 'text-[#1D7A36]/70',
+                      }
+                    : cur.code === 'EUR'
+                    ? {
+                        active: 'bg-[#5856D6] text-white border-[#5856D6] shadow-[0_3px_10px_-3px_rgba(88,86,214,0.55)]',
+                        idle: 'bg-[#5856D6]/10 text-[#4846C2] border-[#5856D6]/20',
+                        countIdle: 'text-[#4846C2]/70',
+                      }
+                    : {
+                        active: 'bg-[#0E7C94] text-white border-[#0E7C94] shadow-[0_3px_10px_-3px_rgba(14,124,148,0.55)]',
+                        idle: 'bg-[#30B0C7]/12 text-[#0C6E84] border-[#30B0C7]/25',
+                        countIdle: 'text-[#0C6E84]/70',
+                      }
+
+                return (
+                  <button
+                    key={cur.code}
+                    type="button"
+                    onClick={() => setDeviseFilter(cur.code)}
+                    className={`h-9 rounded-xl text-xs font-black border flex items-center justify-center gap-1 transition active:scale-[0.97] cursor-pointer ${
+                      active ? applePalette.active : applePalette.idle
+                    }`}
+                  >
+                    <span>{cur.shortLabel}</span>
+                    <span className={`text-[10px] tabular-nums ${active ? 'text-white/80' : applePalette.countIdle}`}>
+                      {deviseCounts[cur.code] ?? 0}
+                    </span>
+                  </button>
+                )
+              })}
+            </div>
+
+            {/* Bannière Synthèse & Actions en mode EMPILÉ 3D (glisser pour basculer, bleu nuit doux sans dégradé) */}
+            {!loading && pelerinsFiltrés.length > 0 && (() => {
+              const total = pelerinsFiltrés.length
+              const singleCurrency = deviseFilter !== 'ALL' ? deviseFilter : (activeCurrenciesInFiltered.length === 1 ? activeCurrenciesInFiltered[0].code : null)
+              const encaisseMulti = activeCurrenciesInFiltered.map(c => formatHajjMoney(payeByCurrency[c.code], c.code, { compact: true }))
+              const resteMulti = activeCurrenciesInFiltered.map(c => formatHajjMoney(resteByCurrency[c.code], c.code, { compact: true }))
+              const pctComplets = total > 0 ? Math.round((nbComplets / total) * 100) : 0
+              const pctGouv = total > 0 ? Math.round((nbGouv / total) * 100) : 0
+              const pctEncaisse = singleCurrency && packageByCurrency[singleCurrency] > 0
+                ? Math.min(100, Math.round((payeByCurrency[singleCurrency] / packageByCurrency[singleCurrency]) * 100))
+                : null
+
+              const nbNusuk = pelerinsFiltrés.filter(p => Boolean(p.sur_plateforme_nusuk)).length
+              const nbAvecHotel = pelerinsFiltrés.filter(p => Boolean(p.hotel_mecque?.trim() || p.hotel_medine?.trim())).length
+              const exportTargetCount = selectedIds.size > 0 ? selectedIds.size : total
+
+              const deckCards = [
+                {
+                  id: 'tresorerie',
+                  label: 'Synthèse',
+                  bgClass: 'bg-[#1E3A5F]', // Bleu Prusse architectural
+                  content: (
+                    <>
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <p className="text-[10px] font-black uppercase tracking-wider text-white/65">
+                            Total encaissé
+                          </p>
+                          <p className="text-[1.4rem] leading-tight font-black tabular-nums tracking-tight text-white mt-0.5 truncate">
+                            {singleCurrency
+                              ? formatHajjMoney(payeByCurrency[singleCurrency], singleCurrency, { compact: true })
+                              : (encaisseMulti[0] || '0 F')}
+                          </p>
+                          {!singleCurrency && encaisseMulti.length > 1 && (
+                            <p className="text-[10.5px] font-bold text-white/65 tabular-nums truncate">
+                              {encaisseMulti.slice(1).join(' • ')}
+                            </p>
+                          )}
+                        </div>
+                        <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded-full bg-white/15 text-white shrink-0">
+                          {singleCurrency ? HAJJ_CURRENCY_MAP[singleCurrency].shortLabel : 'Multi'}
+                        </span>
+                      </div>
+
+                      <div className="grid grid-cols-3 gap-2 pt-2.5 border-t border-white/15">
+                        <div className="min-w-0">
+                          <p className="text-[9.5px] text-white/65 font-semibold">Reste dû</p>
+                          <p className="text-[11px] font-black text-white tabular-nums mt-0.5 truncate">
+                            {singleCurrency
+                              ? formatHajjMoney(resteByCurrency[singleCurrency], singleCurrency, { compact: true })
+                              : (resteMulti[0] || '0 F')}
+                          </p>
+                        </div>
+                        <div className="min-w-0 border-l border-white/15 pl-2">
+                          <p className="text-[9.5px] text-white/65 font-semibold">Soldés</p>
+                          <p className="text-[11px] font-black text-emerald-300 tabular-nums mt-0.5 truncate">
+                            {nbComplets} ({pctComplets}%)
+                          </p>
+                        </div>
+                        <div className="min-w-0 border-l border-white/15 pl-2">
+                          <p className="text-[9.5px] text-white/65 font-semibold">
+                            {singleCurrency ? 'Forfait' : 'Dossiers'}
+                          </p>
+                          <p className="text-[11px] font-black text-white/90 tabular-nums mt-0.5 truncate">
+                            {singleCurrency
+                              ? `${pctEncaisse ?? 0}% • ${formatHajjMoney(packageByCurrency[singleCurrency], singleCurrency, { compact: true })}`
+                              : `${total} pèlerins`}
+                          </p>
+                        </div>
+                      </div>
+                    </>
+                  ),
+                },
+                {
+                  id: 'exports',
+                  label: 'Exports',
+                  bgClass: 'bg-[#2C3A47]', // Ardoise Basalte architectural
+                  content: (
+                    <>
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <p className="text-[10px] font-black uppercase tracking-wider text-white/65">
+                            Téléchargements rapides
+                          </p>
+                          <p className="text-sm font-black text-white leading-snug mt-0.5 truncate">
+                            Passeports, photos & listes
+                          </p>
+                        </div>
+                        <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-white/15 text-white shrink-0 tabular-nums">
+                          {exportTargetCount} dossier{exportTargetCount > 1 ? 's' : ''}
+                        </span>
+                      </div>
+
+                      <div className="grid grid-cols-3 gap-2 pt-2 border-t border-white/15">
+                        <button
+                          type="button"
+                          disabled={isDownloadingZip}
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            exporterTousLesFichiersZIP()
+                          }}
+                          className="h-11 px-2 rounded-xl bg-white/14 active:bg-white/25 border border-white/15 text-white flex flex-col items-center justify-center gap-0.5 transition disabled:opacity-50 cursor-pointer"
+                        >
+                          {isDownloadingZip ? (
+                            <Loader2 size={14} className="animate-spin" />
+                          ) : (
+                            <FolderArchive size={14} />
+                          )}
+                          <span className="text-[10px] font-black leading-none">ZIP Docs</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            setShowPdfModal(true)
+                          }}
+                          className="h-11 px-2 rounded-xl bg-white/14 active:bg-white/25 border border-white/15 text-white flex flex-col items-center justify-center gap-0.5 transition cursor-pointer"
+                        >
+                          <FileText size={14} />
+                          <span className="text-[10px] font-black leading-none">Liste PDF</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            exporterExcel()
+                          }}
+                          className="h-11 px-2 rounded-xl bg-white/14 active:bg-white/25 border border-white/15 text-white flex flex-col items-center justify-center gap-0.5 transition cursor-pointer"
+                        >
+                          <FileSpreadsheet size={14} />
+                          <span className="text-[10px] font-black leading-none">Excel</span>
+                        </button>
+                      </div>
+                    </>
+                  ),
+                },
+                {
+                  id: 'logistique',
+                  label: 'Actions',
+                  bgClass: 'bg-[#1F3F3B]', // Vert Cèdre architectural
+                  content: (
+                    <>
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <p className="text-[10px] font-black uppercase tracking-wider text-white/65">
+                            Plateformes & logistique
+                          </p>
+                          <div className="flex items-center gap-3 mt-1 text-xs font-black text-white tabular-nums">
+                            <span>Gouv {nbGouv}/{total}</span>
+                            <span className="text-white/40">•</span>
+                            <span>Nusuk {nbNusuk}/{total}</span>
+                            <span className="text-white/40">•</span>
+                            <span>Hôtels {nbAvecHotel}</span>
+                          </div>
+                        </div>
+                        <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-white/15 text-white shrink-0 tabular-nums">
+                          {pctGouv}%
+                        </span>
+                      </div>
+
+                      <div className="grid grid-cols-3 gap-2 pt-2 border-t border-white/15">
+                        <Link
+                          href="/hajj/ajouter-pelerin"
+                          onClick={(e) => e.stopPropagation()}
+                          className="h-10 px-2 rounded-xl bg-white text-[#1F3F3B] font-black text-[10.5px] flex items-center justify-center gap-1 active:scale-95 transition"
+                        >
+                          <Plus size={13} strokeWidth={2.5} />
+                          <span>Nouveau</span>
+                        </Link>
+
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            handleToggleSelectMode()
+                          }}
+                          className={`h-10 px-2 rounded-xl border text-[10.5px] font-black flex items-center justify-center gap-1 active:scale-95 transition cursor-pointer ${
+                            selectMode
+                              ? 'bg-emerald-500 border-emerald-400 text-white'
+                              : 'bg-white/14 border-white/15 text-white active:bg-white/25'
+                          }`}
+                        >
+                          <CheckSquare size={12} />
+                          <span>Sélection</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            setMobileFilterSheetOpen(true)
+                          }}
+                          className="h-10 px-2 rounded-xl bg-white/14 active:bg-white/25 border border-white/15 text-white text-[10.5px] font-black flex items-center justify-center gap-1 active:scale-95 transition cursor-pointer"
+                        >
+                          <SlidersHorizontal size={12} />
+                          <span>Filtres</span>
+                        </button>
+                      </div>
+                    </>
+                  ),
+                },
+              ]
+
+              return (
+                <div className="isolate relative z-0 w-[92%] max-w-[345px] mx-auto pt-0.5 pb-1">
+                  {/* Pile 3D interactive (contexte z-index isolé : glisse toujours sous l'en-tête fixe) */}
+                  <div
+                    className="relative h-[132px] select-none"
+                    onTouchStart={handleHeroDeckTouchStart}
+                    onTouchMove={handleHeroDeckTouchMove}
+                    onTouchEnd={handleHeroDeckTouchEnd}
+                    onTouchCancel={handleHeroDeckTouchEnd}
+                  >
+                    {deckCards.map((card, idx) => {
+                      const pos = (idx - heroSlideIndex + deckCards.length) % deckCards.length
+                      const isFront = pos === 0
+                      const isSecond = pos === 1
+
+                      const layerStyle: React.CSSProperties = isFront
+                        ? {
+                            transform: `translate3d(${heroDragX}px, 0px, 0) rotate(${(heroDragX * 0.03).toFixed(2)}deg) scale(1)`,
+                            zIndex: 3,
+                            opacity: 1,
+                            transition: heroDragX !== 0 ? 'none' : 'transform 260ms cubic-bezier(0.22, 1, 0.36, 1), opacity 220ms ease',
+                          }
+                        : isSecond
+                        ? {
+                            transform: `translate3d(0px, ${heroDragX !== 0 ? Math.max(2, 9 - Math.abs(heroDragX) * 0.05) : 9}px, 0) scale(${heroDragX !== 0 ? Math.min(0.99, 0.945 + Math.abs(heroDragX) * 0.00035) : 0.945})`,
+                            zIndex: 2,
+                            opacity: 0.96,
+                            transition: heroDragX !== 0 ? 'none' : 'transform 260ms cubic-bezier(0.22, 1, 0.36, 1), opacity 220ms ease',
+                          }
+                        : {
+                            transform: 'translate3d(0px, 17px, 0) scale(0.89)',
+                            zIndex: 1,
+                            opacity: 0.88,
+                            transition: 'transform 260ms cubic-bezier(0.22, 1, 0.36, 1), opacity 220ms ease',
+                          }
+
+                      return (
+                        <div
+                          key={card.id}
+                          style={layerStyle}
+                          onClick={!isFront ? () => setHeroSlideIndex(idx) : undefined}
+                          className={`absolute inset-x-0 top-0 h-[116px] ${card.bgClass} text-white rounded-2xl px-4 py-3 flex flex-col justify-between border border-white/15 ${
+                            isFront
+                              ? 'shadow-[inset_0_1px_0_rgba(255,255,255,0.22),0_16px_28px_-12px_rgba(15,23,42,0.48),0_4px_10px_-4px_rgba(15,23,42,0.22)]'
+                              : 'shadow-[0_10px_20px_-12px_rgba(15,23,42,0.40)] cursor-pointer'
+                          }`}
+                        >
+                          <div className={isFront ? 'h-full flex flex-col justify-between' : 'opacity-20 pointer-events-none h-full flex flex-col justify-between'}>
+                            {card.content}
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+
+                  {/* Indicateurs cliquables assortis à la couleur architecturale active */}
+                  <div className="flex items-center justify-center gap-2 pt-2">
+                    {deckCards.map((card, idx) => (
+                      <button
+                        key={card.id}
+                        type="button"
+                        onClick={() => setHeroSlideIndex(idx)}
+                        className={`h-5 px-2.5 rounded-full text-[10px] font-bold transition cursor-pointer ${
+                          heroSlideIndex === idx
+                            ? `${card.bgClass} text-white`
+                            : 'text-slate-400 active:bg-slate-200/70'
+                        }`}
+                      >
+                        {card.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )
+            })()}
+
+            {/* Recherche neutre + Bouton Filtres avancés (style État Général) */}
+            <div className="flex items-center gap-2.5">
               <div className="relative flex-1 min-w-0">
                 <Search
-                  size={16}
-                  className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none"
+                  size={17}
+                  className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none"
                 />
                 <input
                   type="text"
                   placeholder="Nom, passeport, tél, agence…"
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
-                  className="w-full h-10 pl-10 pr-9 rounded-2xl bg-slate-100/90 border border-transparent focus:bg-white focus:border-slate-300 text-sm font-semibold text-slate-900 placeholder:text-slate-400 outline-none transition"
+                  className="w-full h-12 pl-11 pr-10 bg-white border border-slate-200/80 rounded-2xl text-sm font-semibold text-slate-900 placeholder:text-slate-400 shadow-xs outline-none focus:border-slate-400 transition"
                 />
                 {searchTerm && (
                   <button
                     type="button"
                     onClick={() => setSearchTerm('')}
                     aria-label="Effacer"
-                    className="absolute right-2 top-1/2 -translate-y-1/2 w-6 h-6 rounded-full bg-slate-200/80 text-slate-500 flex items-center justify-center"
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 w-7 h-7 rounded-full bg-slate-100 text-slate-500 flex items-center justify-center"
                   >
-                    <X size={13} />
+                    <X size={14} />
                   </button>
                 )}
               </div>
@@ -1463,10 +1856,10 @@ export default function ListePelerins() {
                 type="button"
                 onClick={() => setMobileFilterSheetOpen(true)}
                 aria-label="Filtres avancés"
-                className={`relative w-10 h-10 shrink-0 rounded-2xl flex items-center justify-center transition active:scale-95 cursor-pointer ${
+                className={`relative w-12 h-12 shrink-0 rounded-2xl border shadow-xs flex items-center justify-center active:scale-95 transition cursor-pointer ${
                   activeFilterCount > 0
-                    ? 'bg-slate-900 text-white shadow-xs'
-                    : 'bg-slate-100/90 text-slate-700'
+                    ? 'bg-slate-900 text-white border-slate-900'
+                    : 'bg-white text-slate-700 border-slate-200/80'
                 }`}
               >
                 <SlidersHorizontal size={17} />
@@ -1477,303 +1870,142 @@ export default function ListePelerins() {
                 )}
               </button>
             </div>
-          </div>
 
-          {/* 2. PANNEAU SUPÉRIEUR BLANC (Devises + Statistiques + Filtres séparés par de fins filets) */}
-          <div className="bg-white border-b border-slate-200/90 divide-y divide-slate-100">
-            {/* Sous-section A : Devises (rail segmenté discret, blanc par défaut, bleu au clic) */}
-            <section className="px-5 py-3 space-y-2">
-              <div className="flex items-center justify-between">
-                <p className="text-[10px] font-black uppercase tracking-wider text-slate-400">
-                  Devise
-                </p>
-                {deviseFilter !== 'ALL' && (
-                  <button
-                    type="button"
-                    onClick={() => setDeviseFilter('ALL')}
-                    className="text-[11px] font-bold text-blue-600 cursor-pointer"
-                  >
-                    Toutes
-                  </button>
-                )}
-              </div>
-
-              <div className="bg-slate-100/90 p-1 rounded-2xl flex items-center gap-1 overflow-x-auto no-scrollbar">
-                <button
-                  type="button"
-                  onClick={() => setDeviseFilter('ALL')}
-                  className={`h-8 px-3 rounded-xl text-xs font-bold border whitespace-nowrap shrink-0 flex items-center gap-1.5 transition active:scale-95 cursor-pointer ${
-                    deviseFilter === 'ALL'
-                      ? 'bg-blue-600 text-white border-blue-600 shadow-xs'
-                      : 'bg-white text-slate-700 border-slate-200/70'
-                  }`}
-                >
-                  <span>Toutes</span>
-                  <span className={`text-[10px] tabular-nums ${deviseFilter === 'ALL' ? 'text-blue-100' : 'text-slate-400'}`}>
-                    {pelerins.length}
-                  </span>
-                </button>
-
-                {HAJJ_CURRENCIES.map(cur => {
-                  const active = deviseFilter === cur.code
-                  return (
-                    <button
-                      key={cur.code}
-                      type="button"
-                      onClick={() => setDeviseFilter(cur.code)}
-                      className={`h-8 px-3 rounded-xl text-xs font-bold border whitespace-nowrap shrink-0 flex items-center gap-1.5 transition active:scale-95 cursor-pointer ${
-                        active
-                          ? 'bg-blue-600 text-white border-blue-600 shadow-xs'
-                          : 'bg-white text-slate-700 border-slate-200/70'
-                      }`}
-                    >
-                      <span>{cur.shortLabel}</span>
-                      <span className={`text-[10px] tabular-nums ${active ? 'text-blue-100' : 'text-slate-400'}`}>
-                        {deviseCounts[cur.code] ?? 0}
-                      </span>
-                    </button>
-                  )
-                })}
-              </div>
-            </section>
-
-            {/* Sous-section B : Statistiques / Résumé financier */}
-            {!loading && pelerinsFiltrés.length > 0 && (() => {
-              const singleCurrency = deviseFilter !== 'ALL' ? deviseFilter : (activeCurrenciesInFiltered.length === 1 ? activeCurrenciesInFiltered[0].code : null)
-              const encaisseMulti = activeCurrenciesInFiltered.map(c => formatHajjMoney(payeByCurrency[c.code], c.code, { compact: true }))
-              const resteMulti = activeCurrenciesInFiltered.map(c => formatHajjMoney(resteByCurrency[c.code], c.code, { compact: true }))
-              const pctComplets = pelerinsFiltrés.length > 0 ? Math.round((nbComplets / pelerinsFiltrés.length) * 100) : 0
-              const pctGouv = pelerinsFiltrés.length > 0 ? Math.round((nbGouv / pelerinsFiltrés.length) * 100) : 0
-              const pctEncaisse = singleCurrency && packageByCurrency[singleCurrency] > 0
-                ? Math.min(100, Math.round((payeByCurrency[singleCurrency] / packageByCurrency[singleCurrency]) * 100))
-                : null
-
-              return (
-                <section className="px-5 py-3.5 space-y-2.5">
-                  <div className="flex items-center justify-between gap-2">
-                    <p className="text-[10px] font-black uppercase tracking-wider text-slate-400">
-                      Statistiques
-                    </p>
-                    <span className="text-[10px] font-bold text-slate-400 tabular-nums">
-                      {singleCurrency ? HAJJ_CURRENCY_MAP[singleCurrency].shortLabel : 'Multi-devises'}
-                      {selectedYear !== 'all' ? ` • ${selectedYear}` : ''}
-                    </span>
-                  </div>
-
-                  <div className="-mx-5 px-5 flex gap-2.5 overflow-x-auto no-scrollbar snap-x snap-mandatory">
-                    <div className="min-w-[162px] snap-start bg-slate-50/80 rounded-2xl border border-blue-950/15 p-3.5 shrink-0">
-                      <p className="text-[10px] font-black uppercase tracking-wider text-slate-400">Encaissé</p>
-                      <p className="text-sm font-black text-slate-900 tabular-nums mt-1 truncate">
-                        {singleCurrency
-                          ? formatHajjMoney(payeByCurrency[singleCurrency], singleCurrency, { compact: true })
-                          : (encaisseMulti[0] || '0 F')}
-                      </p>
-                      {!singleCurrency && encaisseMulti.slice(1).map((line, idx) => (
-                        <p key={idx} className="text-[11px] font-bold text-slate-500 tabular-nums truncate">{line}</p>
-                      ))}
-                      <p className="text-[10px] font-semibold text-slate-400 mt-0.5 truncate">
-                        {singleCurrency
-                          ? `sur ${formatHajjMoney(packageByCurrency[singleCurrency], singleCurrency, { compact: true })}`
-                          : 'Séparé par devise'}
-                      </p>
-                      {pctEncaisse !== null && (
-                        <div className="mt-2 h-1 bg-slate-200/70 rounded-full overflow-hidden">
-                          <div className="h-full bg-blue-600 rounded-full" style={{ width: `${pctEncaisse}%` }} />
-                        </div>
-                      )}
-                    </div>
-
-                    <div className="min-w-[150px] snap-start bg-slate-50/80 rounded-2xl border border-blue-950/15 p-3.5 shrink-0">
-                      <p className="text-[10px] font-black uppercase tracking-wider text-slate-400">Reste dû</p>
-                      <p className="text-sm font-black text-slate-900 tabular-nums mt-1 truncate">
-                        {singleCurrency
-                          ? formatHajjMoney(resteByCurrency[singleCurrency], singleCurrency, { compact: true })
-                          : (resteMulti[0] || '0 F')}
-                      </p>
-                      {!singleCurrency && resteMulti.slice(1).map((line, idx) => (
-                        <p key={idx} className="text-[11px] font-bold text-slate-700 tabular-nums truncate">{line}</p>
-                      ))}
-                      <p className="text-[10px] font-semibold text-slate-400 mt-0.5">
-                        {pelerinsFiltrés.filter(p => getPaiementStatut(p) !== 'complet').length} en cours
-                      </p>
-                    </div>
-
-                    <div className="min-w-[125px] snap-start bg-slate-50/80 rounded-2xl border border-blue-950/15 p-3.5 shrink-0">
-                      <p className="text-[10px] font-black uppercase tracking-wider text-slate-400">Soldés</p>
-                      <p className="text-sm font-black text-emerald-700 tabular-nums mt-1">
-                        {nbComplets} <span className="text-[11px] font-bold text-slate-400">({pctComplets}%)</span>
-                      </p>
-                      <div className="mt-2.5 h-1 bg-slate-200/70 rounded-full overflow-hidden">
-                        <div className="h-full bg-emerald-500 rounded-full" style={{ width: `${pctComplets}%` }} />
-                      </div>
-                    </div>
-
-                    <div className="min-w-[125px] snap-start bg-slate-50/80 rounded-2xl border border-blue-950/15 p-3.5 shrink-0">
-                      <p className="text-[10px] font-black uppercase tracking-wider text-slate-400">Gouv</p>
-                      <p className="text-sm font-black text-slate-900 tabular-nums mt-1">
-                        {nbGouv}/{pelerinsFiltrés.length}
-                      </p>
-                      <div className="mt-2.5 h-1 bg-slate-200/70 rounded-full overflow-hidden">
-                        <div className="h-full bg-blue-600 rounded-full" style={{ width: `${pctGouv}%` }} />
-                      </div>
-                    </div>
-                  </div>
-                </section>
-              )
-            })()}
-
-            {/* Sous-section C : Filtres de statut & filtres avancés actifs */}
-            <section className="px-5 py-3 space-y-2.5">
-              <div className="flex items-center justify-between gap-2">
-                <p className="text-[10px] font-black uppercase tracking-wider text-slate-400">
-                  Filtres
-                </p>
-                {hasActiveFilters && (
-                  <button
-                    type="button"
-                    onClick={clearAllFilters}
-                    className="text-[11px] font-bold text-rose-600 flex items-center gap-0.5 active:scale-95 transition cursor-pointer"
-                  >
-                    <X size={12} /> Effacer tout
-                  </button>
-                )}
-              </div>
-
-              <div className="-mx-5 px-5 flex items-center gap-2 overflow-x-auto no-scrollbar">
-                {(['all', 'complet', 'partiel', 'non_paye'] as PaiementStatut[]).map(s => {
-                  const labels = { all: 'Tous', complet: 'Soldés', partiel: 'Partiels', non_paye: 'Non payés' }
-                  const active = statutPaiementFilter === s
-                  return (
-                    <button
-                      key={s}
-                      type="button"
-                      onClick={() => setStatutPaiementFilter(s)}
-                      className={`h-8 px-3.5 rounded-full text-xs font-bold whitespace-nowrap shrink-0 transition active:scale-95 cursor-pointer ${
-                        active
-                          ? 'bg-slate-900 text-white shadow-xs'
-                          : 'bg-slate-100/90 text-slate-600 border border-slate-200/70'
-                      }`}
-                    >
-                      {labels[s]}
-                    </button>
-                  )
-                })}
-              </div>
-
-              {/* Pills supprimables des filtres avancés actifs (1 tap pour retirer) */}
-              {(plateformeFilter !== 'all' || hotelFilter !== 'all' || !!selectedFilterValue) && (
-                <div className="-mx-5 px-5 flex items-center gap-2 overflow-x-auto no-scrollbar">
-                  {plateformeFilter !== 'all' && (
-                    <button
-                      type="button"
-                      onClick={() => setPlateformeFilter('all')}
-                      className="h-7 px-2.5 rounded-full bg-blue-50 text-blue-700 border border-blue-200/80 text-[11px] font-bold whitespace-nowrap shrink-0 flex items-center gap-1 active:scale-95 transition cursor-pointer"
-                    >
-                      <span>
-                        Plateforme : {plateformeFilter === 'gouv' ? 'Gouv' : plateformeFilter === 'nusuk' ? 'Nusuk' : plateformeFilter === 'both' ? 'Les deux' : 'Aucune'}
-                      </span>
-                      <X size={12} />
-                    </button>
-                  )}
-                  {hotelFilter !== 'all' && (
-                    <button
-                      type="button"
-                      onClick={() => setHotelFilter('all')}
-                      className="h-7 px-2.5 rounded-full bg-blue-50 text-blue-700 border border-blue-200/80 text-[11px] font-bold whitespace-nowrap shrink-0 flex items-center gap-1 active:scale-95 transition cursor-pointer"
-                    >
-                      <span>Hôtel : {hotelFilter}</span>
-                      <X size={12} />
-                    </button>
-                  )}
-                  {selectedFilterValue && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setSelectedFilterValue(null)
-                        setActiveFilterType(null)
-                      }}
-                      className="h-7 px-2.5 rounded-full bg-blue-50 text-blue-700 border border-blue-200/80 text-[11px] font-bold whitespace-nowrap shrink-0 flex items-center gap-1 active:scale-95 transition cursor-pointer"
-                    >
-                      <span>
-                        {activeFilterType === 'date' ? 'Inscription'
-                          : activeFilterType === 'date_depart' ? 'Départ'
-                          : activeFilterType === 'date_retour' ? 'Retour'
-                          : activeFilterType === 'reference' ? 'Réf.'
-                          : activeFilterType === 'agence' ? 'Agence'
-                          : activeFilterType === 'phone' ? 'Tél.'
-                          : 'Filtre'} : {selectedFilterValue}
-                      </span>
-                      <X size={12} />
-                    </button>
-                  )}
-                </div>
-              )}
-            </section>
-          </div>
-
-          {/* 3. ZONE LISTE DES PÈLERINS (rupture nette sur fond gris doux #F1F5F9) */}
-          <div className="px-5 pt-4 space-y-3">
-            {/* En-tête de section Liste + Tri */}
-            <div className="flex items-center justify-between gap-2">
-              <div className="flex items-center gap-2 min-w-0">
-                <p className="text-[11px] font-black uppercase tracking-wider text-slate-500">
-                  Liste des pèlerins
-                </p>
-                <span className="px-2 py-0.5 rounded-full bg-white border border-blue-950/10 text-[10px] font-black text-slate-600 tabular-nums">
-                  {hasActiveFilters ? `${pelerinsFiltrés.length}/${pelerins.length}` : pelerins.length}
-                </span>
-              </div>
-
+            {/* Pills statut paiement + tri sur 1 seule ligne fluide (sans scrollbar) */}
+            <div className="-mx-5 px-5 flex items-center gap-2 overflow-x-auto no-scrollbar pb-0.5">
               <button
                 type="button"
                 onClick={() => setSortOrder(prev => prev === 'desc' ? 'asc' : 'desc')}
-                className="h-7 px-2.5 rounded-full bg-white border border-blue-950/15 text-slate-700 text-[11px] font-bold whitespace-nowrap shrink-0 flex items-center gap-1 active:scale-95 transition cursor-pointer"
+                className="h-9 px-3 rounded-full bg-white border border-slate-200/80 text-slate-700 text-xs font-bold whitespace-nowrap shrink-0 flex items-center gap-1.5 active:scale-95 transition cursor-pointer"
               >
                 {sortOrder === 'desc' ? (
                   <>
-                    <ArrowDown size={11} className="text-blue-600" />
+                    <ArrowDown size={12} className="text-blue-600" />
                     <span>Récents</span>
                   </>
                 ) : (
                   <>
-                    <ArrowUp size={11} className="text-emerald-600" />
+                    <ArrowUp size={12} className="text-emerald-600" />
                     <span>Premiers</span>
                   </>
                 )}
               </button>
+
+              {(['all', 'complet', 'partiel', 'non_paye'] as PaiementStatut[]).map(s => {
+                const labels = {
+                  all: `Tous (${pelerinsFiltrés.length})`,
+                  complet: 'Soldés',
+                  partiel: 'Partiels',
+                  non_paye: 'Non payés',
+                }
+                const active = statutPaiementFilter === s
+                return (
+                  <button
+                    key={s}
+                    type="button"
+                    onClick={() => setStatutPaiementFilter(s)}
+                    className={`h-9 px-3.5 rounded-full text-xs font-bold whitespace-nowrap shrink-0 transition active:scale-95 cursor-pointer ${
+                      active
+                        ? 'bg-slate-900 text-white shadow-xs'
+                        : 'bg-white text-slate-600 border border-slate-200/80'
+                    }`}
+                  >
+                    {labels[s]}
+                  </button>
+                )
+              })}
+
+              {hasActiveFilters && (
+                <button
+                  type="button"
+                  onClick={clearAllFilters}
+                  className="h-9 px-3 rounded-full bg-rose-50 text-rose-600 border border-rose-200/80 text-xs font-black whitespace-nowrap shrink-0 flex items-center gap-1 active:scale-95 transition cursor-pointer"
+                >
+                  <X size={12} /> Effacer
+                </button>
+              )}
             </div>
 
-            {/* Liste des dossiers mobile épurée */}
+            {/* Pills supprimables des filtres avancés actifs (1 tap pour retirer) */}
+            {(plateformeFilter !== 'all' || hotelFilter !== 'all' || !!selectedFilterValue) && (
+              <div className="-mx-5 px-5 flex items-center gap-2 overflow-x-auto no-scrollbar">
+                {plateformeFilter !== 'all' && (
+                  <button
+                    type="button"
+                    onClick={() => setPlateformeFilter('all')}
+                    className="h-7 px-3 rounded-full bg-blue-50 text-blue-800 border border-blue-100 text-[11px] font-bold whitespace-nowrap shrink-0 flex items-center gap-1 active:scale-95 transition cursor-pointer"
+                  >
+                    <span>
+                      Plateforme : {plateformeFilter === 'gouv' ? 'Gouv' : plateformeFilter === 'nusuk' ? 'Nusuk' : plateformeFilter === 'both' ? 'Les deux' : 'Aucune'}
+                    </span>
+                    <X size={12} className="text-blue-600" />
+                  </button>
+                )}
+                {hotelFilter !== 'all' && (
+                  <button
+                    type="button"
+                    onClick={() => setHotelFilter('all')}
+                    className="h-7 px-3 rounded-full bg-blue-50 text-blue-800 border border-blue-100 text-[11px] font-bold whitespace-nowrap shrink-0 flex items-center gap-1 active:scale-95 transition cursor-pointer"
+                  >
+                    <span>Hôtel : {hotelFilter}</span>
+                    <X size={12} className="text-blue-600" />
+                  </button>
+                )}
+                {selectedFilterValue && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedFilterValue(null)
+                      setActiveFilterType(null)
+                    }}
+                    className="h-7 px-3 rounded-full bg-blue-50 text-blue-800 border border-blue-100 text-[11px] font-bold whitespace-nowrap shrink-0 flex items-center gap-1 active:scale-95 transition cursor-pointer"
+                  >
+                    <span>
+                      {activeFilterType === 'date' ? 'Inscription'
+                        : activeFilterType === 'date_depart' ? 'Départ'
+                        : activeFilterType === 'date_retour' ? 'Retour'
+                        : activeFilterType === 'reference' ? 'Réf.'
+                        : activeFilterType === 'agence' ? 'Agence'
+                        : activeFilterType === 'phone' ? 'Tél.'
+                        : 'Filtre'} : {selectedFilterValue}
+                    </span>
+                    <X size={12} className="text-blue-600" />
+                  </button>
+                )}
+              </div>
+            )}
+
+            {/* Liste des dossiers mobile épurée (cartes compactes légèrement surélevées + contour discret) */}
             {loading ? (
-              <div className="space-y-3" aria-label="Chargement des dossiers">
+              <div className="space-y-2.5" aria-label="Chargement des dossiers">
                 {Array.from({ length: 5 }).map((_, idx) => (
                   <div
                     key={idx}
-                    className="bg-white rounded-2xl border border-blue-950/15 p-4 space-y-3 animate-pulse"
+                    className="bg-white rounded-2xl border border-blue-950/15 shadow-[0_4px_12px_-4px_rgba(15,23,42,0.10),0_1px_3px_rgba(15,23,42,0.06)] p-3 space-y-2 animate-pulse"
                   >
-                    <div className="flex items-center gap-3">
-                      <div className="w-12 h-12 rounded-2xl bg-slate-100 shrink-0" />
-                      <div className="flex-1 space-y-2 min-w-0">
+                    <div className="flex items-center gap-2.5">
+                      <div className="w-10 h-10 rounded-xl bg-slate-100 shrink-0" />
+                      <div className="flex-1 space-y-1.5 min-w-0">
                         <div className="flex items-center justify-between gap-3">
-                          <div className="h-4 w-36 bg-slate-100 rounded-md" />
-                          <div className="h-3.5 w-12 bg-slate-100 rounded-md" />
+                          <div className="h-3.5 w-36 bg-slate-100 rounded-md" />
+                          <div className="h-3 w-12 bg-slate-100 rounded-md" />
                         </div>
-                        <div className="h-3 w-44 bg-slate-100 rounded-md" />
+                        <div className="h-3 w-40 bg-slate-100 rounded-md" />
                       </div>
                     </div>
-                    <div className="space-y-2">
+                    <div className="space-y-1.5">
                       <div className="flex items-center justify-between">
-                        <div className="h-3.5 w-32 bg-slate-100 rounded-md" />
-                        <div className="h-3.5 w-20 bg-slate-100 rounded-md" />
+                        <div className="h-3 w-32 bg-slate-100 rounded-md" />
+                        <div className="h-3 w-20 bg-slate-100 rounded-md" />
                       </div>
                       <div className="w-28 h-1.5 bg-slate-100 rounded-full" />
                     </div>
-                    <div className="pt-2 border-t border-slate-100 flex items-center justify-between">
+                    <div className="pt-1.5 border-t border-slate-100 flex items-center justify-between">
                       <div className="flex items-center gap-3">
                         <div className="h-3 w-10 bg-slate-100 rounded" />
                         <div className="h-3 w-12 bg-slate-100 rounded" />
                       </div>
-                      <div className="h-8 w-20 bg-slate-100 rounded-xl" />
+                      <div className="h-7 w-18 bg-slate-100 rounded-lg" />
                     </div>
                   </div>
                 ))}
@@ -1798,7 +2030,7 @@ export default function ListePelerins() {
                 )}
               </div>
             ) : (
-              <div className="space-y-3">
+              <div className="space-y-2.5">
                 {mobileVisiblePelerins.map((p) => {
                   const statut = getPaiementStatut(p)
                   const isSelected = selectedIds.has(p.id)
@@ -1826,14 +2058,14 @@ export default function ListePelerins() {
                           router.push(`/hajj/pelerin?id=${p.id}`)
                         }
                       }}
-                      className={`bg-white rounded-2xl border p-4 space-y-2.5 transition-colors select-none cursor-pointer active:bg-slate-50/80 ${
+                      className={`bg-white rounded-2xl border p-3 space-y-2 transition select-none cursor-pointer active:scale-[0.99] ${
                         isSelected
-                          ? 'border-blue-600 ring-1 ring-blue-600/20 bg-blue-50/20'
-                          : 'border-blue-950/15'
+                          ? 'border-blue-600 ring-1 ring-blue-600/20 bg-blue-50/20 shadow-[0_4px_12px_-4px_rgba(37,99,235,0.18)]'
+                          : 'border-blue-950/15 shadow-[0_4px_12px_-4px_rgba(15,23,42,0.10),0_1px_3px_rgba(15,23,42,0.06)] active:shadow-[0_1px_4px_rgba(15,23,42,0.08)]'
                       }`}
                     >
                       {/* Ligne 1 : Avatar + Identité + Statut */}
-                      <div className="flex items-center gap-3">
+                      <div className="flex items-center gap-2.5">
                         {selectMode && (
                           <button
                             type="button"
@@ -1842,36 +2074,36 @@ export default function ListePelerins() {
                               e.stopPropagation()
                               toggleSelect(p.id)
                             }}
-                            className={`w-6 h-6 rounded-full flex items-center justify-center shrink-0 transition ${
+                            className={`w-5 h-5 rounded-full flex items-center justify-center shrink-0 transition ${
                               isSelected
                                 ? 'bg-blue-600 text-white'
                                 : 'border-2 border-slate-300 bg-white'
                             }`}
                           >
-                            {isSelected && <Check size={14} strokeWidth={3} />}
+                            {isSelected && <Check size={12} strokeWidth={3} />}
                           </button>
                         )}
 
                         <div className="relative shrink-0">
-                          <div className="w-12 h-12 rounded-2xl bg-slate-100 text-slate-700 flex items-center justify-center font-black text-xs overflow-hidden border border-slate-200/70">
+                          <div className="w-10 h-10 rounded-xl bg-slate-100 text-slate-700 flex items-center justify-center font-black text-[11px] overflow-hidden border border-slate-200/70">
                             {photoUrl ? (
                               <img src={photoUrl} alt={p.nom_complet} loading="lazy" decoding="async" className="w-full h-full object-cover" />
                             ) : (
                               <span>{getInitiales(p)}</span>
                             )}
                           </div>
-                          <span className="absolute -bottom-1 -right-1 px-1.5 py-0.5 rounded-md bg-slate-900 text-white font-mono text-[9px] font-black leading-none shadow-xs">
+                          <span className="absolute -bottom-1 -right-1 px-1 py-0.5 rounded bg-slate-900 text-white font-mono text-[8.5px] font-black leading-none shadow-xs">
                             #{fixedNumber}
                           </span>
                         </div>
 
                         <div className="min-w-0 flex-1">
                           <div className="flex items-start justify-between gap-2">
-                            <h3 className="font-black text-slate-900 text-[15px] leading-snug truncate">
+                            <h3 className="font-black text-slate-900 text-[14px] leading-snug truncate">
                               {p.prenom} {p.nom_complet}
                             </h3>
                             <span
-                              className={`text-[11px] font-black shrink-0 ${
+                              className={`text-[10.5px] font-black shrink-0 ${
                                 statut === 'complet'
                                   ? 'text-emerald-600'
                                   : statut === 'partiel'
@@ -1882,7 +2114,7 @@ export default function ListePelerins() {
                               {statut === 'complet' ? 'Soldé' : statut === 'partiel' ? 'Partiel' : 'Non payé'}
                             </span>
                           </div>
-                          <p className="text-xs text-slate-400 font-medium truncate mt-0.5">
+                          <p className="text-[11px] text-slate-400 font-medium truncate mt-0.5">
                             <span className="font-mono text-slate-600 font-semibold">
                               {p.num_passeport || 'Sans passeport'}
                             </span>
@@ -1892,9 +2124,9 @@ export default function ListePelerins() {
                       </div>
 
                       {/* Ligne 2 : Avancement paiement sobre avec barre miniature */}
-                      <div className="space-y-1.5">
-                        <div className="flex items-baseline justify-between gap-2 text-xs">
-                          <div className="flex items-center gap-1.5 min-w-0">
+                      <div className="space-y-1">
+                        <div className="flex items-baseline justify-between gap-2 text-[11.5px]">
+                          <div className="flex items-center gap-1 min-w-0">
                             <span className="font-black text-slate-900 tabular-nums">
                               {formatHajjMoney(p.total_paye, p.devise, { compact: true })}
                             </span>
@@ -1922,8 +2154,8 @@ export default function ListePelerins() {
                       </div>
 
                       {/* Ligne 3 : Plateformes & Aperçu discret + indicateur d'ouverture */}
-                      <div className="pt-2 border-t border-slate-100 flex items-center justify-between gap-2">
-                        <div className="flex items-center gap-2.5 text-[11px] font-bold">
+                      <div className="pt-1.5 border-t border-slate-100 flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-2.5 text-[10.5px] font-bold">
                           <span className={`inline-flex items-center gap-1.5 ${p.sur_plateforme_gouv ? 'text-emerald-700' : 'text-slate-400'}`}>
                             <span className={`w-1.5 h-1.5 rounded-full ${p.sur_plateforme_gouv ? 'bg-emerald-500' : 'bg-slate-300'}`} />
                             Gouv
@@ -1934,7 +2166,7 @@ export default function ListePelerins() {
                           </span>
                         </div>
 
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-1.5">
                           <button
                             type="button"
                             onTouchStart={(e) => e.stopPropagation()}
@@ -1942,12 +2174,12 @@ export default function ListePelerins() {
                               e.stopPropagation()
                               setQuickViewPelerin(p)
                             }}
-                            className="h-8 px-3 rounded-xl bg-slate-100 active:bg-slate-200 text-slate-700 text-xs font-bold flex items-center gap-1.5 transition cursor-pointer"
+                            className="h-7 px-2.5 rounded-lg bg-slate-100 active:bg-slate-200 text-slate-700 text-[11px] font-bold flex items-center gap-1 transition cursor-pointer"
                           >
-                            <Eye size={13} />
+                            <Eye size={12} />
                             <span>Aperçu</span>
                           </button>
-                          <ChevronRight size={16} className="text-slate-400 shrink-0" />
+                          <ChevronRight size={15} className="text-slate-400 shrink-0" />
                         </div>
                       </div>
                     </div>
