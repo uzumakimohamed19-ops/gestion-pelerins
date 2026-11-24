@@ -4,9 +4,11 @@ import { supabase, getUser } from '@/lib/supabase'
 import { useQuery } from '@powersync/react'
 import { useRouter } from 'next/navigation'
 import { useYear } from '@/lib/YearContext'
+import { useUI } from '@/lib/UIContext'
 import { YearSelector } from '@/components/YearSelector'
 import { HajjCurrencyTabs } from '@/components/HajjCurrencySelector'
 import {
+  HAJJ_CURRENCIES,
   HAJJ_CURRENCY_MAP,
   countByCurrency,
   getHajjCurrencySymbol,
@@ -15,8 +17,8 @@ import {
 } from '@/lib/hajjCurrency'
 import { 
   BarChart3, Download, Loader2, Search,
-  Receipt, Wallet, ChevronDown, ChevronUp,
-  ArrowUpRight, ArrowDownRight, CreditCard
+  Receipt, Wallet, ChevronDown, ChevronUp, ChevronRight,
+  ArrowUpRight, ArrowDownRight, CreditCard, X, SlidersHorizontal, Building2
 } from 'lucide-react'
 import ExcelJS from 'exceljs'
 import { saveAs } from 'file-saver'
@@ -71,12 +73,20 @@ export default function EtatGeneralHajj() {
   const [filtreRentabilite, setFiltreRentabilite] = useState<'tous' | 'positif' | 'negatif' | 'impaye'>('tous')
   const [filtreAgence, setFiltreAgence] = useState<string>('toutes')
   const [expandedPelerinId, setExpandedPelerinId] = useState<string | null>(null)
+  const [mobileDetailPelerinId, setMobileDetailPelerinId] = useState<string | null>(null)
+  const [mobileAgenceSheetOpen, setMobileAgenceSheetOpen] = useState(false)
 
   const curSymbol = getHajjCurrencySymbol(selectedDevise)
   const curShort = getHajjCurrencySymbol(selectedDevise, true)
 
   const router = useRouter()
   const { selectedYear } = useYear()
+  const { setHideNavbar } = useUI()
+
+  useEffect(() => {
+    setHideNavbar(Boolean(mobileDetailPelerinId || mobileAgenceSheetOpen))
+    return () => setHideNavbar(false)
+  }, [mobileDetailPelerinId, mobileAgenceSheetOpen, setHideNavbar])
   const { data: rawPelerins, isLoading: pelerinsLoading } = useQuery<any>(`
     SELECT p.*, a.nom_agence AS agence_nom_agence
     FROM pelerins p
@@ -440,8 +450,508 @@ export default function EtatGeneralHajj() {
     )
   }
 
+  const mobileDetailPelerin = mobileDetailPelerinId
+    ? pelerinsCalcules.find(p => p.id === mobileDetailPelerinId) || null
+    : null
+  const mobileDetailImputations = mobileDetailPelerin
+    ? (detailParPelerin.get(String(mobileDetailPelerin.id)) || [])
+    : []
+
   return (
-    <div className="max-w-[1600px] mx-auto px-4 sm:px-6 py-6 bg-slate-50 min-h-screen w-full min-w-0 overflow-x-hidden text-slate-800">
+    <div className="min-h-screen bg-slate-50 w-full min-w-0 overflow-x-hidden text-slate-800">
+      {/* =================================================================== */}
+      {/* 📱 VERSION MOBILE NATIVE — EN-TÊTE BLANC PUR (`md:hidden`)          */}
+      {/* =================================================================== */}
+      <div className="md:hidden pb-28">
+        {/* 1. EN-TÊTE BLANC ÉPURÉ & COLLANT */}
+        <div className="bg-white/95 backdrop-blur-md border-b border-slate-100 px-5 pt-5 pb-3.5 sticky top-0 z-30 shadow-[0_1px_8px_rgba(15,23,42,0.03)]">
+          <div className="flex items-center justify-between gap-3">
+            <div className="min-w-0">
+              <h1 className="text-2xl font-black text-slate-900 tracking-tight leading-none">
+                État Général
+              </h1>
+              <p className="text-xs font-semibold text-slate-400 mt-1 truncate">
+                {selectedYear === 'all' ? 'Toutes campagnes' : `Campagne ${selectedYear}`} • {pelerins.length} pèlerin
+                {pelerins.length > 1 ? 's' : ''}
+              </p>
+            </div>
+
+            <button
+              type="button"
+              onClick={exporterExcel}
+              aria-label="Exporter Excel"
+              className="h-10 px-3.5 rounded-full bg-slate-900 text-white text-xs font-black flex items-center gap-1.5 shadow-xs active:scale-95 transition shrink-0 cursor-pointer"
+            >
+              <Download size={15} />
+              <span>Excel</span>
+            </button>
+          </div>
+
+          {/* Sélecteur de devise natif (3 segments stricts FCFA | EUR | USD) */}
+          <div className="mt-3.5 grid grid-cols-3 gap-1 p-1 bg-slate-100 rounded-2xl">
+            {HAJJ_CURRENCIES.map(cur => {
+              const active = selectedDevise === cur.code
+              const count = deviseCounts[cur.code] ?? 0
+              return (
+                <button
+                  key={cur.code}
+                  type="button"
+                  onClick={() => {
+                    setSelectedDevise(cur.code)
+                    setFiltreAgence('toutes')
+                    setExpandedPelerinId(null)
+                    setMobileDetailPelerinId(null)
+                  }}
+                  className={`h-9 rounded-xl text-xs font-black flex items-center justify-center gap-1.5 transition-all active:scale-[0.98] cursor-pointer ${
+                    active ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-500'
+                  }`}
+                >
+                  <span>{cur.shortLabel}</span>
+                  <span
+                    className={`text-[10px] px-1.5 py-0.5 rounded-full tabular-nums ${
+                      active ? 'bg-slate-100 text-slate-800' : 'bg-slate-200/70 text-slate-500'
+                    }`}
+                  >
+                    {count}
+                  </span>
+                </button>
+              )
+            })}
+          </div>
+        </div>
+
+        {/* 2. CORPS DE PAGE AÉRÉ */}
+        <div className="px-5 pt-4 space-y-4">
+          {/* Carte Synthèse Trésorerie Hero (1 seul bloc clair) */}
+          <div className="bg-slate-900 text-white rounded-3xl p-5 shadow-md space-y-4">
+            <div className="flex items-start justify-between gap-2">
+              <div>
+                <p className="text-[11px] font-black uppercase tracking-wider text-slate-400">
+                  Solde réel disponible
+                </p>
+                <p
+                  className={`text-[1.85rem] leading-none font-black tabular-nums tracking-tight mt-1.5 ${
+                    statsGlobales.soldeCompteActuel >= 0 ? 'text-emerald-400' : 'text-rose-400'
+                  }`}
+                >
+                  {statsGlobales.soldeCompteActuel > 0 ? '+' : ''}
+                  {statsGlobales.soldeCompteActuel.toLocaleString('fr-FR')}{' '}
+                  <span className="text-sm font-bold text-slate-400">{curSymbol}</span>
+                </p>
+              </div>
+              <span className="text-[10px] font-black uppercase px-2.5 py-1 rounded-full bg-white/10 text-slate-200 shrink-0">
+                {HAJJ_CURRENCY_MAP[selectedDevise].shortLabel}
+              </span>
+            </div>
+
+            <div className="grid grid-cols-3 gap-2 pt-3.5 border-t border-white/10">
+              <div className="min-w-0">
+                <p className="text-[10px] text-slate-400 font-semibold">Encaissé</p>
+                <p className="text-xs font-black text-white tabular-nums mt-0.5 truncate">
+                  {statsGlobales.caEncaisse.toLocaleString('fr-FR')} {curShort}
+                </p>
+              </div>
+              <div className="min-w-0 border-l border-white/10 pl-2.5">
+                <p className="text-[10px] text-slate-400 font-semibold">Dépensé</p>
+                <p className="text-xs font-black text-amber-300 tabular-nums mt-0.5 truncate">
+                  {statsGlobales.totalDepensesReelles.toLocaleString('fr-FR')} {curShort}
+                </p>
+              </div>
+              <div className="min-w-0 border-l border-white/10 pl-2.5">
+                <p className="text-[10px] text-slate-400 font-semibold">À percevoir</p>
+                <p className="text-xs font-black text-sky-300 tabular-nums mt-0.5 truncate">
+                  {statsGlobales.soldeACollecter.toLocaleString('fr-FR')} {curShort}
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-between text-[11px] pt-2.5 border-t border-white/10 text-slate-300">
+              <span>Marge finale estimée</span>
+              <span className="font-black text-white tabular-nums">
+                {statsGlobales.soldeComptePrevisionnel.toLocaleString('fr-FR')} {curShort}
+              </span>
+            </div>
+          </div>
+
+          {/* Recherche + Filtre Agence */}
+          <div className="flex items-center gap-2.5">
+            <div className="relative flex-1 min-w-0">
+              <Search
+                size={17}
+                className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none"
+              />
+              <input
+                type="text"
+                placeholder="Rechercher nom, passeport, réf…"
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="w-full h-12 pl-11 pr-10 bg-white border border-slate-200/80 rounded-2xl text-sm font-semibold text-slate-900 shadow-xs outline-none focus:border-slate-400 transition"
+              />
+              {searchTerm && (
+                <button
+                  type="button"
+                  onClick={() => setSearchTerm('')}
+                  aria-label="Effacer"
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 w-7 h-7 rounded-full bg-slate-100 text-slate-500 flex items-center justify-center"
+                >
+                  <X size={14} />
+                </button>
+              )}
+            </div>
+
+            {listeAgences.length > 0 && (
+              <button
+                type="button"
+                onClick={() => setMobileAgenceSheetOpen(true)}
+                aria-label="Filtrer par agence"
+                className={`relative w-12 h-12 shrink-0 rounded-2xl border shadow-xs flex items-center justify-center active:scale-95 transition cursor-pointer ${
+                  filtreAgence !== 'toutes'
+                    ? 'bg-slate-900 text-white border-slate-900'
+                    : 'bg-white text-slate-700 border-slate-200/80'
+                }`}
+              >
+                <SlidersHorizontal size={17} />
+                {filtreAgence !== 'toutes' && (
+                  <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-blue-600 text-white text-[9px] font-black flex items-center justify-center">
+                    1
+                  </span>
+                )}
+              </button>
+            )}
+          </div>
+
+          {/* Pills de rentabilité sur 1 seule ligne fluide */}
+          <div className="-mx-5 px-5 flex items-center gap-2 overflow-x-auto pb-0.5">
+            {[
+              { id: 'tous', label: `Tous (${pelerinsCalcules.length})` },
+              { id: 'positif', label: 'Bénéficiaires' },
+              { id: 'negatif', label: 'En déficit' },
+              { id: 'impaye', label: 'Reste dû' },
+            ].map(f => {
+              const active = filtreRentabilite === f.id
+              return (
+                <button
+                  key={f.id}
+                  type="button"
+                  onClick={() => setFiltreRentabilite(f.id as any)}
+                  className={`h-9 px-3.5 rounded-full text-xs font-bold whitespace-nowrap shrink-0 transition active:scale-95 cursor-pointer ${
+                    active
+                      ? 'bg-slate-900 text-white shadow-xs'
+                      : 'bg-white text-slate-600 border border-slate-200/80'
+                  }`}
+                >
+                  {f.label}
+                </button>
+              )
+            })}
+          </div>
+
+          {filtreAgence !== 'toutes' && (
+            <div className="flex items-center justify-between px-3.5 py-2 rounded-2xl bg-blue-50 border border-blue-100 text-xs">
+              <span className="font-bold text-blue-800 truncate">
+                Agence : {filtreAgence}
+              </span>
+              <button
+                type="button"
+                onClick={() => setFiltreAgence('toutes')}
+                className="text-blue-600 font-black ml-2 shrink-0 cursor-pointer"
+              >
+                Effacer
+              </button>
+            </div>
+          )}
+
+          {/* Liste des pèlerins aérée */}
+          {pelerinsFiltrés.length === 0 ? (
+            <div className="bg-white rounded-3xl border border-dashed border-slate-200 py-14 px-6 text-center space-y-2">
+              <BarChart3 size={28} className="mx-auto text-slate-300" />
+              <p className="text-sm font-black text-slate-700">Aucun dossier trouvé</p>
+              <p className="text-xs text-slate-400 font-medium">
+                Aucun pèlerin ne correspond à ces critères en {HAJJ_CURRENCY_MAP[selectedDevise].label}.
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {pelerinsFiltrés.map((p) => {
+                const estSolde = p.soldeRestant <= 0
+                const margePositive = p.gainReel >= 0
+                const nomPelerin = getNomPelerin(p)
+                const agenceNom = getAgenceNom(p)
+
+                return (
+                  <button
+                    key={p.id}
+                    type="button"
+                    onClick={() => setMobileDetailPelerinId(p.id)}
+                    className="w-full text-left bg-white rounded-3xl border border-slate-100 shadow-xs p-4 space-y-3 active:scale-[0.99] transition cursor-pointer"
+                  >
+                    {/* Identité + Bénéfice encaissé */}
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-2xl bg-slate-900 text-white font-black text-xs flex items-center justify-center shrink-0">
+                        {nomPelerin.charAt(0).toUpperCase() || 'P'}
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <h3 className="font-black text-slate-900 text-sm truncate leading-snug">
+                          {nomPelerin}
+                        </h3>
+                        <p className="text-[11px] text-slate-400 font-medium truncate mt-0.5">
+                          {p.reference || 'DIRECT'} • {agenceNom}
+                        </p>
+                      </div>
+                      <div className="text-right shrink-0">
+                        <p
+                          className={`text-sm font-black tabular-nums flex items-center justify-end gap-0.5 ${
+                            margePositive ? 'text-emerald-700' : 'text-rose-600'
+                          }`}
+                        >
+                          {margePositive ? <ArrowUpRight size={13} /> : <ArrowDownRight size={13} />}
+                          {p.gainReel > 0 ? '+' : ''}
+                          {p.gainReel.toLocaleString('fr-FR')}
+                        </p>
+                        <p className="text-[10px] font-bold text-slate-400">{curShort} net</p>
+                      </div>
+                    </div>
+
+                    {/* 3 chiffres clés + barre de règlement */}
+                    <div className="space-y-2">
+                      <div className="grid grid-cols-3 gap-2 text-xs">
+                        <div>
+                          <span className="text-[10px] text-slate-400 font-semibold block">Versé</span>
+                          <span className="font-black text-emerald-700 tabular-nums">
+                            {(p.total_paye || 0).toLocaleString('fr-FR')} {curShort}
+                          </span>
+                        </div>
+                        <div>
+                          <span className="text-[10px] text-slate-400 font-semibold block">Charges</span>
+                          <span className="font-black text-slate-800 tabular-nums">
+                            {p.totalCout.toLocaleString('fr-FR')} {curShort}
+                          </span>
+                        </div>
+                        <div className="text-right">
+                          <span className="text-[10px] text-slate-400 font-semibold block">Reste</span>
+                          {estSolde ? (
+                            <span className="font-black text-emerald-600">Soldé</span>
+                          ) : (
+                            <span className="font-black text-amber-600 tabular-nums">
+                              {p.soldeRestant.toLocaleString('fr-FR')} {curShort}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="w-full bg-slate-100 h-1.5 rounded-full overflow-hidden">
+                        <div
+                          className={`h-full rounded-full ${estSolde ? 'bg-emerald-500' : 'bg-blue-600'}`}
+                          style={{ width: `${p.reglementPct}%` }}
+                        />
+                      </div>
+                    </div>
+
+                    {/* Pied discret ouvrant la ventilation */}
+                    <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-xs">
+                      <span className="font-bold text-slate-500 flex items-center gap-1.5">
+                        <Receipt size={13} className="text-blue-600" />
+                        {p.imputationsCount} charge{p.imputationsCount > 1 ? 's' : ''} imputée
+                        {p.imputationsCount > 1 ? 's' : ''}
+                      </span>
+                      <span className="font-black text-slate-900 flex items-center gap-0.5">
+                        Détail <ChevronRight size={14} className="text-slate-400" />
+                      </span>
+                    </div>
+                  </button>
+                )
+              })}
+            </div>
+          )}
+        </div>
+
+        {/* Bottom Sheet 1 : Filtre par Agence */}
+        {mobileAgenceSheetOpen && (
+          <div
+            onClick={() => setMobileAgenceSheetOpen(false)}
+            className="fixed inset-0 z-[9999] bg-slate-900/50 backdrop-blur-xs flex items-end md:hidden animate-in fade-in duration-150"
+          >
+            <div
+              onClick={(e) => e.stopPropagation()}
+              className="w-full bg-white rounded-t-[2rem] shadow-2xl max-h-[80dvh] flex flex-col animate-in slide-in-from-bottom duration-200"
+            >
+              <div className="px-5 pt-3 pb-3.5 border-b border-slate-100 shrink-0">
+                <div className="w-12 h-1.5 bg-slate-200 rounded-full mx-auto mb-3" />
+                <div className="flex items-center justify-between">
+                  <h3 className="text-base font-black text-slate-900">Filtrer par agence</h3>
+                  <button
+                    type="button"
+                    onClick={() => setMobileAgenceSheetOpen(false)}
+                    className="w-9 h-9 rounded-full bg-slate-100 text-slate-500 flex items-center justify-center cursor-pointer"
+                  >
+                    <X size={18} />
+                  </button>
+                </div>
+              </div>
+
+              <div className="p-4 overflow-y-auto space-y-2 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setFiltreAgence('toutes')
+                    setMobileAgenceSheetOpen(false)
+                  }}
+                  className={`w-full h-12 px-4 rounded-2xl text-sm font-black flex items-center justify-between cursor-pointer ${
+                    filtreAgence === 'toutes'
+                      ? 'bg-slate-900 text-white'
+                      : 'bg-slate-50 text-slate-700'
+                  }`}
+                >
+                  <span>Toutes les agences</span>
+                </button>
+                {listeAgences.map((agence) => (
+                  <button
+                    key={agence}
+                    type="button"
+                    onClick={() => {
+                      setFiltreAgence(agence)
+                      setMobileAgenceSheetOpen(false)
+                    }}
+                    className={`w-full h-12 px-4 rounded-2xl text-sm font-bold flex items-center justify-between gap-2 text-left cursor-pointer ${
+                      filtreAgence === agence
+                        ? 'bg-slate-900 text-white'
+                        : 'bg-slate-50 text-slate-700'
+                    }`}
+                  >
+                    <span className="truncate flex items-center gap-2">
+                      <Building2 size={15} className="shrink-0 opacity-70" />
+                      <span className="truncate">{agence}</span>
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Bottom Sheet 2 : Détail Rentabilité & Ventilation des Coûts d'un Pèlerin */}
+        {mobileDetailPelerin && (
+          <div
+            onClick={() => setMobileDetailPelerinId(null)}
+            className="fixed inset-0 z-[9999] bg-slate-900/50 backdrop-blur-xs flex items-end md:hidden animate-in fade-in duration-150"
+          >
+            <div
+              onClick={(e) => e.stopPropagation()}
+              className="w-full bg-white rounded-t-[2rem] shadow-2xl max-h-[88dvh] flex flex-col animate-in slide-in-from-bottom duration-200"
+            >
+              <div className="px-5 pt-3 pb-3.5 border-b border-slate-100 shrink-0">
+                <div className="w-12 h-1.5 bg-slate-200 rounded-full mx-auto mb-3" />
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <h3 className="text-base font-black text-slate-900 truncate">
+                      {getNomPelerin(mobileDetailPelerin)}
+                    </h3>
+                    <p className="text-xs font-semibold text-slate-400 truncate mt-0.5">
+                      {mobileDetailPelerin.num_passeport || 'Passeport en cours'} • {getAgenceNom(mobileDetailPelerin)}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setMobileDetailPelerinId(null)}
+                    className="w-9 h-9 rounded-full bg-slate-100 text-slate-500 flex items-center justify-center shrink-0 cursor-pointer"
+                  >
+                    <X size={18} />
+                  </button>
+                </div>
+              </div>
+
+              <div className="p-5 overflow-y-auto space-y-4">
+                {/* Synthèse rentabilité */}
+                <div
+                  className={`rounded-2xl p-4 text-center border ${
+                    mobileDetailPelerin.gainReel >= 0
+                      ? 'bg-emerald-50 border-emerald-100'
+                      : 'bg-rose-50 border-rose-100'
+                  }`}
+                >
+                  <p className="text-[10px] font-black uppercase tracking-wider text-slate-500">
+                    Bénéfice encaissé
+                  </p>
+                  <p
+                    className={`text-2xl font-black tabular-nums mt-1 ${
+                      mobileDetailPelerin.gainReel >= 0 ? 'text-emerald-700' : 'text-rose-600'
+                    }`}
+                  >
+                    {mobileDetailPelerin.gainReel > 0 ? '+' : ''}
+                    {mobileDetailPelerin.gainReel.toLocaleString('fr-FR')}{' '}
+                    <span className="text-sm">{curSymbol}</span>
+                  </p>
+                  <p className="text-xs font-bold text-slate-500 mt-1">
+                    Marge prévisionnelle : {mobileDetailPelerin.margePct}% ({mobileDetailPelerin.gainPrevisionnel.toLocaleString('fr-FR')} {curShort})
+                  </p>
+                </div>
+
+                {/* Récap chiffré */}
+                <div className="rounded-2xl border border-slate-200 divide-y divide-slate-100 text-xs">
+                  {[
+                    ['Prix forfait', `${(mobileDetailPelerin.prix_package || 0).toLocaleString('fr-FR')} ${curShort}`],
+                    ['Versé par client', `${(mobileDetailPelerin.total_paye || 0).toLocaleString('fr-FR')} ${curShort}`],
+                    ['Reste à payer', mobileDetailPelerin.soldeRestant <= 0 ? 'Soldé' : `${mobileDetailPelerin.soldeRestant.toLocaleString('fr-FR')} ${curShort}`],
+                    ['Total charges imputées', `${mobileDetailPelerin.totalCout.toLocaleString('fr-FR')} ${curShort}`],
+                    ['Téléphone', mobileDetailPelerin.telephone_pelerin || '—'],
+                  ].map(([k, v]) => (
+                    <div key={k} className="flex items-center justify-between px-4 py-3">
+                      <span className="font-semibold text-slate-400">{k}</span>
+                      <span className="font-black text-slate-900 tabular-nums">{v}</span>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Ventilation détaillée des charges */}
+                <div className="space-y-2">
+                  <p className="text-[11px] font-black uppercase tracking-wider text-slate-400">
+                    Ventilation des coûts ({mobileDetailImputations.length})
+                  </p>
+                  {mobileDetailImputations.length === 0 ? (
+                    <p className="text-xs text-slate-400 font-semibold text-center py-6 bg-slate-50 rounded-2xl">
+                      Aucune charge imputée à ce pèlerin.
+                    </p>
+                  ) : (
+                    <div className="rounded-2xl border border-slate-200 divide-y divide-slate-100 overflow-hidden">
+                      {mobileDetailImputations.map((item, idx) => (
+                        <div key={idx} className="px-4 py-3 flex items-center justify-between gap-3">
+                          <div className="min-w-0">
+                            <p className="text-xs font-black text-slate-900 truncate">
+                              {item.depense.libelle}
+                            </p>
+                            <p className="text-[11px] text-slate-400 font-medium mt-0.5 truncate">
+                              {item.motif}
+                              {item.depense.recorded_by_name ? ` • Par ${item.depense.recorded_by_name}` : ''}
+                            </p>
+                          </div>
+                          <span className="text-xs font-black text-slate-900 tabular-nums shrink-0">
+                            {item.montantPartage.toLocaleString('fr-FR')} {curShort}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div className="px-5 pt-3 pb-[max(1.25rem,env(safe-area-inset-bottom))] border-t border-slate-100 bg-white shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setMobileDetailPelerinId(null)}
+                  className="w-full h-12 rounded-2xl bg-slate-900 text-white font-black text-sm cursor-pointer"
+                >
+                  Fermer
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* =================================================================== */}
+      {/* 💻 VERSION PC / TABLETTE (100% INCHANGÉE `hidden md:block`)         */}
+      {/* =================================================================== */}
+      <div className="hidden md:block max-w-[1600px] mx-auto px-4 sm:px-6 py-6 bg-slate-50 min-h-screen w-full min-w-0 overflow-x-hidden text-slate-800">
       
       {/* ── EN-TÊTE PRINCIPAL ── */}
       <div className="flex flex-col lg:flex-row justify-between items-stretch lg:items-center gap-4 mb-4">
@@ -750,6 +1260,7 @@ export default function EtatGeneralHajj() {
         </div>
       )}
 
+      </div>
     </div>
   )
 }

@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { useQuery, usePowerSync } from '@powersync/react'
 import { useYear } from '@/lib/YearContext'
 import { requireSupabaseRows, supabase, getUser } from '@/lib/supabase'
+import { useUI } from '@/lib/UIContext'
 import jsPDF from 'jspdf'
 import {
   ArrowLeft,
@@ -31,6 +32,9 @@ import {
   AlertCircle,
   Maximize2,
   Minimize2,
+  Check,
+  ArrowRight,
+  UserPlus,
 } from 'lucide-react'
 import { getPassportPublicUrl } from '@/lib/hajjPassport'
 
@@ -167,6 +171,7 @@ function parseRoomNumbersStrict(input: string, count: number): string[] {
 export default function RepartitionHotelsPage() {
   const db = usePowerSync()
   const { selectedYear } = useYear()
+  const { setHideNavbar } = useUI()
 
   const [isFullscreen, setIsFullscreen] = useState(false)
   const [currentAgenceId, setCurrentAgenceId] = useState<string | null>(null)
@@ -175,6 +180,14 @@ export default function RepartitionHotelsPage() {
   const [selectedHotelId, setSelectedHotelId] = useState<string>('all')
   const [isProcessing, setIsProcessing] = useState(false)
   const [mobileTab, setMobileTab] = useState<'pelerins' | 'chambres'>('chambres')
+
+  // États natifs dédiés à l'expérience mobile (bottom sheets & placement rapide)
+  const [mobileActionSheetOpen, setMobileActionSheetOpen] = useState(false)
+  const [mobileFilterSheetOpen, setMobileFilterSheetOpen] = useState(false)
+  const [quickAssignChambre, setQuickAssignChambre] = useState<Chambre | null>(null)
+  const [quickAssignIds, setQuickAssignIds] = useState<Set<string>>(new Set())
+  const [quickAssignSearch, setQuickAssignSearch] = useState('')
+  const [quickAssignGenre, setQuickAssignGenre] = useState<'tous' | 'H' | 'F'>('tous')
 
   const [selectedPelerinIds, setSelectedPelerinIds] = useState<Set<string>>(new Set())
 
@@ -207,6 +220,19 @@ export default function RepartitionHotelsPage() {
 
   const [modalError, setModalError] = useState<string | null>(null)
   const [isExporting, setIsExporting] = useState(false)
+
+  // Masquer automatiquement la barre de navigation mobile quand un tiroir/modale est ouvert
+  const anyMobileSheetOpen = Boolean(
+    showAddHotelModal ||
+    showAddChambreModal ||
+    mobileActionSheetOpen ||
+    mobileFilterSheetOpen ||
+    quickAssignChambre
+  )
+  useEffect(() => {
+    setHideNavbar(anyMobileSheetOpen)
+    return () => setHideNavbar(false)
+  }, [anyMobileSheetOpen, setHideNavbar])
 
   useEffect(() => {
     setSelectedPelerinIds(new Set())
@@ -433,20 +459,19 @@ export default function RepartitionHotelsPage() {
     setSelectedPelerinIds(new Set())
   }
 
-  const assignerGroupeDansChambre = async (chambre: Chambre, placesRestantes: number) => {
-    const countToAssign = selectedPelerinIds.size
-    if (countToAssign === 0 || isProcessing) return
+  const assignerIdsDansChambre = async (chambre: Chambre, idsArray: string[], placesRestantes: number) => {
+    const countToAssign = idsArray.length
+    if (countToAssign === 0 || isProcessing) return false
 
     if (countToAssign > placesRestantes) {
       alert(
         `Impossible d'assigner ${countToAssign} pèlerin(s) dans cette chambre : il ne reste que ${placesRestantes} place(s) disponible(s).`
       )
-      return
+      return false
     }
 
     setIsProcessing(true)
     const champ = villeActive === 'Mecque' ? 'chambre_mecque_id' : 'chambre_medine_id'
-    const idsArray = Array.from(selectedPelerinIds)
 
     try {
       const { data, error } = await supabase
@@ -461,12 +486,48 @@ export default function RepartitionHotelsPage() {
         [chambre.id, ...idsArray]
       )
 
-      setSelectedPelerinIds(new Set())
+      return true
     } catch (e) {
       console.error('Erreur assignation groupée :', e)
       alert("Erreur lors de l'attribution groupée.")
+      return false
     } finally {
       setIsProcessing(false)
+    }
+  }
+
+  const assignerGroupeDansChambre = async (chambre: Chambre, placesRestantes: number) => {
+    const ok = await assignerIdsDansChambre(chambre, Array.from(selectedPelerinIds), placesRestantes)
+    if (ok) {
+      setSelectedPelerinIds(new Set())
+    }
+  }
+
+  const openQuickAssignForChambre = (chambre: Chambre) => {
+    setQuickAssignChambre(chambre)
+    setQuickAssignIds(new Set())
+    setQuickAssignSearch('')
+    setQuickAssignGenre(
+      chambre.genre_chambre === 'Hommes'
+        ? 'H'
+        : chambre.genre_chambre === 'Femmes'
+        ? 'F'
+        : 'tous'
+    )
+  }
+
+  const handleConfirmQuickAssign = async () => {
+    if (!quickAssignChambre || quickAssignIds.size === 0) return
+    const occupantsCount = pelerins.filter((p) =>
+      villeActive === 'Mecque'
+        ? p.chambre_mecque_id === quickAssignChambre.id
+        : p.chambre_medine_id === quickAssignChambre.id
+    ).length
+    const placesRestantes = Math.max(0, quickAssignChambre.capacite - occupantsCount)
+    const ok = await assignerIdsDansChambre(quickAssignChambre, Array.from(quickAssignIds), placesRestantes)
+    if (ok) {
+      setQuickAssignIds(new Set())
+      setQuickAssignChambre(null)
     }
   }
 
@@ -1043,21 +1104,796 @@ export default function RepartitionHotelsPage() {
 
   const countSelected = selectedPelerinIds.size
 
+  const hotelsVilleActive = useMemo(
+    () => hotels.filter((h) => h.ville === villeActive),
+    [hotels, villeActive]
+  )
+
+  const totalLogesVille = useMemo(() => {
+    return pelerins.filter((p) =>
+      villeActive === 'Mecque' ? Boolean(p.chambre_mecque_id) : Boolean(p.chambre_medine_id)
+    ).length
+  }, [pelerins, villeActive])
+
+  const totalEnAttenteVille = Math.max(0, pelerins.length - totalLogesVille)
+  const tauxPlacementVille = pelerins.length > 0 ? Math.round((totalLogesVille / pelerins.length) * 100) : 0
+
+  const activeAdvancedFilterCount =
+    (filtreTrancheAge !== 'tous' ? 1 : 0) +
+    (filtreAssocie !== 'tous' ? 1 : 0) +
+    (filtreDateDepart !== 'tous' ? 1 : 0) +
+    (filtreTri !== 'inscription_asc' ? 1 : 0)
+
+  const quickAssignPlacesRestantes = useMemo(() => {
+    if (!quickAssignChambre) return 0
+    const occCount = pelerins.filter((p) =>
+      villeActive === 'Mecque'
+        ? p.chambre_mecque_id === quickAssignChambre.id
+        : p.chambre_medine_id === quickAssignChambre.id
+    ).length
+    return Math.max(0, quickAssignChambre.capacite - occCount)
+  }, [quickAssignChambre, pelerins, villeActive])
+
+  const quickAssignCandidates = useMemo(() => {
+    if (!quickAssignChambre) return []
+    const q = quickAssignSearch.trim().toLowerCase()
+    return pelerins.filter((p) => {
+      const chambreId = villeActive === 'Mecque' ? p.chambre_mecque_id : p.chambre_medine_id
+      if (chambreId) return false
+      const isFemme = isPelerinFemme(p.sexe)
+      if (quickAssignGenre === 'H' && isFemme) return false
+      if (quickAssignGenre === 'F' && !isFemme) return false
+      if (!q) return true
+      return (
+        formatNomComplet(p).toLowerCase().includes(q) ||
+        (p.num_passeport || '').toLowerCase().includes(q) ||
+        (p.reference || '').toLowerCase().includes(q) ||
+        (p.telephone_pelerin || '').includes(q)
+      )
+    })
+  }, [quickAssignChambre, pelerins, villeActive, quickAssignGenre, quickAssignSearch])
+
+  const toggleQuickAssignId = (pelerinId: string) => {
+    setQuickAssignIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(pelerinId)) {
+        next.delete(pelerinId)
+      } else {
+        if (next.size >= quickAssignPlacesRestantes) return prev
+        next.add(pelerinId)
+      }
+      return next
+    })
+  }
+
   return (
     <div
       className={`min-h-screen bg-slate-50 text-slate-800 transition-all duration-200 ${
         isFullscreen
           ? 'fixed inset-0 z-[100] overflow-y-auto pb-10'
-          : 'pb-24'
+          : 'pb-28 lg:pb-24'
       }`}
     >
-      <div className="bg-white border-b border-slate-200 sticky top-0 z-30 px-3 sm:px-6 py-3 shadow-2xs">
+      {/* =================================================================== */}
+      {/* 📱 VERSION MOBILE 100% EXPÉRIENCE APP NATIVE (`lg:hidden`)           */}
+      {/* =================================================================== */}
+      <div className="lg:hidden">
+        {/* 1. EN-TÊTE IMMERSIF BLEU ARRONDI */}
+        <div className="bg-gradient-to-b from-blue-600 to-blue-700 text-white px-4 pt-4 pb-5 rounded-b-[2rem] shadow-md shadow-blue-600/15 relative overflow-hidden">
+          <div className="absolute -right-8 -bottom-10 text-white/5 pointer-events-none select-none">
+            <BedDouble size={160} />
+          </div>
+
+          <div className="flex items-center justify-between gap-2 relative z-10">
+            <div className="flex items-center gap-2.5 min-w-0">
+              <Link
+                href="/hajj/dashboard"
+                aria-label="Retour au dashboard"
+                className="w-10 h-10 rounded-full bg-white/15 border border-white/20 flex items-center justify-center active:scale-90 transition shrink-0"
+              >
+                <ArrowLeft size={18} />
+              </Link>
+              <div className="min-w-0">
+                <h1 className="text-base font-black tracking-tight leading-tight truncate">
+                  Hôtels & Chambres
+                </h1>
+                <p className="text-[11px] text-blue-100 font-semibold truncate">
+                  {nomAgenceAffichee} {selectedYear !== 'all' ? `• ${selectedYear}` : ''}
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 shrink-0">
+              <button
+                type="button"
+                onClick={exportPdfHotelComplet}
+                disabled={isExporting || chambresFiltrees.length === 0}
+                aria-label="Exporter PDF"
+                className="w-10 h-10 rounded-full bg-white/15 border border-white/20 flex items-center justify-center active:scale-90 transition disabled:opacity-40 cursor-pointer"
+              >
+                <FileDown size={18} />
+              </button>
+              <button
+                type="button"
+                onClick={() => setMobileActionSheetOpen(true)}
+                aria-label="Ajouter hôtel ou chambre"
+                className="w-10 h-10 rounded-full bg-white text-blue-600 shadow-sm flex items-center justify-center active:scale-90 transition cursor-pointer"
+              >
+                <Plus size={20} strokeWidth={2.5} />
+              </button>
+            </div>
+          </div>
+
+          {/* Sélecteur segmenté natif La Mecque / Médine */}
+          <div className="mt-4 grid grid-cols-2 gap-1 p-1 bg-white/15 border border-white/15 rounded-2xl backdrop-blur-xs relative z-10">
+            <button
+              type="button"
+              onClick={() => {
+                setVilleActive('Mecque')
+                setSelectedHotelId('all')
+                setSelectedPelerinIds(new Set())
+              }}
+              className={`h-10 rounded-xl text-xs font-black tracking-wide transition-all active:scale-[0.98] cursor-pointer ${
+                villeActive === 'Mecque'
+                  ? 'bg-white text-blue-700 shadow-sm'
+                  : 'text-blue-100'
+              }`}
+            >
+              La Mecque
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setVilleActive('Médine')
+                setSelectedHotelId('all')
+                setSelectedPelerinIds(new Set())
+              }}
+              className={`h-10 rounded-xl text-xs font-black tracking-wide transition-all active:scale-[0.98] cursor-pointer ${
+                villeActive === 'Médine'
+                  ? 'bg-white text-blue-700 shadow-sm'
+                  : 'text-blue-100'
+              }`}
+            >
+              Médine
+            </button>
+          </div>
+
+          {/* Mini-indicateurs temps réel + barre de progression */}
+          <div className="mt-3.5 relative z-10">
+            <div className="grid grid-cols-3 gap-2 text-center">
+              <div className="bg-white/12 rounded-xl py-2 px-1 border border-white/10">
+                <p className="text-base font-black tabular-nums leading-none">{totalLogesVille}</p>
+                <p className="text-[9px] font-bold uppercase tracking-wider text-blue-100 mt-1">Logés</p>
+              </div>
+              <div className="bg-white/12 rounded-xl py-2 px-1 border border-white/10">
+                <p className="text-base font-black tabular-nums leading-none">{totalEnAttenteVille}</p>
+                <p className="text-[9px] font-bold uppercase tracking-wider text-blue-100 mt-1">En attente</p>
+              </div>
+              <div className="bg-white/12 rounded-xl py-2 px-1 border border-white/10">
+                <p className="text-base font-black tabular-nums leading-none">{chambresFiltrees.length}</p>
+                <p className="text-[9px] font-bold uppercase tracking-wider text-blue-100 mt-1">Chambres</p>
+              </div>
+            </div>
+            <div className="mt-2.5 flex items-center gap-2">
+              <div className="flex-1 h-1.5 bg-white/20 rounded-full overflow-hidden">
+                <div
+                  className="h-full bg-emerald-300 rounded-full transition-all duration-500"
+                  style={{ width: `${tauxPlacementVille}%` }}
+                />
+              </div>
+              <span className="text-[10px] font-black tabular-nums text-blue-100">{tauxPlacementVille}%</span>
+            </div>
+          </div>
+        </div>
+
+        {/* 2. BARRE D'ONGLETS STICKY (CHAMBRES / À LOGER) */}
+        <div className="sticky top-0 z-30 bg-slate-50/95 backdrop-blur-md px-4 py-3 border-b border-slate-200/70">
+          <div className="grid grid-cols-2 gap-1.5 p-1 bg-slate-200/75 rounded-2xl">
+            <button
+              type="button"
+              onClick={() => setMobileTab('chambres')}
+              className={`h-11 rounded-xl text-xs font-black transition-all flex items-center justify-center gap-2 active:scale-[0.98] cursor-pointer ${
+                mobileTab === 'chambres'
+                  ? 'bg-white text-slate-900 shadow-xs'
+                  : 'text-slate-600'
+              }`}
+            >
+              <BedDouble size={16} className={mobileTab === 'chambres' ? 'text-blue-600' : 'text-slate-500'} />
+              <span>Chambres</span>
+              <span className={`px-1.5 py-0.5 rounded-md text-[10px] tabular-nums ${
+                mobileTab === 'chambres' ? 'bg-blue-50 text-blue-700' : 'bg-slate-300/60 text-slate-600'
+              }`}>
+                {chambresFiltrees.length}
+              </span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setMobileTab('pelerins')}
+              className={`h-11 rounded-xl text-xs font-black transition-all flex items-center justify-center gap-2 active:scale-[0.98] cursor-pointer ${
+                mobileTab === 'pelerins'
+                  ? 'bg-white text-slate-900 shadow-xs'
+                  : 'text-slate-600'
+              }`}
+            >
+              <Users size={16} className={mobileTab === 'pelerins' ? 'text-blue-600' : 'text-slate-500'} />
+              <span>À loger</span>
+              <span className={`px-1.5 py-0.5 rounded-md text-[10px] tabular-nums ${
+                countSelected > 0
+                  ? 'bg-blue-600 text-white'
+                  : mobileTab === 'pelerins'
+                    ? 'bg-blue-50 text-blue-700'
+                    : 'bg-slate-300/60 text-slate-600'
+              }`}>
+                {countSelected > 0 ? `${countSelected} sél.` : pelerinsEnAttenteFiltres.length}
+              </span>
+            </button>
+          </div>
+        </div>
+
+        {/* 3. CONTENU MOBILE SELON L'ONGLET ACTIF */}
+        <div className="px-4 pt-3 pb-6">
+          {mobileTab === 'chambres' ? (
+            <div className="space-y-4">
+              {/* Bannière active si des pèlerins sont en cours de placement */}
+              {countSelected > 0 && (
+                <div className="p-3.5 bg-blue-600 text-white rounded-2xl shadow-lg shadow-blue-600/20 flex items-center justify-between gap-2 animate-in fade-in slide-in-from-top-2">
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <div className="w-9 h-9 rounded-xl bg-white/20 flex items-center justify-center shrink-0">
+                      <UserCheck size={18} />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-xs font-black leading-tight">
+                        {countSelected} pèlerin{countSelected > 1 ? 's' : ''} sélectionné{countSelected > 1 ? 's' : ''}
+                      </p>
+                      <p className="text-[10px] text-blue-100 font-semibold truncate">
+                        Appuyez sur une chambre verte pour les placer
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={deselectAll}
+                    className="px-3 py-2 bg-white/20 active:bg-white/30 rounded-xl text-[11px] font-black shrink-0 cursor-pointer"
+                  >
+                    Annuler
+                  </button>
+                </div>
+              )}
+
+              {/* Puces Hôtels défilables horizontalement au pouce */}
+              <div className="flex items-center gap-2 overflow-x-auto pb-1 -mx-4 px-4 no-scrollbar snap-x">
+                <button
+                  type="button"
+                  onClick={() => setSelectedHotelId('all')}
+                  className={`h-10 px-4 rounded-2xl text-xs font-black shrink-0 snap-start border transition-all active:scale-95 cursor-pointer ${
+                    selectedHotelId === 'all'
+                      ? 'bg-slate-900 text-white border-slate-900 shadow-xs'
+                      : 'bg-white text-slate-600 border-slate-200'
+                  }`}
+                >
+                  Tous ({chambres.filter((c) => c.ville === villeActive).length})
+                </button>
+
+                {hotelsVilleActive.map((h) => {
+                  const isActive = selectedHotelId === h.id
+                  const roomCount = chambres.filter((c) => c.hotel_id === h.id).length
+                  return (
+                    <div key={h.id} className="inline-flex items-center shrink-0 snap-start">
+                      <button
+                        type="button"
+                        onClick={() => setSelectedHotelId(h.id)}
+                        className={`h-10 px-4 text-xs font-black border transition-all active:scale-95 flex items-center gap-1.5 cursor-pointer ${
+                          isActive
+                            ? 'bg-blue-600 text-white border-blue-600 rounded-l-2xl shadow-xs'
+                            : 'bg-white text-slate-700 border-slate-200 rounded-2xl'
+                        }`}
+                      >
+                        <span className="max-w-[140px] truncate">{h.nom}</span>
+                        <span className={`text-[10px] px-1.5 py-0.5 rounded-md tabular-nums ${
+                          isActive ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-500'
+                        }`}>
+                          {roomCount}
+                        </span>
+                      </button>
+                      {isActive && (
+                        <button
+                          type="button"
+                          onClick={handleDeleteHotel}
+                          aria-label="Supprimer cet hôtel"
+                          className="h-10 px-2.5 bg-rose-600 text-white border border-rose-600 rounded-r-2xl flex items-center justify-center active:scale-95 transition cursor-pointer"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      )}
+                    </div>
+                  )
+                })}
+
+                <button
+                  type="button"
+                  onClick={() => setShowAddHotelModal(true)}
+                  className="h-10 px-3.5 rounded-2xl text-xs font-black shrink-0 snap-start border border-dashed border-blue-300 bg-blue-50/70 text-blue-700 flex items-center gap-1 active:scale-95 transition cursor-pointer"
+                >
+                  <Plus size={14} />
+                  <span>Hôtel</span>
+                </button>
+              </div>
+
+              {/* Liste des cartes Chambres (zones de clic généreuses) */}
+              {chambresFiltrees.length === 0 ? (
+                <div className="bg-white border border-dashed border-slate-300 rounded-3xl p-8 text-center space-y-4 shadow-2xs">
+                  <div className="w-14 h-14 mx-auto rounded-2xl bg-blue-50 text-blue-600 flex items-center justify-center">
+                    <BedDouble size={28} />
+                  </div>
+                  <div>
+                    <p className="text-sm font-black text-slate-900">
+                      Aucune chambre à {villeActive}
+                    </p>
+                    <p className="text-xs text-slate-400 font-medium mt-1">
+                      Ajoutez un hôtel puis créez vos chambres pour commencer la répartition.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (hotelsVilleActive.length === 0) {
+                        setShowAddHotelModal(true)
+                      } else {
+                        setChambreTargetHotelId(hotelsVilleActive[0]?.id || '')
+                        setShowAddChambreModal(true)
+                      }
+                    }}
+                    className="w-full h-12 bg-blue-600 active:bg-blue-700 text-white rounded-2xl text-xs font-black uppercase tracking-wider shadow-sm cursor-pointer"
+                  >
+                    {hotelsVilleActive.length === 0 ? '+ Ajouter un hôtel' : '+ Ajouter des chambres'}
+                  </button>
+                </div>
+              ) : (
+                <div className="space-y-3.5">
+                  {chambresFiltrees.map((chambre) => {
+                    const occupants = pelerins.filter((p) =>
+                      villeActive === 'Mecque'
+                        ? p.chambre_mecque_id === chambre.id
+                        : p.chambre_medine_id === chambre.id
+                    )
+                    const placesRestantes = Math.max(0, chambre.capacite - occupants.length)
+                    const isPlein = placesRestantes === 0
+                    const fillPct = chambre.capacite > 0 ? Math.min(100, Math.round((occupants.length / chambre.capacite) * 100)) : 0
+                    const hasEnoughRoomForBatch = countSelected > 0 && placesRestantes >= countSelected
+                    const titreAffiche =
+                      chambre.numero_chambre && chambre.numero_chambre.trim() !== ''
+                        ? `Chambre N° ${chambre.numero_chambre}`
+                        : `Chambre ${getLabelTypeChambre(chambre.capacite)}`
+
+                    return (
+                      <div
+                        key={chambre.id}
+                        className={`bg-white rounded-3xl border p-4 shadow-xs transition-all ${
+                          hasEnoughRoomForBatch
+                            ? 'border-emerald-400 ring-2 ring-emerald-500/20'
+                            : countSelected > 0 && !hasEnoughRoomForBatch
+                              ? 'border-slate-200 opacity-70'
+                              : 'border-slate-200/90'
+                        }`}
+                      >
+                        {/* Haut de carte chambre */}
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <h3 className="text-base font-black text-slate-900 tracking-tight">
+                                {titreAffiche}
+                              </h3>
+                              <span
+                                className={`text-[10px] px-2 py-0.5 rounded-full font-black uppercase ${
+                                  chambre.genre_chambre === 'Femmes'
+                                    ? 'bg-pink-50 text-pink-600 border border-pink-100'
+                                    : chambre.genre_chambre === 'Hommes'
+                                      ? 'bg-sky-50 text-sky-700 border border-sky-100'
+                                      : 'bg-slate-100 text-slate-600 border border-slate-200'
+                                }`}
+                              >
+                                {chambre.genre_chambre}
+                              </span>
+                            </div>
+                            <p className="text-xs font-semibold text-slate-500 mt-0.5 truncate">
+                              {chambre.hotel_nom}
+                              {chambre.etage ? ` • Étage ${chambre.etage}` : ''}
+                            </p>
+                          </div>
+
+                          <span
+                            className={`px-2.5 py-1 rounded-xl text-[11px] font-black tabular-nums shrink-0 ${
+                              isPlein
+                                ? 'bg-rose-50 text-rose-700 border border-rose-100'
+                                : 'bg-emerald-50 text-emerald-700 border border-emerald-100'
+                            }`}
+                          >
+                            {occupants.length}/{chambre.capacite} lits
+                          </span>
+                        </div>
+
+                        {/* Barre visuelle d'occupation */}
+                        <div className="mt-3 h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                          <div
+                            className={`h-full rounded-full transition-all duration-300 ${
+                              isPlein ? 'bg-rose-500' : fillPct > 0 ? 'bg-blue-600' : 'bg-slate-200'
+                            }`}
+                            style={{ width: `${fillPct}%` }}
+                          />
+                        </div>
+
+                        {/* Occupants */}
+                        <div className="mt-3.5 space-y-2">
+                          {occupants.length === 0 ? (
+                            <div className="py-3.5 px-3 rounded-2xl bg-slate-50 border border-dashed border-slate-200 text-center text-xs font-semibold text-slate-400">
+                              {getLabelTypeChambre(chambre.capacite)} • {placesRestantes} lit{placesRestantes > 1 ? 's' : ''} libre{placesRestantes > 1 ? 's' : ''}
+                            </div>
+                          ) : (
+                            occupants.map((occ) => {
+                              const age = calculateAge(occ.date_naissance)
+                              const nomOcc = formatNomComplet(occ)
+                              const isFemme = isPelerinFemme(occ.sexe)
+                              const photoUrl = occ.photo_url ? getPassportPublicUrl(occ.photo_url) : null
+
+                              return (
+                                <div
+                                  key={occ.id}
+                                  className="flex items-center justify-between gap-2.5 bg-slate-50/90 border border-slate-100 px-3 py-2.5 rounded-2xl min-h-[52px]"
+                                >
+                                  <div className="flex items-center gap-2.5 min-w-0">
+                                    <div
+                                      className={`w-9 h-9 rounded-xl flex items-center justify-center font-black text-xs shrink-0 overflow-hidden ${
+                                        isFemme ? 'bg-pink-100 text-pink-700' : 'bg-sky-100 text-sky-700'
+                                      }`}
+                                    >
+                                      {photoUrl ? (
+                                        <img src={photoUrl} alt={nomOcc} className="w-full h-full object-cover" />
+                                      ) : (
+                                        <span>{nomOcc.charAt(0).toUpperCase() || 'P'}</span>
+                                      )}
+                                    </div>
+                                    <div className="min-w-0">
+                                      <p className="text-xs font-black text-slate-900 truncate">{nomOcc}</p>
+                                      <p className="text-[10px] font-semibold text-slate-400 truncate">
+                                        {isFemme ? 'Femme' : 'Homme'}
+                                        {age ? ` • ${age} ans` : ''}
+                                        {occ.num_passeport ? ` • ${occ.num_passeport}` : ''}
+                                      </p>
+                                    </div>
+                                  </div>
+
+                                  <button
+                                    type="button"
+                                    onClick={() => retirerChambre(occ.id)}
+                                    disabled={isProcessing}
+                                    aria-label={`Retirer ${nomOcc}`}
+                                    className="w-9 h-9 rounded-xl bg-rose-50 active:bg-rose-100 text-rose-600 flex items-center justify-center shrink-0 active:scale-90 transition cursor-pointer"
+                                  >
+                                    <UserMinus size={16} />
+                                  </button>
+                                </div>
+                              )
+                            })
+                          )}
+                        </div>
+
+                        {/* Actions bas de carte (44-48px faciles au pouce) */}
+                        <div className="mt-3.5 pt-3 border-t border-slate-100 flex items-center gap-2">
+                          {countSelected > 0 ? (
+                            hasEnoughRoomForBatch ? (
+                              <button
+                                type="button"
+                                onClick={() => assignerGroupeDansChambre(chambre, placesRestantes)}
+                                disabled={isProcessing}
+                                className="flex-1 h-12 bg-emerald-600 active:bg-emerald-700 text-white rounded-2xl text-xs font-black flex items-center justify-center gap-2 shadow-sm active:scale-[0.98] transition cursor-pointer disabled:opacity-50"
+                              >
+                                <UserCheck size={16} />
+                                <span>Placer les {countSelected} ici ({placesRestantes} libres)</span>
+                              </button>
+                            ) : (
+                              <div className="flex-1 h-11 rounded-2xl bg-amber-50 border border-amber-100 text-amber-700 text-[11px] font-bold flex items-center justify-center gap-1.5 px-3">
+                                <AlertCircle size={14} />
+                                <span>{isPlein ? 'Chambre complète' : `${placesRestantes} libre(s) sur ${countSelected}`}</span>
+                              </div>
+                            )
+                          ) : !isPlein ? (
+                            <button
+                              type="button"
+                              onClick={() => openQuickAssignForChambre(chambre)}
+                              className="flex-1 h-11 bg-blue-50 active:bg-blue-100 text-blue-700 border border-blue-200/80 rounded-2xl text-xs font-black flex items-center justify-center gap-1.5 active:scale-[0.98] transition cursor-pointer"
+                            >
+                              <UserPlus size={15} />
+                              <span>Placer ici ({placesRestantes} libre{placesRestantes > 1 ? 's' : ''})</span>
+                            </button>
+                          ) : (
+                            <div className="flex-1 h-11 rounded-2xl bg-slate-100 text-slate-500 text-xs font-black flex items-center justify-center gap-1.5">
+                              <CheckCircle2 size={14} className="text-emerald-600" />
+                              <span>Complète</span>
+                            </div>
+                          )}
+
+                          <button
+                            type="button"
+                            onClick={() => exportPdfChambreUnique(chambre)}
+                            aria-label="Imprimer fiche PDF chambre"
+                            className="w-11 h-11 rounded-2xl bg-slate-100 active:bg-blue-50 active:text-blue-600 text-slate-600 flex items-center justify-center shrink-0 active:scale-90 transition cursor-pointer"
+                          >
+                            <Printer size={17} />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteChambre(chambre)}
+                            aria-label="Supprimer cette chambre"
+                            className="w-11 h-11 rounded-2xl bg-rose-50/70 active:bg-rose-100 text-rose-500 flex items-center justify-center shrink-0 active:scale-90 transition cursor-pointer"
+                          >
+                            <Trash2 size={17} />
+                          </button>
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+            </div>
+          ) : (
+            /* ===== ONGLET MOBILE : PÈLERINS À LOGER ===== */
+            <div className="space-y-3.5 pb-16">
+              {/* Recherche tactile 48px */}
+              <div className="relative">
+                <Search size={17} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
+                <input
+                  type="text"
+                  placeholder="Rechercher nom, passeport, réf..."
+                  value={searchPelerin}
+                  onChange={(e) => {
+                    setSearchPelerin(e.target.value)
+                    setPagePelerins(1)
+                  }}
+                  className="w-full h-12 pl-10 pr-10 bg-white border border-slate-200 rounded-2xl text-sm font-semibold outline-none focus:border-blue-600 shadow-2xs"
+                />
+                {searchPelerin && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSearchPelerin('')
+                      setPagePelerins(1)
+                    }}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 w-7 h-7 rounded-full bg-slate-100 text-slate-500 flex items-center justify-center"
+                  >
+                    <X size={14} />
+                  </button>
+                )}
+              </div>
+
+              {/* Puces de filtre rapides + bouton tiroir filtres avancés */}
+              <div className="flex items-center gap-2 overflow-x-auto pb-1 -mx-4 px-4 no-scrollbar">
+                {(
+                  [
+                    { id: 'tous', label: 'Tous', active: 'bg-slate-900 text-white border-slate-900' },
+                    { id: 'H', label: 'Hommes', active: 'bg-sky-600 text-white border-sky-600' },
+                    { id: 'F', label: 'Femmes', active: 'bg-pink-600 text-white border-pink-600' },
+                  ] as const
+                ).map((g) => (
+                  <button
+                    key={g.id}
+                    type="button"
+                    onClick={() => {
+                      setGenreFiltre(g.id)
+                      setPagePelerins(1)
+                    }}
+                    className={`h-10 px-4 rounded-2xl text-xs font-black border shrink-0 transition active:scale-95 cursor-pointer ${
+                      genreFiltre === g.id ? g.active : 'bg-white text-slate-600 border-slate-200'
+                    }`}
+                  >
+                    {g.label}
+                  </button>
+                ))}
+
+                <button
+                  type="button"
+                  onClick={() => setMobileFilterSheetOpen(true)}
+                  className={`h-10 px-3.5 rounded-2xl text-xs font-black border shrink-0 flex items-center gap-1.5 transition active:scale-95 cursor-pointer ${
+                    activeAdvancedFilterCount > 0
+                      ? 'bg-blue-600 text-white border-blue-600'
+                      : 'bg-white text-slate-700 border-slate-200'
+                  }`}
+                >
+                  <SlidersHorizontal size={14} />
+                  <span>Filtres</span>
+                  {activeAdvancedFilterCount > 0 && (
+                    <span className="px-1.5 py-0.2 rounded-full bg-white/25 text-[10px]">
+                      {activeAdvancedFilterCount}
+                    </span>
+                  )}
+                </button>
+              </div>
+
+              {/* Barre de sélection rapide */}
+              <div className="flex items-center justify-between px-1">
+                <button
+                  type="button"
+                  onClick={selectAllCurrentPage}
+                  className="inline-flex items-center gap-1.5 text-xs font-black text-blue-600 active:opacity-70 py-1 cursor-pointer"
+                >
+                  <CheckSquare size={15} />
+                  <span>Cocher la page ({pelerinsAffiches.length})</span>
+                </button>
+                {countSelected > 0 ? (
+                  <button
+                    type="button"
+                    onClick={deselectAll}
+                    className="text-xs font-bold text-rose-600 active:opacity-70 py-1 cursor-pointer"
+                  >
+                    Tout effacer ({countSelected})
+                  </button>
+                ) : (
+                  <span className="text-[11px] font-bold text-slate-400">
+                    {pelerinsEnAttenteFiltres.length} en attente
+                  </span>
+                )}
+              </div>
+
+              {/* Cartes pèlerins tactiles */}
+              {pelerinsAffiches.length === 0 ? (
+                <div className="bg-white rounded-3xl border border-slate-200 p-8 text-center space-y-2">
+                  <CheckCircle2 size={32} className="mx-auto text-emerald-500" />
+                  <p className="text-sm font-black text-slate-900">Tout le monde est logé !</p>
+                  <p className="text-xs text-slate-400 font-medium">
+                    Aucun pèlerin en attente ne correspond à vos filtres.
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-2.5">
+                  {pelerinsAffiches.map((p, indexOnPage) => {
+                    const isSelected = selectedPelerinIds.has(p.id)
+                    const isFemme = isPelerinFemme(p.sexe)
+                    const age = calculateAge(p.date_naissance)
+                    const nomCompletAffiche = formatNomComplet(p)
+                    const numeroOrdre = (pagePelerins - 1) * itemsPerPage + indexOnPage + 1
+                    const photoUrl = p.photo_url ? getPassportPublicUrl(p.photo_url) : null
+
+                    return (
+                      <button
+                        key={p.id}
+                        type="button"
+                        onClick={() => toggleSelectPelerin(p.id)}
+                        className={`w-full text-left p-3.5 rounded-2xl border transition-all active:scale-[0.98] flex items-center gap-3 min-h-[68px] cursor-pointer ${
+                          isSelected
+                            ? 'bg-blue-50/90 border-blue-500 ring-2 ring-blue-500/20 shadow-xs'
+                            : 'bg-white border-slate-200/90 shadow-2xs'
+                        }`}
+                      >
+                        {/* Coche circulaire native */}
+                        <div
+                          className={`w-6 h-6 rounded-full border-2 flex items-center justify-center shrink-0 transition-all ${
+                            isSelected
+                              ? 'bg-blue-600 border-blue-600 text-white scale-105'
+                              : 'border-slate-300 bg-white text-transparent'
+                          }`}
+                        >
+                          <Check size={14} strokeWidth={3} />
+                        </div>
+
+                        {/* Photo ou avatar */}
+                        <div
+                          className={`w-10 h-10 rounded-xl flex items-center justify-center font-black text-xs shrink-0 overflow-hidden ${
+                            isFemme ? 'bg-pink-100 text-pink-700' : 'bg-sky-100 text-sky-700'
+                          }`}
+                        >
+                          {photoUrl ? (
+                            <img src={photoUrl} alt={nomCompletAffiche} className="w-full h-full object-cover" />
+                          ) : (
+                            <span>{nomCompletAffiche.charAt(0).toUpperCase() || 'P'}</span>
+                          )}
+                        </div>
+
+                        {/* Infos pèlerin */}
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-[10px] font-mono font-black text-slate-400">#{numeroOrdre}</span>
+                            <p className="text-sm font-black text-slate-900 truncate">{nomCompletAffiche}</p>
+                          </div>
+                          <div className="flex items-center gap-1.5 flex-wrap mt-1">
+                            <span
+                              className={`text-[10px] px-1.5 py-0.5 rounded-md font-black ${
+                                isFemme ? 'bg-pink-50 text-pink-700' : 'bg-sky-50 text-sky-700'
+                              }`}
+                            >
+                              {isFemme ? 'F' : 'H'}{age ? ` • ${age} ans` : ''}
+                            </span>
+                            {p.num_passeport && (
+                              <span className="text-[10px] font-mono font-bold text-slate-500">
+                                {p.num_passeport}
+                              </span>
+                            )}
+                            {p.agence_ou_personne_associee && (
+                              <span className="text-[10px] font-bold text-blue-600 truncate max-w-[110px]">
+                                • {p.agence_ou_personne_associee}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      </button>
+                    )
+                  })}
+                </div>
+              )}
+
+              {/* Pagination mobile confortable */}
+              {totalPagesPelerins > 1 && (
+                <div className="flex items-center justify-between gap-2 pt-2">
+                  <button
+                    type="button"
+                    disabled={pagePelerins <= 1}
+                    onClick={() => setPagePelerins((prev) => Math.max(1, prev - 1))}
+                    className="h-11 px-4 rounded-2xl bg-white border border-slate-200 text-xs font-black text-slate-700 disabled:opacity-35 flex items-center gap-1 active:scale-95 transition cursor-pointer"
+                  >
+                    <ChevronLeft size={16} /> Préc.
+                  </button>
+                  <span className="text-xs font-black text-slate-500 tabular-nums">
+                    {pagePelerins} / {totalPagesPelerins}
+                  </span>
+                  <button
+                    type="button"
+                    disabled={pagePelerins >= totalPagesPelerins}
+                    onClick={() => setPagePelerins((prev) => Math.min(totalPagesPelerins, prev + 1))}
+                    className="h-11 px-4 rounded-2xl bg-white border border-slate-200 text-xs font-black text-slate-700 disabled:opacity-35 flex items-center gap-1 active:scale-95 transition cursor-pointer"
+                  >
+                    Suiv. <ChevronRight size={16} />
+                  </button>
+                </div>
+              )}
+
+              {/* Barre flottante native au pouce dès que >= 1 pèlerin est sélectionné */}
+              {countSelected > 0 && (
+                <div className="fixed left-3 right-3 bottom-24 z-40 animate-in fade-in slide-in-from-bottom-4 duration-200">
+                  <div className="bg-slate-900/95 backdrop-blur-md text-white rounded-3xl p-2.5 pl-4 shadow-2xl border border-white/10 flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <button
+                        type="button"
+                        onClick={deselectAll}
+                        aria-label="Annuler la sélection"
+                        className="w-8 h-8 rounded-full bg-white/15 flex items-center justify-center shrink-0 active:scale-90 transition cursor-pointer"
+                      >
+                        <X size={15} />
+                      </button>
+                      <div className="min-w-0">
+                        <p className="text-xs font-black leading-tight">
+                          {countSelected} sélectionné{countSelected > 1 ? 's' : ''}
+                        </p>
+                        <p className="text-[10px] text-slate-300 font-medium truncate">
+                          Prêt pour {villeActive}
+                        </p>
+                      </div>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => setMobileTab('chambres')}
+                      className="h-11 px-4 rounded-2xl bg-emerald-500 active:bg-emerald-600 text-white text-xs font-black flex items-center gap-1.5 shrink-0 shadow-md active:scale-95 transition cursor-pointer"
+                    >
+                      <span>Choisir chambre</span>
+                      <ArrowRight size={15} />
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* =================================================================== */}
+      {/* 💻 VERSION PC / DESKTOP INCHANGÉE (`hidden lg:block`)                */}
+      {/* =================================================================== */}
+      <div className="hidden lg:block bg-white border-b border-slate-200 sticky top-0 z-30 px-3 sm:px-6 py-3 shadow-2xs">
         <div className="max-w-7xl mx-auto flex flex-col md:flex-row md:items-center justify-between gap-3">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2.5">
               {!isFullscreen && (
                 <Link
-                  href="/hajj"
+                  href="/hajj/dashboard"
                   className="p-1.5 rounded-xl text-slate-500 hover:text-slate-900 hover:bg-slate-100 transition"
                 >
                   <ArrowLeft size={18} />
@@ -1072,27 +1908,6 @@ export default function RepartitionHotelsPage() {
                   {nomAgenceAffichee} {selectedYear !== 'all' ? `• Campagne ${selectedYear}` : '• Toutes les campagnes'}
                 </p>
               </div>
-            </div>
-
-            <div className="flex items-center gap-1.5 md:hidden">
-              <button
-                onClick={() => setIsFullscreen(!isFullscreen)}
-                className={`p-1.5 rounded-lg border text-xs font-bold transition ${
-                  isFullscreen ? 'bg-blue-600 text-white border-blue-600' : 'bg-slate-100 text-slate-700 border-slate-200'
-                }`}
-                title={isFullscreen ? 'Réduire' : 'Plein écran'}
-              >
-                {isFullscreen ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
-              </button>
-
-              <button
-                onClick={exportPdfHotelComplet}
-                disabled={isExporting || chambresFiltrees.length === 0}
-                className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-emerald-600 text-white text-xs font-bold shadow-xs active:scale-95"
-              >
-                <FileDown size={14} />
-                <span>{isExporting ? '…' : 'PDF'}</span>
-              </button>
             </div>
           </div>
 
@@ -1174,37 +1989,9 @@ export default function RepartitionHotelsPage() {
             </div>
           </div>
         </div>
-
-        <div className="grid grid-cols-2 gap-1 mt-2.5 pt-2 border-t border-slate-100 lg:hidden">
-          <button
-            onClick={() => setMobileTab('chambres')}
-            className={`py-1.5 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5 ${
-              mobileTab === 'chambres'
-                ? 'bg-blue-600 text-white shadow-xs'
-                : 'bg-slate-100 text-slate-600'
-            }`}
-          >
-            <BedDouble size={14} />
-            <span>Chambres ({chambresFiltrees.length})</span>
-          </button>
-          <button
-            onClick={() => setMobileTab('pelerins')}
-            className={`py-1.5 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5 ${
-              mobileTab === 'pelerins'
-                ? 'bg-blue-600 text-white shadow-xs'
-                : 'bg-slate-100 text-slate-600'
-            }`}
-          >
-            <Users size={14} />
-            <span>
-              À loger ({pelerinsEnAttenteFiltres.length})
-              {countSelected > 0 && ` [${countSelected}]`}
-            </span>
-          </button>
-        </div>
       </div>
 
-      <div className="max-w-7xl mx-auto px-3 sm:px-6 py-4 sm:py-6">
+      <div className="hidden lg:block max-w-7xl mx-auto px-3 sm:px-6 py-4 sm:py-6">
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
 
           <div
@@ -1753,30 +2540,552 @@ export default function RepartitionHotelsPage() {
         </div>
       </div>
 
+      {/* =================================================================== */}
+      {/* 📱 BOTTOM SHEETS NATIFS MOBILE (`lg:hidden`)                        */}
+      {/* =================================================================== */}
+
+      {/* 1. Action Sheet rapide "+" (Ajouter Hôtel / Chambre / PDF) */}
+      {mobileActionSheetOpen && (
+        <div
+          onClick={() => setMobileActionSheetOpen(false)}
+          className="fixed inset-0 bg-slate-900/50 backdrop-blur-xs z-[999] flex items-end lg:hidden animate-in fade-in duration-150"
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="w-full bg-white rounded-t-[2rem] shadow-2xl px-4 pt-3 pb-[max(1.5rem,env(safe-area-inset-bottom))] space-y-3 animate-in slide-in-from-bottom duration-200"
+          >
+            <div className="w-12 h-1.5 bg-slate-200 rounded-full mx-auto" />
+
+            <div className="flex items-center justify-between pt-1">
+              <div>
+                <h3 className="text-base font-black text-slate-900">Actions rapides</h3>
+                <p className="text-xs font-semibold text-slate-500">
+                  {villeActive} • {selectedYear !== 'all' ? selectedYear : 'Campagne courante'}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setMobileActionSheetOpen(false)}
+                aria-label="Fermer"
+                className="w-9 h-9 rounded-full bg-slate-100 text-slate-500 flex items-center justify-center active:scale-90 transition cursor-pointer"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="space-y-2.5 pt-1">
+              <button
+                type="button"
+                onClick={() => {
+                  setMobileActionSheetOpen(false)
+                  setModalError(null)
+                  setShowAddHotelModal(true)
+                }}
+                className="w-full min-h-[64px] p-3.5 rounded-2xl bg-slate-50 border border-slate-200/80 flex items-center gap-3.5 text-left active:scale-[0.98] transition cursor-pointer"
+              >
+                <div className="w-11 h-11 rounded-2xl bg-blue-600 text-white flex items-center justify-center shrink-0 shadow-sm shadow-blue-600/20">
+                  <Building2 size={20} />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-black text-slate-900">Ajouter un Hôtel</p>
+                  <p className="text-xs font-medium text-slate-500 truncate">
+                    Nouvel hôtel à {villeActive}
+                  </p>
+                </div>
+                <ChevronRight size={18} className="text-slate-400 shrink-0" />
+              </button>
+
+              <button
+                type="button"
+                disabled={hotelsVilleActive.length === 0}
+                onClick={() => {
+                  setMobileActionSheetOpen(false)
+                  setModalError(null)
+                  const targetHotel =
+                    selectedHotelId !== 'all'
+                      ? selectedHotelId
+                      : hotelsVilleActive[0]?.id || ''
+                  setChambreTargetHotelId(targetHotel)
+                  setShowAddChambreModal(true)
+                }}
+                className="w-full min-h-[64px] p-3.5 rounded-2xl bg-slate-50 border border-slate-200/80 flex items-center gap-3.5 text-left active:scale-[0.98] transition disabled:opacity-45 cursor-pointer"
+              >
+                <div className="w-11 h-11 rounded-2xl bg-emerald-600 text-white flex items-center justify-center shrink-0 shadow-sm shadow-emerald-600/20">
+                  <BedDouble size={20} />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-black text-slate-900">Ajouter des Chambres</p>
+                  <p className="text-xs font-medium text-slate-500 truncate">
+                    {hotelsVilleActive.length === 0
+                      ? `Ajoutez d'abord un hôtel à ${villeActive}`
+                      : 'Création rapide simple ou en lot'}
+                  </p>
+                </div>
+                <ChevronRight size={18} className="text-slate-400 shrink-0" />
+              </button>
+
+              <button
+                type="button"
+                disabled={isExporting || chambresFiltrees.length === 0}
+                onClick={() => {
+                  setMobileActionSheetOpen(false)
+                  exportPdfHotelComplet()
+                }}
+                className="w-full min-h-[64px] p-3.5 rounded-2xl bg-slate-50 border border-slate-200/80 flex items-center gap-3.5 text-left active:scale-[0.98] transition disabled:opacity-45 cursor-pointer"
+              >
+                <div className="w-11 h-11 rounded-2xl bg-slate-900 text-white flex items-center justify-center shrink-0 shadow-sm">
+                  <FileDown size={20} />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-black text-slate-900">
+                    {isExporting ? 'Génération du PDF…' : 'Exporter le PDF complet'}
+                  </p>
+                  <p className="text-xs font-medium text-slate-500 truncate">
+                    Fiches de toutes les chambres affichées ({chambresFiltrees.length})
+                  </p>
+                </div>
+                <ChevronRight size={18} className="text-slate-400 shrink-0" />
+              </button>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setMobileActionSheetOpen(false)}
+              className="w-full h-12 rounded-2xl bg-slate-100 text-slate-700 font-black text-sm active:scale-[0.98] transition cursor-pointer"
+            >
+              Fermer
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* 2. Bottom Sheet Filtres & Tri avancés mobile */}
+      {mobileFilterSheetOpen && (
+        <div
+          onClick={() => setMobileFilterSheetOpen(false)}
+          className="fixed inset-0 bg-slate-900/50 backdrop-blur-xs z-[999] flex items-end lg:hidden animate-in fade-in duration-150"
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="w-full bg-white rounded-t-[2rem] shadow-2xl max-h-[85vh] flex flex-col animate-in slide-in-from-bottom duration-200"
+          >
+            <div className="px-4 pt-3 pb-3 border-b border-slate-100 shrink-0">
+              <div className="w-12 h-1.5 bg-slate-200 rounded-full mx-auto mb-3" />
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <div className="w-9 h-9 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center">
+                    <SlidersHorizontal size={18} />
+                  </div>
+                  <div>
+                    <h3 className="text-base font-black text-slate-900">Filtres & Tri</h3>
+                    <p className="text-[11px] font-semibold text-slate-500">
+                      {pelerinsEnAttenteFiltres.length} pèlerin{pelerinsEnAttenteFiltres.length > 1 ? 's' : ''} correspondant{pelerinsEnAttenteFiltres.length > 1 ? 's' : ''}
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setMobileFilterSheetOpen(false)}
+                  aria-label="Fermer les filtres"
+                  className="w-9 h-9 rounded-full bg-slate-100 text-slate-500 flex items-center justify-center active:scale-90 transition cursor-pointer"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+            </div>
+
+            <div className="p-4 space-y-5 overflow-y-auto">
+              {/* Tranche d'âge */}
+              <div>
+                <label className="text-[11px] font-black uppercase tracking-wider text-slate-400 block mb-2">
+                  Tranche d'âge
+                </label>
+                <div className="grid grid-cols-4 gap-2">
+                  {(
+                    [
+                      { value: 'tous', label: 'Tous' },
+                      { value: '-40', label: '< 40 ans' },
+                      { value: '40-60', label: '40–60' },
+                      { value: '60+', label: '60+ ans' },
+                    ] as const
+                  ).map((opt) => (
+                    <button
+                      key={opt.value}
+                      type="button"
+                      onClick={() => {
+                        setFiltreTrancheAge(opt.value)
+                        setPagePelerins(1)
+                      }}
+                      className={`h-11 rounded-xl text-xs font-black transition active:scale-95 cursor-pointer ${
+                        filtreTrancheAge === opt.value
+                          ? 'bg-blue-600 text-white shadow-sm shadow-blue-600/20'
+                          : 'bg-slate-100 text-slate-600'
+                      }`}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Ordre de tri */}
+              <div>
+                <label className="text-[11px] font-black uppercase tracking-wider text-slate-400 block mb-2">
+                  Trier par
+                </label>
+                <select
+                  value={filtreTri}
+                  onChange={(e) => {
+                    setFiltreTri(e.target.value as any)
+                    setPagePelerins(1)
+                  }}
+                  className="w-full h-12 px-3.5 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold text-slate-800 outline-none focus:border-blue-600"
+                >
+                  <option value="inscription_asc">Inscription (Ancien → Récent)</option>
+                  <option value="inscription_desc">Inscription (Récent → Ancien)</option>
+                  <option value="nom_asc">Nom (A → Z)</option>
+                  <option value="nom_desc">Nom (Z → A)</option>
+                  <option value="age_desc">Plus âgés en premier</option>
+                </select>
+              </div>
+
+              {/* Associé / Sous-agence */}
+              {uniqueAssocies.length > 0 && (
+                <div>
+                  <label className="text-[11px] font-black uppercase tracking-wider text-slate-400 block mb-2">
+                    Associé / Sous-agence
+                  </label>
+                  <select
+                    value={filtreAssocie}
+                    onChange={(e) => {
+                      setFiltreAssocie(e.target.value)
+                      setPagePelerins(1)
+                    }}
+                    className="w-full h-12 px-3.5 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold text-slate-800 outline-none focus:border-blue-600"
+                  >
+                    <option value="tous">Tous les associés</option>
+                    {uniqueAssocies.map((a) => (
+                      <option key={a} value={a}>
+                        {a}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              {/* Date de départ */}
+              {uniqueDatesDepart.length > 0 && (
+                <div>
+                  <label className="text-[11px] font-black uppercase tracking-wider text-slate-400 block mb-2">
+                    Date de départ
+                  </label>
+                  <select
+                    value={filtreDateDepart}
+                    onChange={(e) => {
+                      setFiltreDateDepart(e.target.value)
+                      setPagePelerins(1)
+                    }}
+                    className="w-full h-12 px-3.5 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold text-slate-800 outline-none focus:border-blue-600"
+                  >
+                    <option value="tous">Toutes les dates</option>
+                    {uniqueDatesDepart.map((d) => (
+                      <option key={d} value={d}>
+                        {d}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+            </div>
+
+            <div className="px-4 pt-3 pb-[max(1.25rem,env(safe-area-inset-bottom))] border-t border-slate-100 bg-white flex gap-2.5 shrink-0">
+              <button
+                type="button"
+                onClick={() => {
+                  resetFilters()
+                }}
+                className="h-12 px-4 rounded-2xl bg-slate-100 text-slate-700 font-black text-xs flex items-center justify-center gap-1.5 active:scale-95 transition cursor-pointer"
+              >
+                <RotateCcw size={15} />
+                <span>Réinitialiser</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setMobileFilterSheetOpen(false)}
+                className="h-12 flex-1 rounded-2xl bg-blue-600 text-white font-black text-sm shadow-md shadow-blue-600/20 active:scale-[0.98] transition cursor-pointer"
+              >
+                Afficher ({pelerinsEnAttenteFiltres.length})
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 3. Bottom Sheet Placement Rapide dans une chambre (1-tap depuis la carte chambre) */}
+      {quickAssignChambre && (
+        <div
+          onClick={() => {
+            if (!isProcessing) setQuickAssignChambre(null)
+          }}
+          className="fixed inset-0 bg-slate-900/50 backdrop-blur-xs z-[999] flex items-end lg:hidden animate-in fade-in duration-150"
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="w-full bg-white rounded-t-[2rem] shadow-2xl h-[86vh] flex flex-col animate-in slide-in-from-bottom duration-200"
+          >
+            {/* En-tête fixe */}
+            <div className="px-4 pt-3 pb-3 border-b border-slate-100 shrink-0 space-y-3">
+              <div className="w-12 h-1.5 bg-slate-200 rounded-full mx-auto" />
+
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <h3 className="text-base font-black text-slate-900 truncate">
+                      {quickAssignChambre.numero_chambre && quickAssignChambre.numero_chambre.trim() !== ''
+                        ? `Chambre N° ${quickAssignChambre.numero_chambre}`
+                        : `Chambre ${getLabelTypeChambre(quickAssignChambre.capacite)}`}
+                    </h3>
+                    <span
+                      className={`text-[10px] px-2 py-0.5 rounded-full font-black ${
+                        quickAssignChambre.genre_chambre === 'Femmes'
+                          ? 'bg-pink-50 text-pink-600'
+                          : quickAssignChambre.genre_chambre === 'Hommes'
+                          ? 'bg-sky-50 text-sky-600'
+                          : 'bg-slate-100 text-slate-600'
+                      }`}
+                    >
+                      {quickAssignChambre.genre_chambre}
+                    </span>
+                  </div>
+                  <p className="text-xs font-semibold text-slate-500 truncate mt-0.5">
+                    {quickAssignChambre.hotel_nom} •{' '}
+                    <span className="text-emerald-600 font-black tabular-nums">
+                      {quickAssignIds.size} / {quickAssignPlacesRestantes} lit{quickAssignPlacesRestantes > 1 ? 's' : ''} libre{quickAssignPlacesRestantes > 1 ? 's' : ''}
+                    </span>
+                  </p>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setQuickAssignChambre(null)}
+                  aria-label="Fermer"
+                  className="w-9 h-9 rounded-full bg-slate-100 text-slate-500 flex items-center justify-center shrink-0 active:scale-90 transition cursor-pointer"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+
+              {/* Barre de recherche rapide */}
+              <div className="relative">
+                <Search
+                  size={17}
+                  className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none"
+                />
+                <input
+                  type="text"
+                  placeholder="Rechercher nom, passeport, tél…"
+                  value={quickAssignSearch}
+                  onChange={(e) => setQuickAssignSearch(e.target.value)}
+                  className="w-full h-11 pl-10 pr-10 bg-slate-100 border border-transparent focus:border-blue-500 focus:bg-white rounded-2xl text-sm font-semibold text-slate-800 outline-none transition"
+                />
+                {quickAssignSearch && (
+                  <button
+                    type="button"
+                    onClick={() => setQuickAssignSearch('')}
+                    aria-label="Effacer la recherche"
+                    className="absolute right-2 top-1/2 -translate-y-1/2 w-7 h-7 rounded-full bg-slate-200/80 text-slate-500 flex items-center justify-center"
+                  >
+                    <X size={14} />
+                  </button>
+                )}
+              </div>
+
+              {/* Filtre genre rapide */}
+              <div className="grid grid-cols-3 gap-1.5">
+                {(
+                  [
+                    { value: 'tous', label: 'Tous' },
+                    { value: 'H', label: 'Hommes' },
+                    { value: 'F', label: 'Femmes' },
+                  ] as const
+                ).map((g) => (
+                  <button
+                    key={g.value}
+                    type="button"
+                    onClick={() => setQuickAssignGenre(g.value)}
+                    className={`h-9 rounded-xl text-xs font-black transition active:scale-95 cursor-pointer ${
+                      quickAssignGenre === g.value
+                        ? 'bg-blue-600 text-white shadow-xs'
+                        : 'bg-slate-100 text-slate-600'
+                    }`}
+                  >
+                    {g.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Liste scrollable des candidats à loger */}
+            <div className="flex-1 overflow-y-auto px-4 py-3 space-y-2">
+              {quickAssignCandidates.length === 0 ? (
+                <div className="py-12 text-center space-y-2">
+                  <Users size={30} className="mx-auto text-slate-300" />
+                  <p className="text-sm font-bold text-slate-600">
+                    Aucun pèlerin disponible
+                  </p>
+                  <p className="text-xs text-slate-400">
+                    Modifiez la recherche ou le filtre genre ci-dessus.
+                  </p>
+                </div>
+              ) : (
+                quickAssignCandidates.map((p) => {
+                  const isSelected = quickAssignIds.has(p.id)
+                  const isLimitReached = !isSelected && quickAssignIds.size >= quickAssignPlacesRestantes
+                  const isFemme = isPelerinFemme(p.sexe)
+                  const age = calculateAge(p.date_naissance)
+                  const photoSrc = p.photo_url ? getPassportPublicUrl(p.photo_url) : null
+                  const initiales = `${p.prenom?.charAt(0) || ''}${p.nom_complet?.charAt(0) || ''}`.toUpperCase() || 'P'
+
+                  return (
+                    <button
+                      key={p.id}
+                      type="button"
+                      disabled={isLimitReached}
+                      onClick={() => toggleQuickAssignId(p.id)}
+                      className={`w-full min-h-[64px] p-3 rounded-2xl border text-left flex items-center gap-3 transition active:scale-[0.98] cursor-pointer ${
+                        isSelected
+                          ? 'bg-emerald-50 border-emerald-400 ring-2 ring-emerald-500/20'
+                          : isLimitReached
+                          ? 'bg-slate-50 border-slate-100 opacity-45'
+                          : 'bg-white border-slate-200/90'
+                      }`}
+                    >
+                      {photoSrc ? (
+                        <img
+                          src={photoSrc}
+                          alt={formatNomComplet(p)}
+                          className="w-11 h-11 rounded-full object-cover border border-slate-200 shrink-0"
+                        />
+                      ) : (
+                        <div
+                          className={`w-11 h-11 rounded-full flex items-center justify-center text-xs font-black shrink-0 ${
+                            isFemme ? 'bg-pink-100 text-pink-700' : 'bg-blue-100 text-blue-700'
+                          }`}
+                        >
+                          {initiales}
+                        </div>
+                      )}
+
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-black text-slate-900 truncate">
+                          {formatNomComplet(p)}
+                        </p>
+                        <div className="flex items-center gap-1.5 text-[11px] font-semibold text-slate-500 mt-0.5 flex-wrap">
+                          <span
+                            className={`px-1.5 py-0.5 rounded-md text-[10px] font-black ${
+                              isFemme ? 'bg-pink-50 text-pink-600' : 'bg-sky-50 text-sky-600'
+                            }`}
+                          >
+                            {isFemme ? 'Femme' : 'Homme'}
+                          </span>
+                          {age && <span>• {age} ans</span>}
+                          {p.num_passeport && (
+                            <span className="font-mono text-[10px] text-slate-400 truncate">
+                              • {p.num_passeport}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      <div
+                        className={`w-7 h-7 rounded-full flex items-center justify-center shrink-0 transition ${
+                          isSelected
+                            ? 'bg-emerald-600 text-white shadow-xs'
+                            : 'border-2 border-slate-300 bg-white'
+                        }`}
+                      >
+                        {isSelected && <Check size={15} strokeWidth={3} />}
+                      </div>
+                    </button>
+                  )
+                })
+              )}
+            </div>
+
+            {/* Barre de confirmation collée en bas */}
+            <div className="px-4 pt-3 pb-[max(1.25rem,env(safe-area-inset-bottom))] border-t border-slate-100 bg-white flex gap-2.5 shrink-0">
+              <button
+                type="button"
+                disabled={isProcessing}
+                onClick={() => setQuickAssignChambre(null)}
+                className="h-12 px-5 rounded-2xl bg-slate-100 text-slate-700 font-black text-sm active:scale-95 transition cursor-pointer"
+              >
+                Annuler
+              </button>
+              <button
+                type="button"
+                disabled={isProcessing || quickAssignIds.size === 0}
+                onClick={handleConfirmQuickAssign}
+                className="h-12 flex-1 rounded-2xl bg-emerald-600 text-white font-black text-sm shadow-lg shadow-emerald-600/20 flex items-center justify-center gap-2 active:scale-[0.98] transition disabled:opacity-40 cursor-pointer"
+              >
+                <UserCheck size={18} />
+                <span>
+                  {isProcessing
+                    ? 'Placement en cours…'
+                    : quickAssignIds.size > 0
+                    ? `Placer ${quickAssignIds.size} pèlerin${quickAssignIds.size > 1 ? 's' : ''}`
+                    : 'Sélectionnez des pèlerins'}
+                </span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* =================================================================== */}
+      {/* MODALES HÔTEL & CHAMBRE (Bottom Sheet sur mobile, Modale sur PC)    */}
+      {/* =================================================================== */}
+
       {showAddHotelModal && (
-        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl border border-slate-100 shadow-2xl max-w-sm w-full p-5 space-y-3.5 animate-in fade-in zoom-in-95">
-            <div className="flex items-center justify-between pb-2 border-b border-slate-100">
-              <div className="flex items-center gap-1.5">
-                <Building2 size={16} className="text-blue-600" />
-                <h3 className="text-xs font-black text-slate-900">
+        <div
+          onClick={() => setShowAddHotelModal(false)}
+          className="fixed inset-0 bg-slate-900/50 lg:bg-slate-900/40 backdrop-blur-sm z-[999] lg:z-50 flex items-end lg:items-center justify-center p-0 lg:p-4"
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="bg-white rounded-t-[2rem] lg:rounded-3xl border border-slate-100 shadow-2xl w-full lg:max-w-sm px-5 pt-3 pb-[max(1.5rem,env(safe-area-inset-bottom))] lg:p-5 space-y-4 lg:space-y-3.5 max-h-[90vh] overflow-y-auto animate-in slide-in-from-bottom lg:fade-in lg:zoom-in-95 duration-200"
+          >
+            <div className="w-12 h-1.5 bg-slate-200 rounded-full mx-auto lg:hidden" />
+
+            <div className="flex items-center justify-between pb-2.5 lg:pb-2 border-b border-slate-100">
+              <div className="flex items-center gap-2 lg:gap-1.5 min-w-0">
+                <div className="w-9 h-9 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center lg:hidden shrink-0">
+                  <Building2 size={18} />
+                </div>
+                <Building2 size={16} className="text-blue-600 hidden lg:block shrink-0" />
+                <h3 className="text-sm lg:text-xs font-black text-slate-900 truncate">
                   Ajouter un Hôtel ({villeActive} - {selectedYear !== 'all' ? selectedYear : 'Campagne courante'})
                 </h3>
               </div>
-              <button onClick={() => setShowAddHotelModal(false)} className="text-slate-400 cursor-pointer">
-                <X size={16} />
+              <button
+                type="button"
+                onClick={() => setShowAddHotelModal(false)}
+                aria-label="Fermer"
+                className="w-9 h-9 lg:w-auto lg:h-auto rounded-full lg:rounded-none bg-slate-100 lg:bg-transparent flex items-center justify-center text-slate-500 lg:text-slate-400 cursor-pointer shrink-0"
+              >
+                <X size={18} className="lg:w-4 lg:h-4" />
               </button>
             </div>
 
             {modalError && (
-              <div className="p-2.5 bg-rose-50 text-rose-600 rounded-xl text-xs font-bold">
+              <div className="p-3 lg:p-2.5 bg-rose-50 text-rose-600 rounded-2xl lg:rounded-xl text-xs font-bold">
                 {modalError}
               </div>
             )}
 
-            <form onSubmit={handleCreateHotel} className="space-y-3">
+            <form onSubmit={handleCreateHotel} className="space-y-3.5 lg:space-y-3">
               <div>
-                <label className="text-[10px] font-black uppercase text-slate-400 block mb-1">
+                <label className="text-[11px] lg:text-[10px] font-black uppercase text-slate-400 block mb-1.5 lg:mb-1">
                   Nom officiel de l'hôtel *
                 </label>
                 <input
@@ -1785,12 +3094,12 @@ export default function RepartitionHotelsPage() {
                   placeholder="Nom de l'hôtel"
                   value={nouveauNomHotel}
                   onChange={(e) => setNouveauNomHotel(e.target.value)}
-                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold outline-none focus:border-blue-600"
+                  className="w-full h-12 lg:h-auto px-3.5 lg:px-3 lg:py-2 bg-slate-50 border border-slate-200 rounded-2xl lg:rounded-xl text-sm lg:text-xs font-bold outline-none focus:border-blue-600"
                 />
               </div>
 
               <div>
-                <label className="text-[10px] font-black uppercase text-slate-400 block mb-1">
+                <label className="text-[11px] lg:text-[10px] font-black uppercase text-slate-400 block mb-1.5 lg:mb-1">
                   Adresse / Quartier
                 </label>
                 <input
@@ -1798,22 +3107,22 @@ export default function RepartitionHotelsPage() {
                   placeholder="Adresse ou quartier"
                   value={nouvelleAdresseHotel}
                   onChange={(e) => setNouvelleAdresseHotel(e.target.value)}
-                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold outline-none focus:border-blue-600"
+                  className="w-full h-12 lg:h-auto px-3.5 lg:px-3 lg:py-2 bg-slate-50 border border-slate-200 rounded-2xl lg:rounded-xl text-sm lg:text-xs font-semibold outline-none focus:border-blue-600"
                 />
               </div>
 
-              <div className="flex gap-2 pt-2">
+              <div className="flex gap-2.5 lg:gap-2 pt-2">
                 <button
                   type="button"
                   onClick={() => setShowAddHotelModal(false)}
-                  className="flex-1 py-2 bg-slate-100 text-slate-700 rounded-xl text-xs font-bold cursor-pointer"
+                  className="flex-1 h-12 lg:h-auto lg:py-2 bg-slate-100 text-slate-700 rounded-2xl lg:rounded-xl text-sm lg:text-xs font-black lg:font-bold active:scale-95 transition cursor-pointer"
                 >
                   Annuler
                 </button>
                 <button
                   type="submit"
                   disabled={isCreatingHotel}
-                  className="flex-1 py-2 bg-blue-600 text-white rounded-xl text-xs font-bold disabled:opacity-50 cursor-pointer"
+                  className="flex-1 h-12 lg:h-auto lg:py-2 bg-blue-600 text-white rounded-2xl lg:rounded-xl text-sm lg:text-xs font-black lg:font-bold shadow-md shadow-blue-600/20 lg:shadow-none disabled:opacity-50 active:scale-95 transition cursor-pointer"
                 >
                   {isCreatingHotel ? 'Enregistrement…' : 'Enregistrer'}
                 </button>
@@ -1824,36 +3133,52 @@ export default function RepartitionHotelsPage() {
       )}
 
       {showAddChambreModal && (
-        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl border border-slate-100 shadow-2xl max-w-sm w-full p-5 space-y-3.5 animate-in fade-in zoom-in-95">
-            <div className="flex items-center justify-between pb-2 border-b border-slate-100">
-              <div className="flex items-center gap-1.5">
-                <BedDouble size={16} className="text-blue-600" />
-                <h3 className="text-xs font-black text-slate-900">
+        <div
+          onClick={() => setShowAddChambreModal(false)}
+          className="fixed inset-0 bg-slate-900/50 lg:bg-slate-900/40 backdrop-blur-sm z-[999] lg:z-50 flex items-end lg:items-center justify-center p-0 lg:p-4"
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="bg-white rounded-t-[2rem] lg:rounded-3xl border border-slate-100 shadow-2xl w-full lg:max-w-sm px-5 pt-3 pb-[max(1.5rem,env(safe-area-inset-bottom))] lg:p-5 space-y-4 lg:space-y-3.5 max-h-[92vh] overflow-y-auto animate-in slide-in-from-bottom lg:fade-in lg:zoom-in-95 duration-200"
+          >
+            <div className="w-12 h-1.5 bg-slate-200 rounded-full mx-auto lg:hidden" />
+
+            <div className="flex items-center justify-between pb-2.5 lg:pb-2 border-b border-slate-100">
+              <div className="flex items-center gap-2 lg:gap-1.5">
+                <div className="w-9 h-9 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center lg:hidden shrink-0">
+                  <BedDouble size={18} />
+                </div>
+                <BedDouble size={16} className="text-blue-600 hidden lg:block" />
+                <h3 className="text-sm lg:text-xs font-black text-slate-900">
                   Ajouter des Chambres
                 </h3>
               </div>
-              <button onClick={() => setShowAddChambreModal(false)} className="text-slate-400 cursor-pointer">
-                <X size={16} />
+              <button
+                type="button"
+                onClick={() => setShowAddChambreModal(false)}
+                aria-label="Fermer"
+                className="w-9 h-9 lg:w-auto lg:h-auto rounded-full lg:rounded-none bg-slate-100 lg:bg-transparent flex items-center justify-center text-slate-500 lg:text-slate-400 cursor-pointer"
+              >
+                <X size={18} className="lg:w-4 lg:h-4" />
               </button>
             </div>
 
             {modalError && (
-              <div className="p-2.5 bg-rose-50 text-rose-600 rounded-xl text-xs font-bold">
+              <div className="p-3 lg:p-2.5 bg-rose-50 text-rose-600 rounded-2xl lg:rounded-xl text-xs font-bold">
                 {modalError}
               </div>
             )}
 
-            <form onSubmit={handleCreateChambre} className="space-y-3">
+            <form onSubmit={handleCreateChambre} className="space-y-3.5 lg:space-y-3">
               <div>
-                <label className="text-[10px] font-black uppercase text-slate-400 block mb-1">
+                <label className="text-[11px] lg:text-[10px] font-black uppercase text-slate-400 block mb-1.5 lg:mb-1">
                   Hôtel rattaché *
                 </label>
                 <select
                   required
                   value={chambreTargetHotelId}
                   onChange={(e) => setChambreTargetHotelId(e.target.value)}
-                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold outline-none focus:border-blue-600 cursor-pointer"
+                  className="w-full h-12 lg:h-auto px-3.5 lg:px-3 lg:py-2 bg-slate-50 border border-slate-200 rounded-2xl lg:rounded-xl text-sm lg:text-xs font-bold outline-none focus:border-blue-600 cursor-pointer"
                 >
                   {hotels
                     .filter((h) => h.ville === villeActive)
@@ -1866,13 +3191,13 @@ export default function RepartitionHotelsPage() {
               </div>
 
               <div>
-                <label className="text-[10px] font-black uppercase text-slate-400 block mb-1">
+                <label className="text-[11px] lg:text-[10px] font-black uppercase text-slate-400 block mb-1.5 lg:mb-1">
                   Type de Chambre / Capacité Lits *
                 </label>
                 <select
                   value={capaciteSelectionnee}
                   onChange={(e) => setCapaciteSelectionnee(Number(e.target.value))}
-                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold outline-none focus:border-blue-600 cursor-pointer"
+                  className="w-full h-12 lg:h-auto px-3.5 lg:px-3 lg:py-2 bg-slate-50 border border-slate-200 rounded-2xl lg:rounded-xl text-sm lg:text-xs font-bold outline-none focus:border-blue-600 cursor-pointer"
                 >
                   {TYPES_CHAMBRES_HAJJ.map((type) => (
                     <option key={type.capacite} value={type.capacite}>
@@ -1882,15 +3207,15 @@ export default function RepartitionHotelsPage() {
                 </select>
               </div>
 
-              <div className="p-3 bg-blue-50/60 rounded-2xl border border-blue-100 space-y-2.5">
+              <div className="p-3.5 lg:p-3 bg-blue-50/60 rounded-2xl border border-blue-100 space-y-2.5">
                 <div className="flex items-center gap-1.5 text-blue-700 text-xs font-bold">
                   <Sparkles size={14} />
                   <span>Quantité & Numéro</span>
                 </div>
 
-                <div className="grid grid-cols-2 gap-2">
+                <div className="grid grid-cols-2 gap-2.5 lg:gap-2">
                   <div>
-                    <label className="text-[9px] font-bold text-slate-500 block mb-1">
+                    <label className="text-[10px] lg:text-[9px] font-bold text-slate-500 block mb-1">
                       Nombre de chambres
                     </label>
                     <input
@@ -1899,28 +3224,28 @@ export default function RepartitionHotelsPage() {
                       max={100}
                       value={nombreChambresACreer}
                       onChange={(e) => setNombreChambresACreer(Math.max(1, Number(e.target.value)))}
-                      className="w-full px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-bold outline-none focus:border-blue-600"
+                      className="w-full h-11 lg:h-auto px-3 lg:px-2.5 lg:py-1.5 bg-white border border-slate-200 rounded-xl lg:rounded-lg text-sm lg:text-xs font-bold outline-none focus:border-blue-600"
                     />
                   </div>
 
                   <div>
-                    <label className="text-[9px] font-bold text-slate-500 block mb-1">
+                    <label className="text-[10px] lg:text-[9px] font-bold text-slate-500 block mb-1">
                       Numéro (Optionnel)
                     </label>
                     <input
                       type="text"
-                      placeholder="Laisser vide si non numérotée"
+                      placeholder="Ex: 101 ou 101-110"
                       value={chambreNumeroPattern}
                       onChange={(e) => setChambreNumeroPattern(e.target.value)}
-                      className="w-full px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-bold outline-none focus:border-blue-600"
+                      className="w-full h-11 lg:h-auto px-3 lg:px-2.5 lg:py-1.5 bg-white border border-slate-200 rounded-xl lg:rounded-lg text-sm lg:text-xs font-bold outline-none focus:border-blue-600"
                     />
                   </div>
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-2">
+              <div className="grid grid-cols-2 gap-2.5 lg:gap-2">
                 <div>
-                  <label className="text-[10px] font-black uppercase text-slate-400 block mb-1">
+                  <label className="text-[11px] lg:text-[10px] font-black uppercase text-slate-400 block mb-1.5 lg:mb-1">
                     Étage (Optionnel)
                   </label>
                   <input
@@ -1928,18 +3253,18 @@ export default function RepartitionHotelsPage() {
                     placeholder="Étage"
                     value={chambreEtage}
                     onChange={(e) => setChambreEtage(e.target.value)}
-                    className="w-full px-2.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold outline-none focus:border-blue-600"
+                    className="w-full h-12 lg:h-auto px-3 lg:px-2.5 lg:py-2 bg-slate-50 border border-slate-200 rounded-2xl lg:rounded-xl text-sm lg:text-xs font-bold outline-none focus:border-blue-600"
                   />
                 </div>
 
                 <div>
-                  <label className="text-[10px] font-black uppercase text-slate-400 block mb-1">
+                  <label className="text-[11px] lg:text-[10px] font-black uppercase text-slate-400 block mb-1.5 lg:mb-1">
                     Genre
                   </label>
                   <select
                     value={chambreGenre}
                     onChange={(e) => setChambreGenre(e.target.value as any)}
-                    className="w-full px-2 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold outline-none focus:border-blue-600 cursor-pointer"
+                    className="w-full h-12 lg:h-auto px-3 lg:px-2 lg:py-2 bg-slate-50 border border-slate-200 rounded-2xl lg:rounded-xl text-sm lg:text-xs font-bold outline-none focus:border-blue-600 cursor-pointer"
                   >
                     <option value="Hommes">Hommes</option>
                     <option value="Femmes">Femmes</option>
@@ -1948,23 +3273,23 @@ export default function RepartitionHotelsPage() {
                 </div>
               </div>
 
-              <div className="flex gap-2 pt-2">
+              <div className="flex gap-2.5 lg:gap-2 pt-2">
                 <button
                   type="button"
                   onClick={() => setShowAddChambreModal(false)}
-                  className="flex-1 py-2 bg-slate-100 text-slate-700 rounded-xl text-xs font-bold cursor-pointer"
+                  className="flex-1 h-12 lg:h-auto lg:py-2 bg-slate-100 text-slate-700 rounded-2xl lg:rounded-xl text-sm lg:text-xs font-black lg:font-bold active:scale-95 transition cursor-pointer"
                 >
                   Annuler
                 </button>
                 <button
                   type="submit"
                   disabled={isCreatingChambre}
-                  className="flex-1 py-2 bg-blue-600 text-white rounded-xl text-xs font-bold disabled:opacity-50 cursor-pointer"
+                  className="flex-1 h-12 lg:h-auto lg:py-2 bg-blue-600 text-white rounded-2xl lg:rounded-xl text-sm lg:text-xs font-black lg:font-bold shadow-md shadow-blue-600/20 lg:shadow-none disabled:opacity-50 active:scale-95 transition cursor-pointer"
                 >
                   {isCreatingChambre
                     ? 'Création…'
                     : nombreChambresACreer > 1
-                    ? `Créer les ${nombreChambresACreer} chambres`
+                    ? `Créer (${nombreChambresACreer})`
                     : 'Créer la chambre'}
                 </button>
               </div>

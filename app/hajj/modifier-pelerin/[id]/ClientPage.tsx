@@ -10,6 +10,7 @@ import {
 import { uploadPassportFile, getPassportPublicUrl } from '@/lib/hajjPassport'
 import { HAJJ_CURRENCIES, getHajjCurrencySymbol, normalizeHajjCurrency, type HajjCurrency } from '@/lib/hajjCurrency'
 import { usePowerSync } from '@powersync/react'
+import { useUI } from '@/lib/UIContext'
 import Link from 'next/link'
 import * as faceapi from '@vladmandic/face-api'
 
@@ -364,6 +365,8 @@ export default function ModifierPelerin() {
   const id = useSearchParams().get('id')
   const router = useRouter()
   const db = usePowerSync()
+  const { setHideNavbar } = useUI()
+  const [mobileTab, setMobileTab] = useState<'identite' | 'finances' | 'voyage' | 'jalons'>('identite')
   
   // États de contrôle de l'application
   const [loading, setLoading] = useState(true)
@@ -442,6 +445,11 @@ export default function ModifierPelerin() {
   useEffect(() => {
     loadFaceModel().catch(() => {})
   }, [])
+
+  useEffect(() => {
+    setHideNavbar(cropModalOpen)
+    return () => setHideNavbar(false)
+  }, [cropModalOpen, setHideNavbar])
 
   // Applique un résultat de cadrage automatique à l'aperçu et au fichier à enregistrer
   const applyAutoCrop = (result: Awaited<ReturnType<typeof autoDetectAndCropNusuk>>) => {
@@ -838,7 +846,711 @@ export default function ModifierPelerin() {
   )
 
   return (
-    <div className="max-w-7xl mx-auto px-4 py-6 md:py-10">
+    <div className="min-h-screen bg-slate-50 md:bg-transparent">
+      {/* =================================================================== */}
+      {/* 📱 VERSION MOBILE NATIVE — EN-TÊTE BLANC PUR (`md:hidden`)          */}
+      {/* =================================================================== */}
+      <div className="md:hidden pb-28">
+        {/* 1. BARRE SUPÉRIEURE BLANCHE COLLANTE */}
+        <div className="bg-white/95 backdrop-blur-md border-b border-slate-100 px-4 py-3 sticky top-0 z-30 flex items-center justify-between gap-2">
+          <Link
+            href={`/hajj/pelerin?id=${id}`}
+            aria-label="Retour au dossier"
+            className="w-10 h-10 rounded-full bg-slate-100 text-slate-700 flex items-center justify-center active:scale-90 transition shrink-0"
+          >
+            <ArrowLeft size={18} />
+          </Link>
+
+          <div className="min-w-0 flex-1 text-center px-1">
+            <h1 className="text-sm font-black text-slate-900 tracking-tight leading-tight truncate">
+              Modifier le dossier
+            </h1>
+            <p className="text-[11px] font-semibold text-slate-400 truncate">
+              {formData.prenom} {formData.nom_complet}
+            </p>
+          </div>
+
+          <button
+            type="submit"
+            form="modifier-pelerin-mobile-form"
+            disabled={updating}
+            className="h-10 px-3.5 rounded-full bg-slate-900 text-white text-xs font-black flex items-center gap-1.5 active:scale-95 transition disabled:opacity-50 shrink-0 cursor-pointer"
+          >
+            {updating ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
+            <span>Enreg.</span>
+          </button>
+        </div>
+
+        {/* 2. ONGLETS SEGMENTÉS COLLANTS (Identité | Finances | Voyage | Jalons) */}
+        <div className="sticky top-[64px] z-20 bg-slate-50/95 backdrop-blur-md px-4 py-3">
+          <div className="grid grid-cols-4 gap-1 p-1 bg-slate-200/75 rounded-2xl">
+            {(
+              [
+                ['identite', 'Identité'],
+                ['finances', 'Finances'],
+                ['voyage', 'Voyage'],
+                ['jalons', 'Jalons'],
+              ] as const
+            ).map(([key, label]) => (
+              <button
+                key={key}
+                type="button"
+                onClick={() => setMobileTab(key)}
+                className={`h-9 rounded-xl text-[11px] font-black transition-all cursor-pointer ${
+                  mobileTab === key
+                    ? 'bg-white text-slate-900 shadow-xs'
+                    : 'text-slate-600'
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* 3. CORPS DU FORMULAIRE MOBILE */}
+        <div className="px-4 space-y-4">
+          {error && (
+            <div className="p-3.5 bg-rose-50 border border-rose-200 rounded-2xl flex items-start gap-2.5 text-rose-700 font-bold text-xs">
+              <AlertCircle size={17} className="shrink-0 mt-0.5" />
+              <span>{error}</span>
+            </div>
+          )}
+
+          {isGouvLocked && (
+            <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-xs font-bold text-emerald-800 leading-relaxed">
+              Dossier enregistré sur GOUV : seuls les montants financiers, les notes et les documents peuvent être mis à jour.
+            </div>
+          )}
+
+          <form
+            id="modifier-pelerin-mobile-form"
+            onSubmit={handleUpdate}
+            onInvalid={() => setMobileTab('identite')}
+            className="space-y-4"
+          >
+            {/* ── TAB 1 : IDENTITÉ & DOCUMENTS ── */}
+            <div className={mobileTab === 'identite' ? 'space-y-4' : 'hidden'}>
+              {/* Carte Photo Nusuk & Passeport */}
+              <div className="bg-white rounded-3xl border border-slate-100 shadow-xs p-5 space-y-4">
+                <div className="flex items-center justify-between gap-2">
+                  <h2 className="text-sm font-black text-slate-900">Photo Nusuk & Passeport</h2>
+                  {photoPreview && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setPhotoFile(null)
+                        setPhotoPreview(null)
+                        setCaptureInfo(null)
+                        handleInputChange('photo_url', '')
+                      }}
+                      className="text-[11px] font-bold text-rose-500 active:opacity-70 cursor-pointer"
+                    >
+                      Supprimer photo
+                    </button>
+                  )}
+                </div>
+
+                <div className="flex items-center gap-3.5">
+                  <div className="w-[4.5rem] h-24 rounded-2xl bg-slate-50 border-2 border-dashed border-slate-200 flex items-center justify-center overflow-hidden shrink-0 relative">
+                    {photoPreview ? (
+                      <img src={photoPreview} alt="Aperçu identité" className="w-full h-full object-cover" />
+                    ) : (
+                      <ImageIcon size={22} className="text-slate-300" />
+                    )}
+                    {photoPreview && photoFile && (
+                      <div className="absolute bottom-0 inset-x-0 bg-emerald-600 text-[8px] font-black text-white text-center py-0.5 uppercase">
+                        Nusuk OK
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="flex-1 space-y-2">
+                    {cropImageSrc && (
+                      <button
+                        type="button"
+                        onClick={openCropEditor}
+                        className="w-full h-10 px-3 bg-blue-50 active:bg-blue-100 text-blue-700 border border-blue-200 rounded-xl text-xs font-black flex items-center justify-center gap-1.5 transition cursor-pointer"
+                      >
+                        <Crop size={14} />
+                        <span>Ajuster la photo</span>
+                      </button>
+                    )}
+
+                    <label className="w-full h-10 px-3 bg-slate-100 active:bg-slate-200 text-slate-800 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer transition">
+                      <Camera size={14} />
+                      <span>{photoPreview ? 'Changer la photo' : 'Ajouter une photo'}</span>
+                      <input type="file" className="hidden" accept="image/*" onChange={handlePhotoSelect} />
+                    </label>
+                  </div>
+                </div>
+
+                {canCaptureFromPassport && (
+                  <button
+                    type="button"
+                    onClick={captureFromPassport}
+                    disabled={capturing}
+                    className="w-full h-11 px-3.5 bg-blue-600 active:bg-blue-700 text-white rounded-2xl text-xs font-black flex items-center justify-center gap-2 transition disabled:opacity-50 cursor-pointer"
+                  >
+                    {capturing ? <Loader2 size={15} className="animate-spin" /> : <ScanLine size={15} />}
+                    <span>
+                      {capturing
+                        ? 'Extraction en cours…'
+                        : file
+                        ? 'Extraire photo du nouveau passeport'
+                        : 'Extraire photo du passeport enregistré'}
+                    </span>
+                  </button>
+                )}
+
+                {captureInfo && (
+                  <p
+                    className={`px-3.5 py-2.5 rounded-2xl text-xs font-bold border ${
+                      captureInfo.type === 'success'
+                        ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                        : captureInfo.type === 'info'
+                        ? 'bg-blue-50 text-blue-700 border-blue-200'
+                        : 'bg-rose-50 text-rose-700 border-rose-200'
+                    }`}
+                  >
+                    {captureInfo.text}
+                  </p>
+                )}
+
+                <div className="pt-3 border-t border-slate-100">
+                  <label className="w-full min-h-[52px] px-3.5 py-2.5 rounded-2xl border border-dashed border-slate-300 bg-slate-50 active:bg-slate-100 flex items-center gap-3 cursor-pointer transition">
+                    {file ? (
+                      <FileCheck size={18} className="text-blue-600 shrink-0" />
+                    ) : (
+                      <Upload size={18} className="text-slate-400 shrink-0" />
+                    )}
+                    <div className="min-w-0 flex-1">
+                      <p className="text-xs font-bold text-slate-800 truncate">
+                        {file
+                          ? file.name
+                          : formData.document_url
+                          ? 'Remplacer le scan du passeport'
+                          : 'Joindre le scan du passeport'}
+                      </p>
+                      <p className="text-[10px] text-slate-400">Image ou PDF</p>
+                    </div>
+                    <input
+                      type="file"
+                      className="hidden"
+                      accept="image/*,.pdf"
+                      onChange={(e) => setFile(e.target.files?.[0] || null)}
+                    />
+                  </label>
+                </div>
+              </div>
+
+              {/* Carte État Civil */}
+              <div className="bg-white rounded-3xl border border-slate-100 shadow-xs p-5 space-y-4">
+                <h2 className="text-sm font-black text-slate-900">État civil & Passeport</h2>
+
+                <div>
+                  <label className="text-[11px] font-black uppercase text-slate-400 block mb-1.5">
+                    Prénom
+                  </label>
+                  <input
+                    type="text"
+                    value={formData.prenom}
+                    onChange={(e) => handleInputChange('prenom', e.target.value)}
+                    disabled={isFieldLockedForGouv('prenom')}
+                    className={`w-full h-12 px-4 rounded-2xl border text-sm font-bold outline-none transition ${
+                      isFieldLockedForGouv('prenom')
+                        ? 'opacity-60 cursor-not-allowed bg-slate-100 border-slate-200 text-slate-500'
+                        : 'bg-slate-50 border-slate-200 text-slate-900 focus:bg-white focus:border-blue-600'
+                    }`}
+                  />
+                </div>
+
+                <div>
+                  <label className="text-[11px] font-black uppercase text-slate-400 block mb-1.5">
+                    Nom complet *
+                  </label>
+                  <input
+                    type="text"
+                    value={formData.nom_complet}
+                    onChange={(e) => handleInputChange('nom_complet', e.target.value)}
+                    disabled={isFieldLockedForGouv('nom_complet')}
+                    required
+                    className={`w-full h-12 px-4 rounded-2xl border text-sm font-bold outline-none transition ${
+                      isFieldLockedForGouv('nom_complet')
+                        ? 'opacity-60 cursor-not-allowed bg-slate-100 border-slate-200 text-slate-500'
+                        : 'bg-slate-50 border-slate-200 text-slate-900 focus:bg-white focus:border-blue-600'
+                    }`}
+                  />
+                </div>
+
+                <div>
+                  <label className="text-[11px] font-black uppercase text-slate-400 block mb-1.5">
+                    Sexe
+                  </label>
+                  <div className="grid grid-cols-2 gap-2">
+                    {(['HOMME', 'FEMME'] as const).map((g) => {
+                      const active = formData.sexe === g
+                      const locked = isFieldLockedForGouv('sexe')
+                      return (
+                        <button
+                          key={g}
+                          type="button"
+                          disabled={locked}
+                          onClick={() => handleInputChange('sexe', active ? '' : g)}
+                          className={`h-11 rounded-2xl text-xs font-black transition cursor-pointer disabled:opacity-50 ${
+                            active
+                              ? 'bg-slate-900 text-white shadow-xs'
+                              : 'bg-slate-100 text-slate-600'
+                          }`}
+                        >
+                          {g === 'HOMME' ? 'Homme' : 'Femme'}
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-[11px] font-black uppercase text-slate-400 block mb-1.5">
+                      Téléphone
+                    </label>
+                    <input
+                      type="tel"
+                      value={formData.telephone_pelerin}
+                      onChange={(e) => handleInputChange('telephone_pelerin', e.target.value)}
+                      disabled={isFieldLockedForGouv('telephone_pelerin')}
+                      className={`w-full h-12 px-3.5 rounded-2xl border text-sm font-bold outline-none ${
+                        isFieldLockedForGouv('telephone_pelerin')
+                          ? 'opacity-60 bg-slate-100 border-slate-200 text-slate-500'
+                          : 'bg-slate-50 border-slate-200 text-slate-900 focus:bg-white focus:border-blue-600'
+                      }`}
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[11px] font-black uppercase text-slate-400 block mb-1.5">
+                      Naissance
+                    </label>
+                    <input
+                      type="date"
+                      value={formData.date_naissance}
+                      onChange={(e) => handleInputChange('date_naissance', e.target.value)}
+                      disabled={isFieldLockedForGouv('date_naissance')}
+                      className={`w-full h-12 px-3 rounded-2xl border text-xs font-bold outline-none ${
+                        isFieldLockedForGouv('date_naissance')
+                          ? 'opacity-60 bg-slate-100 border-slate-200 text-slate-500'
+                          : 'bg-slate-50 border-slate-200 text-slate-900 focus:bg-white focus:border-blue-600'
+                      }`}
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-[11px] font-black uppercase text-slate-400 block mb-1.5">
+                      N° Passeport *
+                    </label>
+                    <input
+                      type="text"
+                      value={formData.num_passeport}
+                      onChange={(e) => handleInputChange('num_passeport', e.target.value)}
+                      disabled={isFieldLockedForGouv('num_passeport')}
+                      required
+                      className={`w-full h-12 px-3.5 rounded-2xl border font-mono text-sm font-bold outline-none ${
+                        isFieldLockedForGouv('num_passeport')
+                          ? 'opacity-60 bg-slate-100 border-slate-200 text-slate-500'
+                          : 'bg-slate-50 border-slate-200 text-slate-900 focus:bg-white focus:border-blue-600'
+                      }`}
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[11px] font-black uppercase text-slate-400 block mb-1.5">
+                      Expiration
+                    </label>
+                    <input
+                      type="date"
+                      value={formData.date_expiration}
+                      onChange={(e) => handleInputChange('date_expiration', e.target.value)}
+                      disabled={isFieldLockedForGouv('date_expiration')}
+                      className={`w-full h-12 px-3 rounded-2xl border text-xs font-bold outline-none ${
+                        isFieldLockedForGouv('date_expiration')
+                          ? 'opacity-60 bg-slate-100 border-slate-200 text-slate-500'
+                          : 'bg-slate-50 border-slate-200 text-slate-900 focus:bg-white focus:border-blue-600'
+                      }`}
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-[11px] font-black uppercase text-slate-400 block mb-1.5">
+                      Référence
+                    </label>
+                    <input
+                      type="text"
+                      value={formData.reference}
+                      onChange={(e) => handleInputChange('reference', e.target.value)}
+                      disabled={isFieldLockedForGouv('reference')}
+                      className={`w-full h-12 px-3.5 rounded-2xl border text-sm font-bold outline-none ${
+                        isFieldLockedForGouv('reference')
+                          ? 'opacity-60 bg-slate-100 border-slate-200 text-slate-500'
+                          : 'bg-slate-50 border-slate-200 text-slate-900 focus:bg-white focus:border-blue-600'
+                      }`}
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[11px] font-black uppercase text-slate-400 block mb-1.5">
+                      Campagne
+                    </label>
+                    <select
+                      value={formData.campagne}
+                      onChange={(e) => handleInputChange('campagne', Number(e.target.value))}
+                      disabled={isFieldLockedForGouv('campagne')}
+                      className={`w-full h-12 px-3.5 rounded-2xl border text-sm font-bold outline-none ${
+                        isFieldLockedForGouv('campagne')
+                          ? 'opacity-60 bg-slate-100 border-slate-200 text-slate-500'
+                          : 'bg-slate-50 border-slate-200 text-slate-900 focus:bg-white focus:border-blue-600'
+                      }`}
+                    >
+                      {(() => {
+                        const start = 2024
+                        const end = new Date().getFullYear() + 5
+                        const opts: number[] = []
+                        for (let y = start; y <= end; y++) opts.push(y)
+                        return opts.map((y) => (
+                          <option key={y} value={y}>
+                            {y}
+                          </option>
+                        ))
+                      })()}
+                    </select>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="text-[11px] font-black uppercase text-slate-400 block mb-1.5">
+                    Date d'inscription
+                  </label>
+                  <input
+                    type="date"
+                    value={formData.date_inscription}
+                    onChange={(e) => handleInputChange('date_inscription', e.target.value)}
+                    disabled={isFieldLockedForGouv('date_inscription')}
+                    className={`w-full h-12 px-3.5 rounded-2xl border text-xs font-bold outline-none ${
+                      isFieldLockedForGouv('date_inscription')
+                        ? 'opacity-60 bg-slate-100 border-slate-200 text-slate-500'
+                        : 'bg-slate-50 border-slate-200 text-slate-900 focus:bg-white focus:border-blue-600'
+                    }`}
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* ── TAB 2 : FINANCES, AGENCE & NOTES ── */}
+            <div className={mobileTab === 'finances' ? 'space-y-4' : 'hidden'}>
+              <div className="bg-white rounded-3xl border border-slate-100 shadow-xs p-5 space-y-4">
+                <h2 className="text-sm font-black text-slate-900">Tarification & Devise</h2>
+
+                <div>
+                  <label className="text-[11px] font-black uppercase text-slate-400 block mb-1.5">
+                    Devise du dossier
+                  </label>
+                  <div className="grid grid-cols-3 gap-1.5 p-1 bg-slate-100 rounded-2xl">
+                    {HAJJ_CURRENCIES.map((cur) => {
+                      const active = formData.devise === cur.code
+                      return (
+                        <button
+                          key={cur.code}
+                          type="button"
+                          onClick={() => handleInputChange('devise', cur.code)}
+                          className={`h-10 rounded-xl text-xs font-black transition cursor-pointer ${
+                            active ? cur.pillActiveClass : 'text-slate-600'
+                          }`}
+                        >
+                          {cur.shortLabel}
+                        </button>
+                      )
+                    })}
+                  </div>
+                  <p className="text-[11px] text-slate-400 font-medium mt-1.5">
+                    Synchronise automatiquement tous les versements dans la comptabilité de cette devise.
+                  </p>
+                </div>
+
+                <div>
+                  <label className="text-[11px] font-black uppercase text-slate-400 block mb-1.5">
+                    Nom du Package / Offre
+                  </label>
+                  <input
+                    type="text"
+                    value={formData.nom_package}
+                    onChange={(e) => handleInputChange('nom_package', e.target.value)}
+                    className="w-full h-12 px-4 rounded-2xl border border-slate-200 bg-slate-50 text-slate-900 font-bold text-sm focus:bg-white focus:border-blue-600 outline-none"
+                  />
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="bg-slate-900 p-3.5 rounded-2xl">
+                    <label className="text-[10px] font-black text-slate-400 uppercase block mb-1">
+                      Prix Package ({getHajjCurrencySymbol(formData.devise)})
+                    </label>
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      pattern="[0-9\s]*"
+                      value={prixPackageInput}
+                      onChange={(e) => {
+                        setPrixPackageInput(formatAmount(e.target.value))
+                        handleInputChange('prix_package', parseAmount(e.target.value))
+                      }}
+                      className="w-full bg-transparent text-white font-black text-base tabular-nums outline-none"
+                    />
+                  </div>
+                  <div className="bg-emerald-600 p-3.5 rounded-2xl">
+                    <label className="text-[10px] font-black text-emerald-100 uppercase block mb-1">
+                      Total Payé ({getHajjCurrencySymbol(formData.devise)})
+                    </label>
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      pattern="[0-9\s]*"
+                      value={totalPayeInput}
+                      onChange={(e) => {
+                        setTotalPayeInput(formatAmount(e.target.value))
+                        handleInputChange('total_paye', parseAmount(e.target.value))
+                      }}
+                      className="w-full bg-transparent text-white font-black text-base tabular-nums outline-none"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="text-[11px] font-black uppercase text-slate-400 block mb-1.5">
+                    Agence ou Personne associée
+                  </label>
+                  <input
+                    type="text"
+                    value={formData.agence_ou_personne_associee}
+                    onChange={(e) => handleInputChange('agence_ou_personne_associee', e.target.value)}
+                    disabled={isFieldLockedForGouv('agence_ou_personne_associee')}
+                    className={`w-full h-12 px-4 rounded-2xl border text-sm font-bold outline-none ${
+                      isFieldLockedForGouv('agence_ou_personne_associee')
+                        ? 'opacity-60 bg-slate-100 border-slate-200 text-slate-500'
+                        : 'bg-slate-50 border-slate-200 text-slate-900 focus:bg-white focus:border-blue-600'
+                    }`}
+                  />
+                </div>
+              </div>
+
+              <div className="bg-white rounded-3xl border border-slate-100 shadow-xs p-5 space-y-2.5">
+                <h2 className="text-sm font-black text-slate-900">Notes & Remarques</h2>
+                <textarea
+                  rows={4}
+                  value={formData.notes}
+                  onChange={(e) => handleInputChange('notes', e.target.value)}
+                  placeholder="Régime alimentaire, état de santé particulier, demandes spéciales…"
+                  className="w-full p-3.5 rounded-2xl border border-slate-200 bg-slate-50 text-slate-900 font-medium text-sm outline-none focus:bg-white focus:border-blue-600 resize-none"
+                />
+              </div>
+            </div>
+
+            {/* ── TAB 3 : VOYAGE, HÔTELS & FORMATION ── */}
+            <div className={mobileTab === 'voyage' ? 'space-y-4' : 'hidden'}>
+              <div className="bg-white rounded-3xl border border-slate-100 shadow-xs p-5 space-y-4">
+                <h2 className="text-sm font-black text-slate-900">Vols Aller & Retour</h2>
+
+                <div>
+                  <label className="text-[11px] font-black uppercase text-slate-400 block mb-1.5">
+                    Date & Heure Vol Aller
+                  </label>
+                  <input
+                    type="datetime-local"
+                    value={formData.date_depart}
+                    onChange={(e) => handleInputChange('date_depart', e.target.value)}
+                    disabled={isFieldLockedForGouv('date_depart')}
+                    className={`w-full h-12 px-3.5 rounded-2xl border text-sm font-bold outline-none ${
+                      isFieldLockedForGouv('date_depart')
+                        ? 'opacity-60 bg-slate-100 border-slate-200 text-slate-500'
+                        : 'bg-slate-50 border-slate-200 text-slate-900 focus:bg-white focus:border-blue-600'
+                    }`}
+                  />
+                </div>
+
+                <div>
+                  <label className="text-[11px] font-black uppercase text-slate-400 block mb-1.5">
+                    Date & Heure Vol Retour
+                  </label>
+                  <input
+                    type="datetime-local"
+                    value={formData.date_retour}
+                    onChange={(e) => handleInputChange('date_retour', e.target.value)}
+                    disabled={isFieldLockedForGouv('date_retour')}
+                    className={`w-full h-12 px-3.5 rounded-2xl border text-sm font-bold outline-none ${
+                      isFieldLockedForGouv('date_retour')
+                        ? 'opacity-60 bg-slate-100 border-slate-200 text-slate-500'
+                        : 'bg-slate-50 border-slate-200 text-slate-900 focus:bg-white focus:border-blue-600'
+                    }`}
+                  />
+                </div>
+              </div>
+
+              <div className="bg-white rounded-3xl border border-slate-100 shadow-xs p-5 space-y-4">
+                <h2 className="text-sm font-black text-slate-900">Hébergements & Formation</h2>
+
+                <div>
+                  <label className="text-[11px] font-black uppercase text-slate-400 block mb-1.5">
+                    Hôtel La Mecque
+                  </label>
+                  <input
+                    type="text"
+                    value={formData.hotel_mecque}
+                    onChange={(e) => handleInputChange('hotel_mecque', e.target.value)}
+                    disabled={isFieldLockedForGouv('hotel_mecque')}
+                    className={`w-full h-12 px-4 rounded-2xl border text-sm font-bold outline-none ${
+                      isFieldLockedForGouv('hotel_mecque')
+                        ? 'opacity-60 bg-slate-100 border-slate-200 text-slate-500'
+                        : 'bg-slate-50 border-slate-200 text-slate-900 focus:bg-white focus:border-blue-600'
+                    }`}
+                  />
+                </div>
+
+                <div>
+                  <label className="text-[11px] font-black uppercase text-slate-400 block mb-1.5">
+                    Hôtel Médine
+                  </label>
+                  <input
+                    type="text"
+                    value={formData.hotel_medine}
+                    onChange={(e) => handleInputChange('hotel_medine', e.target.value)}
+                    disabled={isFieldLockedForGouv('hotel_medine')}
+                    className={`w-full h-12 px-4 rounded-2xl border text-sm font-bold outline-none ${
+                      isFieldLockedForGouv('hotel_medine')
+                        ? 'opacity-60 bg-slate-100 border-slate-200 text-slate-500'
+                        : 'bg-slate-50 border-slate-200 text-slate-900 focus:bg-white focus:border-blue-600'
+                    }`}
+                  />
+                </div>
+
+                <div>
+                  <label className="text-[11px] font-black uppercase text-slate-400 block mb-1.5">
+                    Guide / Encadreur
+                  </label>
+                  <input
+                    type="text"
+                    value={formData.groupe_encadrement}
+                    onChange={(e) => handleInputChange('groupe_encadrement', e.target.value)}
+                    disabled={isFieldLockedForGouv('groupe_encadrement')}
+                    className={`w-full h-12 px-4 rounded-2xl border text-sm font-bold outline-none ${
+                      isFieldLockedForGouv('groupe_encadrement')
+                        ? 'opacity-60 bg-slate-100 border-slate-200 text-slate-500'
+                        : 'bg-slate-50 border-slate-200 text-slate-900 focus:bg-white focus:border-blue-600'
+                    }`}
+                  />
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-[11px] font-black uppercase text-slate-400 block mb-1.5">
+                      Date formation
+                    </label>
+                    <input
+                      type="date"
+                      value={formData.date_formation}
+                      onChange={(e) => handleInputChange('date_formation', e.target.value)}
+                      disabled={isFieldLockedForGouv('date_formation')}
+                      className={`w-full h-12 px-3 rounded-2xl border text-xs font-bold outline-none ${
+                        isFieldLockedForGouv('date_formation')
+                          ? 'opacity-60 bg-slate-100 border-slate-200 text-slate-500'
+                          : 'bg-slate-50 border-slate-200 text-slate-900 focus:bg-white focus:border-blue-600'
+                      }`}
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[11px] font-black uppercase text-slate-400 block mb-1.5">
+                      Groupe formation
+                    </label>
+                    <input
+                      type="text"
+                      value={formData.groupe_formation}
+                      onChange={(e) => handleInputChange('groupe_formation', e.target.value)}
+                      disabled={isFieldLockedForGouv('groupe_formation')}
+                      className={`w-full h-12 px-3.5 rounded-2xl border text-sm font-bold outline-none ${
+                        isFieldLockedForGouv('groupe_formation')
+                          ? 'opacity-60 bg-slate-100 border-slate-200 text-slate-500'
+                          : 'bg-slate-50 border-slate-200 text-slate-900 focus:bg-white focus:border-blue-600'
+                      }`}
+                    />
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* ── TAB 4 : JALONS & STATUTS (Liste style Réglages iOS) ── */}
+            <div className={mobileTab === 'jalons' ? 'space-y-4' : 'hidden'}>
+              <div className="bg-white rounded-3xl border border-slate-100 shadow-xs overflow-hidden divide-y divide-slate-100">
+                {[
+                  { label: 'Carnet Vaccinal Validé', field: 'vacciné' as const, checked: formData.vacciné, disabled: isGouvLocked },
+                  { label: 'Visite Médicale OK', field: 'visite_medicale' as const, checked: formData.visite_medicale, disabled: isGouvLocked },
+                  { label: 'Formation Suivie', field: 'formation_suivie' as const, checked: formData.formation_suivie, disabled: isGouvLocked },
+                  { label: 'Chambres Assignées (Hôtel)', field: 'hotel_statut' as const, checked: formData.hotel_statut, disabled: isGouvLocked },
+                  { label: 'Visa Hajj Obtenu', field: 'visa_obtenu' as const, checked: formData.visa_obtenu, disabled: isGouvLocked },
+                  {
+                    label: sessionLocked ? 'GOUV (verrouillé)' : 'Enregistré Gouv.ml',
+                    field: 'sur_plateforme_gouv' as const,
+                    checked: formData.sur_plateforme_gouv,
+                    disabled: sessionLocked || isGouvLocked,
+                  },
+                  { label: 'Inscrit Nusuk (KSA)', field: 'sur_plateforme_nusuk' as const, checked: formData.sur_plateforme_nusuk, disabled: isGouvLocked },
+                ].map((item) => (
+                  <div
+                    key={item.field}
+                    onClick={() => !item.disabled && handleInputChange(item.field, !item.checked)}
+                    className={`px-5 py-4 flex items-center justify-between gap-3 select-none ${
+                      item.disabled ? 'bg-amber-50/50 cursor-not-allowed' : 'active:bg-slate-50 cursor-pointer'
+                    }`}
+                  >
+                    <span className={`text-sm font-bold ${item.disabled ? 'text-amber-700' : 'text-slate-800'}`}>
+                      {item.label}
+                    </span>
+                    <div
+                      className={`w-12 h-6 flex items-center rounded-full p-1 transition-all duration-300 shrink-0 ${
+                        item.checked ? 'bg-blue-600' : 'bg-slate-300'
+                      }`}
+                    >
+                      <div
+                        className={`bg-white w-4 h-4 rounded-full shadow-md transform transition-transform duration-300 ${
+                          item.checked ? 'translate-x-6' : 'translate-x-0'
+                        }`}
+                      />
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {sessionLocked && (
+                <p className="text-xs font-bold text-amber-700 bg-amber-50 border border-amber-200 rounded-2xl px-4 py-3">
+                  La session GOUV est fermée : ce statut est verrouillé dans toute l’application Hajj.
+                </p>
+              )}
+            </div>
+
+            {/* Bouton principal Sauvegarder */}
+            <button
+              type="submit"
+              disabled={updating}
+              className="w-full h-14 rounded-2xl bg-slate-900 active:bg-blue-600 text-white font-black text-base shadow-md flex items-center justify-center gap-2.5 transition disabled:opacity-50 cursor-pointer"
+            >
+              {updating ? <Loader2 className="animate-spin" size={20} /> : <Save size={20} />}
+              <span>{updating ? 'Enregistrement…' : 'Sauvegarder les modifications'}</span>
+            </button>
+          </form>
+        </div>
+      </div>
+
+      {/* =================================================================== */}
+      {/* 💻 VERSION PC / TABLETTE (100% INCHANGÉE `hidden md:block`)         */}
+      {/* =================================================================== */}
+      <div className="hidden md:block max-w-7xl mx-auto px-4 py-6 md:py-10">
       <Link href={`/hajj/pelerin?id=${id}`} className="flex items-center gap-2 text-gray-500 hover:text-blue-600 font-bold mb-6 transition group text-sm w-fit">
         <ArrowLeft size={18} className="group-hover:-translate-x-1 transition-transform" /> Retour au dossier
       </Link>
@@ -1328,6 +2040,7 @@ export default function ModifierPelerin() {
             {updating ? "ENREGISTREMENT DES DONNÉES..." : "SAUVEGARDER LES MODIFICATIONS"}
           </button>
         </form>
+      </div>
       </div>
 
       {/* ── 🎯 MODAL : RECADRAGE VISAGE NUSUK (480x680 px) ── */}

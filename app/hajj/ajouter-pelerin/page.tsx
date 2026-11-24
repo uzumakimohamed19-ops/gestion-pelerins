@@ -6,11 +6,15 @@ import { supabase, getUser } from '@/lib/supabase'
 import { 
   ScanLine, Loader2, Save, Upload, RotateCcw, Smartphone, 
   CalendarDays, UserRound, FileText, Camera, Image as ImageIcon, 
-  Crop, Check, X, Move, Keyboard, Radio, FileCheck, Printer
+  Crop, Check, X, Move, Keyboard, Radio, FileCheck, Printer,
+  ArrowLeft, ChevronRight
 } from 'lucide-react'
+import Link from 'next/link'
 import { uploadPassportFile } from '@/lib/hajjPassport'
 import { HAJJ_CURRENCIES, formatHajjMoney, getHajjCurrencySymbol, type HajjCurrency } from '@/lib/hajjCurrency'
 import { useWorkProfile } from '@/lib/ProfileContext'
+import { useUI } from '@/lib/UIContext'
+import { useYear } from '@/lib/YearContext'
 import { Capacitor, CapacitorHttp } from '@capacitor/core'
 import * as faceapi from '@vladmandic/face-api'
 
@@ -750,6 +754,9 @@ async function postMrzOcr(imageBase64: string): Promise<any> {
 
 export default function AjouterPelerin() {
   const { profile: workProfile } = useWorkProfile()
+  const { setHideNavbar } = useUI()
+  const { selectedYear } = useYear()
+  const [mobileScannerSheetOpen, setMobileScannerSheetOpen] = useState(false)
   const [nom, setNom] = useState('')
   const [prenom, setPrenom] = useState('')
   const [reference, setReference] = useState('')
@@ -759,7 +766,9 @@ export default function AjouterPelerin() {
   const [dateNaissance, setDateNaissance] = useState('')
   const [dateExpiration, setDateExpiration] = useState('')
   const [dateInscription, setDateInscription] = useState(new Date().toISOString().split('T')[0])
-  const [campagne, setCampagne] = useState<number | null>(new Date().getFullYear())
+  const [campagne, setCampagne] = useState<number | null>(() =>
+    selectedYear === 'all' ? new Date().getFullYear() : Number(selectedYear)
+  )
   const [associe, setAssocie] = useState('')
   const [total, setTotal] = useState(0)
   const [totalInput, setTotalInput] = useState('')
@@ -865,6 +874,18 @@ export default function AjouterPelerin() {
     const localAgenceId = localProfiles?.[0]?.agence_id
     if (localAgenceId) setAgenceId(localAgenceId)
   }, [localProfiles])
+
+  // Synchronisation automatique de la campagne avec l'année sélectionnée depuis le dashboard
+  useEffect(() => {
+    setCampagne(selectedYear === 'all' ? new Date().getFullYear() : Number(selectedYear))
+  }, [selectedYear])
+
+  useEffect(() => {
+    setHideNavbar(
+      Boolean(mrzPreviewModalOpen || cropModalOpen || passportCropModalOpen || mobileScannerSheetOpen)
+    )
+    return () => setHideNavbar(false)
+  }, [mrzPreviewModalOpen, cropModalOpen, passportCropModalOpen, mobileScannerSheetOpen, setHideNavbar])
 
   const isPassportExpiringSoon = (() => {
     if (!dateExpiration) return false
@@ -1075,7 +1096,7 @@ export default function AjouterPelerin() {
   const resetForm = () => {
     setNom(''); setPrenom(''); setReference(''); setPasseport(''); setPhone(''); setSexe(''); setDateNaissance('')
     setDateExpiration(''); setDateInscription(new Date().toISOString().split('T')[0])
-    setCampagne(new Date().getFullYear())
+    setCampagne(selectedYear === 'all' ? new Date().getFullYear() : Number(selectedYear))
     setAssocie(''); setTotal(0); setTotalInput(''); setPaye(0); setPayeInput(''); setNomPackage(''); setFileToUpload(null)
     setNotes(''); setPhotoFile(null); setPhotoPreview(null); setCropImageSrc(null); setMrzBuffer('')
     setMessage({ text: '', type: '' })
@@ -1497,8 +1518,674 @@ export default function AjouterPelerin() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 flex items-center justify-center p-0 md:p-6 lg:p-8">
-      <div className="w-full max-w-6xl">
+    <div className="min-h-screen bg-slate-50 md:bg-gray-50 md:flex md:items-center md:justify-center p-0 md:p-6 lg:p-8">
+      {/* =================================================================== */}
+      {/* 📱 VERSION MOBILE NATIVE — EN-TÊTE BLANC PUR (`md:hidden`)          */}
+      {/* =================================================================== */}
+      <div className="md:hidden pb-28">
+        {/* 1. BARRE SUPÉRIEURE BLANCHE COLLANTE */}
+        <div className="bg-white/95 backdrop-blur-md border-b border-slate-100 px-4 py-3 sticky top-0 z-30 flex items-center justify-between gap-2">
+          <Link
+            href="/hajj/liste-pelerins"
+            aria-label="Retour aux dossiers"
+            className="w-10 h-10 rounded-full bg-slate-100 text-slate-700 flex items-center justify-center active:scale-90 transition shrink-0"
+          >
+            <ArrowLeft size={18} />
+          </Link>
+
+          <div className="min-w-0 flex-1 text-center px-1">
+            <h1 className="text-base font-black text-slate-900 tracking-tight leading-tight truncate">
+              Nouveau pèlerin
+            </h1>
+            <p className="text-[11px] font-semibold text-slate-400 truncate">
+              {campagne ? `Campagne ${campagne}` : 'Inscription Hajj'}
+            </p>
+          </div>
+
+          <button
+            type="button"
+            onClick={resetForm}
+            aria-label="Vider le formulaire"
+            className="w-10 h-10 rounded-full bg-slate-100 text-slate-500 active:bg-rose-50 active:text-rose-600 flex items-center justify-center active:scale-90 transition shrink-0 cursor-pointer"
+          >
+            <RotateCcw size={17} />
+          </button>
+        </div>
+
+        <div className="px-4 pt-4 space-y-4">
+          {/* Bannière de statut immédiatement visible après un scan ou une action */}
+          {message.text && (
+            <div
+              className={`p-3.5 rounded-2xl text-xs font-bold border leading-relaxed ${
+                message.type === 'success'
+                  ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                  : message.type === 'info'
+                  ? 'bg-blue-50 text-blue-800 border-blue-200'
+                  : 'bg-rose-50 text-rose-800 border-rose-200'
+              }`}
+            >
+              {message.text}
+            </div>
+          )}
+
+          {/* 2. CARTE SCAN PASSEPORT (1 TAP MOBILE) */}
+          <div className="bg-white rounded-3xl border border-slate-100 shadow-xs p-4 space-y-3">
+            <label className="w-full p-4 rounded-2xl bg-slate-900 text-white flex items-center gap-3.5 active:scale-[0.98] transition cursor-pointer shadow-sm">
+              <div className="w-12 h-12 rounded-2xl bg-white/15 flex items-center justify-center shrink-0">
+                {isScanning || isTwainScanning ? (
+                  <Loader2 size={22} className="animate-spin text-blue-300" />
+                ) : (
+                  <ScanLine size={22} className="text-blue-300" />
+                )}
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-black leading-tight">
+                  {isScanning ? 'Lecture du passeport…' : 'Scanner le passeport'}
+                </p>
+                <p className="text-[11px] text-slate-300 font-medium mt-0.5 leading-snug">
+                  Photo ou galerie • Lecture MRZ & portrait 480×680 auto
+                </p>
+              </div>
+              <ChevronRight size={18} className="text-slate-400 shrink-0" />
+              <input
+                type="file"
+                className="hidden"
+                accept="image/*"
+                onChange={handleAutoFill}
+                disabled={isScanning}
+              />
+            </label>
+
+            <div className="flex items-center justify-between gap-2 px-1">
+              <span className="text-[11px] font-semibold text-slate-400">
+                Scanner externe ou douchette ?
+              </span>
+              <button
+                type="button"
+                onClick={() => setMobileScannerSheetOpen(true)}
+                className="text-xs font-black text-blue-600 active:opacity-70 py-1 cursor-pointer"
+              >
+                Autres modes →
+              </button>
+            </div>
+
+            {showPhysicalScannerInput && (
+              <div className="p-3.5 bg-emerald-50/60 rounded-2xl border border-emerald-200 space-y-2 animate-in fade-in">
+                <div className="flex items-center justify-between text-[11px] font-black text-emerald-800">
+                  <span className="flex items-center gap-1.5">
+                    <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping inline-block" />
+                    Prêt pour la douchette
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setShowPhysicalScannerInput(false)}
+                    className="w-7 h-7 rounded-full bg-white text-slate-500 flex items-center justify-center cursor-pointer"
+                  >
+                    <X size={14} />
+                  </button>
+                </div>
+                <input
+                  autoFocus
+                  type="text"
+                  value={mrzBuffer}
+                  onChange={handlePhysicalScanChange}
+                  onKeyDown={handlePhysicalScanKeyDown}
+                  placeholder="Glissez le passeport dans la douchette…"
+                  className="w-full h-11 px-3.5 bg-white border border-emerald-200 rounded-xl text-xs font-mono font-bold text-slate-900 outline-none focus:border-emerald-500"
+                />
+              </div>
+            )}
+          </div>
+
+          {/* 3. CARTE PHOTO NUSUK (480×680) & COPIE DU PASSEPORT */}
+          <div className="bg-white rounded-3xl border border-slate-100 shadow-xs p-4 space-y-4">
+            {/* Photo Nusuk */}
+            <div className="space-y-3">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-xs font-black text-slate-900 flex items-center gap-1.5">
+                  <Camera size={15} className="text-blue-600" />
+                  Photo Nusuk (480×680)
+                </span>
+                {photoPreview && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setPhotoFile(null)
+                      setPhotoPreview(null)
+                    }}
+                    className="text-[11px] font-bold text-rose-500 active:opacity-70 cursor-pointer"
+                  >
+                    Supprimer
+                  </button>
+                )}
+              </div>
+
+              <div className="flex items-center gap-3.5">
+                <div className="w-20 h-28 rounded-2xl border-2 border-dashed border-slate-200 bg-slate-50 flex items-center justify-center overflow-hidden shrink-0 relative">
+                  {photoPreview ? (
+                    <img src={photoPreview} alt="Aperçu Nusuk" className="w-full h-full object-cover" />
+                  ) : (
+                    <ImageIcon size={24} className="text-slate-300" />
+                  )}
+                  {photoPreview && (
+                    <div className="absolute bottom-0 inset-x-0 bg-emerald-600 text-[9px] font-black text-white text-center py-0.5 uppercase">
+                      Nusuk OK
+                    </div>
+                  )}
+                </div>
+
+                <div className="flex-1 space-y-2">
+                  {cropImageSrc && (
+                    <button
+                      type="button"
+                      onClick={() => setCropModalOpen(true)}
+                      className="w-full h-10 px-3 bg-blue-50 active:bg-blue-100 text-blue-700 border border-blue-200/80 rounded-xl text-xs font-black flex items-center justify-center gap-1.5 transition cursor-pointer"
+                    >
+                      <Crop size={14} />
+                      <span>Ajuster la photo</span>
+                    </button>
+                  )}
+
+                  <label className="w-full h-10 px-3 bg-slate-100 active:bg-slate-200 text-slate-800 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer transition">
+                    <Upload size={14} />
+                    <span>{photoFile ? 'Remplacer' : 'Choisir une photo'}</span>
+                    <input
+                      type="file"
+                      className="hidden"
+                      accept="image/*"
+                      onChange={handlePhotoFileChange}
+                    />
+                  </label>
+                  <p className="text-[10px] text-slate-400 font-medium leading-tight">
+                    480×680 px (&lt; 100 Ko) • Visage isolé auto
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* Copie du passeport */}
+            <div className="pt-3.5 border-t border-slate-100 space-y-2.5">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-xs font-black text-slate-900 flex items-center gap-1.5">
+                  <FileCheck size={15} className="text-blue-600" />
+                  Copie du passeport
+                </span>
+                {fileToUpload && (
+                  <span className="text-[10px] font-black text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full">
+                    {(fileToUpload.size / 1024).toFixed(0)} Ko • Prêt
+                  </span>
+                )}
+              </div>
+
+              <label className="w-full min-h-[52px] px-3.5 py-2.5 bg-slate-50 rounded-2xl border border-dashed border-slate-300 active:bg-slate-100 flex items-center gap-3 cursor-pointer transition">
+                <Upload size={17} className="text-blue-600 shrink-0" />
+                <div className="min-w-0 flex-1">
+                  <p className="text-xs font-bold text-slate-800 truncate">
+                    {fileToUpload ? fileToUpload.name : 'Joindre la copie du passeport'}
+                  </p>
+                  <p className="text-[10px] text-slate-400">Compression Nusuk &lt; 400 Ko</p>
+                </div>
+                <input
+                  type="file"
+                  className="hidden"
+                  accept="image/*,.pdf"
+                  onChange={handlePassportFileChange}
+                />
+              </label>
+
+              {cropImageSrc && (
+                <button
+                  type="button"
+                  onClick={openPassportCropper}
+                  className="w-full h-10 px-3 bg-white active:bg-slate-50 text-slate-700 border border-slate-200 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition cursor-pointer"
+                >
+                  <Crop size={14} className="text-blue-600" />
+                  <span>Recadrer le passeport</span>
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* 4. FORMULAIRE STRUCTURÉ PAR CARTES AÉRÉES */}
+          <form onSubmit={handleSubmit} className="space-y-4">
+            {/* Carte Identité */}
+            <div className="bg-white rounded-3xl border border-slate-100 shadow-xs p-5 space-y-4">
+              <h2 className="text-sm font-black text-slate-900">Identité</h2>
+
+              <div>
+                <label className="text-[11px] font-black uppercase text-slate-400 block mb-1.5">
+                  Nom *
+                </label>
+                <input
+                  type="text"
+                  value={nom}
+                  onChange={(e) => setNom(e.target.value)}
+                  className="w-full h-12 px-4 rounded-2xl border border-slate-200 bg-slate-50 text-slate-900 text-sm font-bold focus:bg-white focus:border-blue-600 outline-none transition uppercase"
+                  placeholder="NOM DE FAMILLE"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="text-[11px] font-black uppercase text-slate-400 block mb-1.5">
+                  Prénom *
+                </label>
+                <input
+                  type="text"
+                  value={prenom}
+                  onChange={(e) => setPrenom(e.target.value)}
+                  className="w-full h-12 px-4 rounded-2xl border border-slate-200 bg-slate-50 text-slate-900 text-sm font-bold focus:bg-white focus:border-blue-600 outline-none transition uppercase"
+                  placeholder="PRÉNOM(S)"
+                  required
+                />
+              </div>
+
+              {/* Sexe en 2 pills tactiles */}
+              <div>
+                <label className="text-[11px] font-black uppercase text-slate-400 block mb-1.5">
+                  Sexe
+                </label>
+                <div className="grid grid-cols-2 gap-2">
+                  {(['HOMME', 'FEMME'] as const).map((g) => {
+                    const active = sexe === g
+                    return (
+                      <button
+                        key={g}
+                        type="button"
+                        onClick={() => setSexe(active ? '' : g)}
+                        className={`h-11 rounded-2xl text-xs font-black transition active:scale-[0.98] cursor-pointer ${
+                          active
+                            ? 'bg-slate-900 text-white shadow-xs'
+                            : 'bg-slate-100 text-slate-600'
+                        }`}
+                      >
+                        {g === 'HOMME' ? 'Homme' : 'Femme'}
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-[11px] font-black uppercase text-slate-400 block mb-1.5">
+                    Naissance
+                  </label>
+                  <input
+                    type="date"
+                    value={dateNaissance}
+                    onChange={(e) => setDateNaissance(e.target.value)}
+                    className="w-full h-12 px-3 rounded-2xl border border-slate-200 bg-slate-50 text-slate-900 font-bold text-xs outline-none focus:bg-white focus:border-blue-600"
+                  />
+                </div>
+                <div>
+                  <label className="text-[11px] font-black uppercase text-slate-400 block mb-1.5">
+                    Téléphone
+                  </label>
+                  <input
+                    type="tel"
+                    value={phone}
+                    onChange={(e) => setPhone(e.target.value)}
+                    className="w-full h-12 px-3.5 rounded-2xl border border-slate-200 bg-slate-50 text-slate-900 font-bold text-sm outline-none focus:bg-white focus:border-blue-600"
+                    placeholder="70 00 00 00"
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* Carte Passeport & Dossier */}
+            <div className="bg-white rounded-3xl border border-slate-100 shadow-xs p-5 space-y-4">
+              <h2 className="text-sm font-black text-slate-900">Passeport & Dossier</h2>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-[11px] font-black uppercase text-slate-400 block mb-1.5">
+                    N° Passeport
+                  </label>
+                  <input
+                    type="text"
+                    value={passeport}
+                    onChange={(e) => setPasseport(e.target.value)}
+                    className="w-full h-12 px-3.5 rounded-2xl border border-slate-200 bg-slate-50 text-slate-900 font-mono font-bold text-sm outline-none focus:bg-white focus:border-blue-600 uppercase"
+                    placeholder="A000000"
+                  />
+                </div>
+                <div>
+                  <label className="text-[11px] font-black uppercase text-slate-400 block mb-1.5">
+                    Expiration
+                  </label>
+                  <input
+                    type="date"
+                    value={dateExpiration}
+                    onChange={(e) => setDateExpiration(e.target.value)}
+                    className={`w-full h-12 px-3 rounded-2xl border font-bold text-xs outline-none ${
+                      isPassportExpiringSoon
+                        ? 'border-amber-500 bg-amber-50/50 text-amber-900'
+                        : 'border-slate-200 bg-slate-50 text-slate-900 focus:bg-white focus:border-blue-600'
+                    }`}
+                  />
+                </div>
+              </div>
+
+              {isPassportExpiringSoon && (
+                <p className="text-xs font-bold text-amber-700 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2">
+                  ⚠️ Attention : ce passeport expire dans moins de 6 mois.
+                </p>
+              )}
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-[11px] font-black uppercase text-slate-400 block mb-1.5">
+                    Référence
+                  </label>
+                  <input
+                    type="text"
+                    value={reference}
+                    onChange={(e) => setReference(e.target.value)}
+                    className="w-full h-12 px-3.5 rounded-2xl border border-slate-200 bg-slate-50 text-slate-900 font-bold text-sm outline-none focus:bg-white focus:border-blue-600 uppercase"
+                    placeholder="GRP-A"
+                  />
+                </div>
+                <div>
+                  <label className="text-[11px] font-black uppercase text-slate-400 block mb-1.5">
+                    Campagne
+                  </label>
+                  <select
+                    value={campagne ?? ''}
+                    onChange={(e) => setCampagne(e.target.value ? Number(e.target.value) : null)}
+                    className="w-full h-12 px-3.5 rounded-2xl border border-slate-200 bg-slate-50 text-slate-900 font-bold text-sm outline-none focus:bg-white focus:border-blue-600"
+                  >
+                    <option value="">Sélectionner</option>
+                    {(() => {
+                      const start = 2024
+                      const end = new Date().getFullYear() + 100
+                      const opts = [] as number[]
+                      for (let y = start; y <= end; y++) opts.push(y)
+                      return opts.map((y) => (
+                        <option key={y} value={y}>
+                          {y}
+                        </option>
+                      ))
+                    })()}
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-[11px] font-black uppercase text-slate-400 block mb-1.5">
+                    Intermédiaire
+                  </label>
+                  <input
+                    type="text"
+                    value={associe}
+                    onChange={(e) => setAssocie(e.target.value)}
+                    className="w-full h-12 px-3.5 rounded-2xl border border-slate-200 bg-slate-50 text-slate-900 font-bold text-sm outline-none focus:bg-white focus:border-blue-600 uppercase"
+                    placeholder="Associé / Agence"
+                  />
+                </div>
+                <div>
+                  <label className="text-[11px] font-black uppercase text-slate-400 block mb-1.5">
+                    Inscription
+                  </label>
+                  <input
+                    type="date"
+                    value={dateInscription}
+                    onChange={(e) => setDateInscription(e.target.value)}
+                    className="w-full h-12 px-3 rounded-2xl border border-slate-200 bg-slate-50 text-slate-900 font-bold text-xs outline-none focus:bg-white focus:border-blue-600"
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* Carte Forfait & Paiement */}
+            <div className="bg-white rounded-3xl border border-slate-100 shadow-xs p-5 space-y-4">
+              <h2 className="text-sm font-black text-slate-900">Forfait & Paiement</h2>
+
+              <div>
+                <label className="text-[11px] font-black uppercase text-slate-400 block mb-1.5">
+                  Devise de paiement
+                </label>
+                <div className="grid grid-cols-3 gap-1.5 p-1 bg-slate-100 rounded-2xl">
+                  {HAJJ_CURRENCIES.map((cur) => {
+                    const active = devise === cur.code
+                    return (
+                      <button
+                        key={cur.code}
+                        type="button"
+                        onClick={() => setDevise(cur.code)}
+                        className={`h-10 rounded-xl text-xs font-black transition active:scale-[0.98] cursor-pointer ${
+                          active
+                            ? cur.pillActiveClass
+                            : 'text-slate-600'
+                        }`}
+                      >
+                        {cur.shortLabel}
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div className="bg-slate-900 p-3.5 rounded-2xl">
+                  <label className="text-[10px] font-black text-slate-400 uppercase block mb-1">
+                    Prix total ({getHajjCurrencySymbol(devise)}) *
+                  </label>
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    pattern="[0-9\s]*"
+                    value={totalInput}
+                    onChange={(e) => {
+                      setTotalInput(formatAmount(e.target.value))
+                      setTotal(parseAmount(e.target.value))
+                    }}
+                    placeholder="0"
+                    className="w-full bg-transparent text-white font-black text-lg tabular-nums outline-none"
+                    required
+                  />
+                </div>
+
+                <div className="bg-emerald-600 p-3.5 rounded-2xl">
+                  <label className="text-[10px] font-black text-emerald-100 uppercase block mb-1">
+                    Acompte ({getHajjCurrencySymbol(devise)})
+                  </label>
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    pattern="[0-9\s]*"
+                    value={payeInput}
+                    onChange={(e) => {
+                      setPayeInput(formatAmount(e.target.value))
+                      setPaye(parseAmount(e.target.value))
+                    }}
+                    placeholder="0"
+                    className="w-full bg-transparent text-white font-black text-lg tabular-nums outline-none"
+                  />
+                </div>
+              </div>
+
+              <div className="flex items-center justify-between px-4 py-3 bg-slate-50 rounded-2xl border border-slate-100">
+                <span className="text-xs font-bold text-slate-500">Reste à payer</span>
+                <span className="text-base font-black text-slate-900 tabular-nums">
+                  {formatHajjMoney(total - paye, devise)}
+                </span>
+              </div>
+
+              <div>
+                <label className="text-[11px] font-black uppercase text-slate-400 block mb-1.5">
+                  Nom du package (optionnel)
+                </label>
+                <input
+                  type="text"
+                  value={nomPackage}
+                  onChange={(e) => setNomPackage(e.target.value)}
+                  className="w-full h-12 px-4 rounded-2xl border border-slate-200 bg-slate-50 text-slate-900 font-bold text-sm outline-none focus:bg-white focus:border-blue-600 uppercase"
+                  placeholder="Ex: PREMIUM, ÉCONOMIQUE…"
+                />
+              </div>
+
+              <div>
+                <label className="text-[11px] font-black uppercase text-slate-400 block mb-1.5">
+                  Notes & commentaires
+                </label>
+                <textarea
+                  rows={3}
+                  value={notes}
+                  onChange={(e) => setNotes(e.target.value)}
+                  placeholder="Observations médicales, régime, demandes particulières…"
+                  className="w-full p-3.5 rounded-2xl border border-slate-200 bg-slate-50 text-slate-900 font-medium text-sm outline-none focus:bg-white focus:border-blue-600 resize-none"
+                />
+              </div>
+            </div>
+
+            {/* Bouton Enregistrer principal */}
+            <button
+              type="submit"
+              disabled={loading || !agenceId || !profileReady}
+              className={`w-full h-14 rounded-2xl text-white font-black text-base shadow-lg active:scale-[0.98] transition flex items-center justify-center gap-2.5 cursor-pointer ${
+                loading || !agenceId || !profileReady
+                  ? 'bg-slate-400 cursor-not-allowed shadow-none'
+                  : 'bg-blue-600 active:bg-blue-700 shadow-blue-600/25'
+              }`}
+            >
+              {loading ? <Loader2 size={20} className="animate-spin" /> : <Save size={20} />}
+              <span>
+                {loading
+                  ? 'Enregistrement…'
+                  : !profileReady
+                  ? 'Chargement…'
+                  : 'Enregistrer le dossier'}
+              </span>
+            </button>
+
+            {message.text && (
+              <div
+                className={`p-3.5 rounded-2xl text-center font-bold text-xs border ${
+                  message.type === 'success'
+                    ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                    : message.type === 'info'
+                    ? 'bg-blue-50 text-blue-800 border-blue-200'
+                    : 'bg-rose-50 text-rose-800 border-rose-200'
+                }`}
+              >
+                {message.text}
+              </div>
+            )}
+          </form>
+        </div>
+
+        {/* Bottom Sheet Autres modes de scan (USB / Pleine page / Douchette) */}
+        {mobileScannerSheetOpen && (
+          <div
+            onClick={() => setMobileScannerSheetOpen(false)}
+            className="fixed inset-0 z-[9999] bg-slate-900/50 backdrop-blur-xs flex items-end md:hidden animate-in fade-in duration-150"
+          >
+            <div
+              onClick={(e) => e.stopPropagation()}
+              className="w-full bg-white rounded-t-[2rem] shadow-2xl px-5 pt-3 pb-[max(1.5rem,env(safe-area-inset-bottom))] space-y-3.5 animate-in slide-in-from-bottom duration-200"
+            >
+              <div className="w-12 h-1.5 bg-slate-200 rounded-full mx-auto" />
+
+              <div className="flex items-center justify-between pt-1">
+                <div>
+                  <h3 className="text-base font-black text-slate-900">Modes de scan externes</h3>
+                  <p className="text-xs font-semibold text-slate-500">
+                    Scanners USB, pleine page ou douchette MRZ
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setMobileScannerSheetOpen(false)}
+                  aria-label="Fermer"
+                  className="w-9 h-9 rounded-full bg-slate-100 text-slate-500 flex items-center justify-center cursor-pointer"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+
+              <div className="space-y-2.5">
+                <button
+                  type="button"
+                  disabled={isTwainScanning}
+                  onClick={() => {
+                    setMobileScannerSheetOpen(false)
+                    triggerTwainScan()
+                  }}
+                  className="w-full min-h-[60px] p-3.5 rounded-2xl bg-slate-50 border border-slate-200/80 flex items-center gap-3.5 text-left active:scale-[0.98] transition disabled:opacity-50 cursor-pointer"
+                >
+                  <div className="w-11 h-11 rounded-2xl bg-blue-600 text-white flex items-center justify-center shrink-0">
+                    <Printer size={20} />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-black text-slate-900">Numériser (Scanner à plat)</p>
+                    <p className="text-xs font-medium text-slate-500">Scanner USB / TWAIN</p>
+                  </div>
+                  <ChevronRight size={18} className="text-slate-400 shrink-0" />
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMobileScannerSheetOpen(false)
+                    toggleFullPageScanner()
+                  }}
+                  className="w-full min-h-[60px] p-3.5 rounded-2xl bg-slate-50 border border-slate-200/80 flex items-center gap-3.5 text-left active:scale-[0.98] transition cursor-pointer"
+                >
+                  <div
+                    className={`w-11 h-11 rounded-2xl flex items-center justify-center shrink-0 ${
+                      isFullPageListening
+                        ? 'bg-emerald-600 text-white'
+                        : 'bg-emerald-50 text-emerald-600 border border-emerald-200'
+                    }`}
+                  >
+                    <Radio size={20} className={isFullPageListening ? 'animate-pulse' : ''} />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-black text-slate-900">
+                      Pleine Page {isFullPageListening ? '(Actif)' : ''}
+                    </p>
+                    <p className="text-xs font-medium text-slate-500">Lecteur vitre USB</p>
+                  </div>
+                  <ChevronRight size={18} className="text-slate-400 shrink-0" />
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMobileScannerSheetOpen(false)
+                    setShowPhysicalScannerInput(true)
+                  }}
+                  className="w-full min-h-[60px] p-3.5 rounded-2xl bg-slate-50 border border-slate-200/80 flex items-center gap-3.5 text-left active:scale-[0.98] transition cursor-pointer"
+                >
+                  <div className="w-11 h-11 rounded-2xl bg-slate-900 text-white flex items-center justify-center shrink-0">
+                    <Keyboard size={20} />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-black text-slate-900">Douchette MRZ</p>
+                    <p className="text-xs font-medium text-slate-500">Lecteur code passeport USB</p>
+                  </div>
+                  <ChevronRight size={18} className="text-slate-400 shrink-0" />
+                </button>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setMobileScannerSheetOpen(false)}
+                className="w-full h-12 rounded-2xl bg-slate-100 text-slate-700 font-black text-sm cursor-pointer"
+              >
+                Fermer
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* =================================================================== */}
+      {/* 💻 VERSION PC / TABLETTE (100% INCHANGÉE `hidden md:block`)         */}
+      {/* =================================================================== */}
+      <div className="hidden md:block w-full max-w-6xl">
         <div className="bg-white md:rounded-[2.5rem] shadow-xl border border-gray-100 p-5 md:p-10 min-h-screen md:min-h-0">
           
           <div className="text-center mb-8">

@@ -284,6 +284,7 @@ export default function DetailsPelerin() {
   const [payments, setPayments] = useState<any[]>([])
   const [savingPayment, setSavingPayment] = useState(false)
   const [updatingDevise, setUpdatingDevise] = useState(false)
+  const [mobileTab, setMobileTab] = useState<'dossier' | 'paiements' | 'voyage'>('dossier')
   const { setHideNavbar } = useUI()
 
   const pelerinDevise: HajjCurrency = normalizeHajjCurrency(p?.devise)
@@ -1003,8 +1004,776 @@ export default function DetailsPelerin() {
   }
 
   return (
-    <div className="min-h-screen bg-[radial-gradient(ellipse_at_top_right,_var(--tw-gradient-stops))] from-slate-100 via-slate-50 to-white pb-16 transition-all duration-500">
-      <div className="max-w-7xl mx-auto px-4 py-6 md:py-8 space-y-6 animate-fadeIn">
+    <div className="min-h-screen bg-slate-50 md:bg-[radial-gradient(ellipse_at_top_right,_var(--tw-gradient-stops))] md:from-slate-100 md:via-slate-50 md:to-white pb-28 md:pb-16 transition-all duration-500">
+      {/* =================================================================== */}
+      {/* 📱 VERSION MOBILE NATIVE — EN-TÊTE BLANC PUR (`md:hidden`)          */}
+      {/* =================================================================== */}
+      <div className="md:hidden">
+        {/* 1. BARRE SUPÉRIEURE BLANCHE COLLANTE */}
+        <div className="bg-white/95 backdrop-blur-md border-b border-slate-100 px-4 py-3 sticky top-0 z-30 flex items-center justify-between gap-2">
+          <Link
+            href="/hajj/liste-pelerins"
+            aria-label="Retour à la liste"
+            className="w-10 h-10 rounded-full bg-slate-100 text-slate-700 flex items-center justify-center active:scale-90 transition shrink-0"
+          >
+            <ArrowLeft size={18} />
+          </Link>
+
+          <div className="min-w-0 flex-1 text-center px-1">
+            <p className="text-sm font-black text-slate-900 truncate leading-tight">
+              {p.prenom} {p.nom_complet}
+            </p>
+            <p className="text-[10px] font-bold text-slate-400 truncate">
+              {statutDynamique} • {HAJJ_CURRENCY_MAP[pelerinDevise].shortLabel}
+            </p>
+          </div>
+
+          <button
+            type="button"
+            onClick={saveAdvancedData}
+            disabled={updating}
+            className="h-10 px-3.5 rounded-full bg-slate-900 text-white text-xs font-black flex items-center gap-1.5 active:scale-95 transition disabled:opacity-50 shrink-0 cursor-pointer"
+          >
+            {updating ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
+            <span>Enreg.</span>
+          </button>
+        </div>
+
+        {/* 2. CARTE IDENTITÉ BLANCHE ÉPURÉE (Style iOS Contact Card) */}
+        <div className="bg-white px-5 pt-5 pb-5 border-b border-slate-100">
+          <div className="flex flex-col items-center text-center">
+            <div
+              className={`w-20 h-20 rounded-3xl border-2 shadow-sm overflow-hidden flex items-center justify-center ${
+                estFemme ? 'bg-pink-50 border-pink-100' : 'bg-blue-50 border-blue-100'
+              }`}
+            >
+              {photoIdentiteUrl && !photoError ? (
+                <img
+                  src={photoIdentiteUrl}
+                  alt={`Photo de ${p.nom_complet}`}
+                  className="w-full h-full object-cover"
+                  onError={() => setPhotoError(true)}
+                />
+              ) : estFemme ? (
+                estVieux ? <AvatarFemmeVieille size={76} /> : <AvatarFemmeJeune size={76} />
+              ) : (
+                estVieux ? <AvatarHommeVieux size={76} /> : <AvatarHommeJeune size={76} />
+              )}
+            </div>
+
+            <h1 className="text-xl font-black text-slate-900 tracking-tight mt-3 leading-snug">
+              {p.prenom ? `${p.prenom} ` : ''}
+              {p.nom_complet}
+            </h1>
+
+            {p.telephone_pelerin && (
+              <p className="text-xs font-semibold text-slate-500 mt-0.5 tabular-nums">
+                {p.telephone_pelerin}
+              </p>
+            )}
+
+            {/* Badges de statut épurés */}
+            <div className="flex items-center justify-center gap-2 flex-wrap mt-3">
+              <span className={`px-3 py-1 rounded-full text-[11px] font-black border ${statutColor}`}>
+                {statutDynamique}
+              </span>
+              <span className={`px-3 py-1 rounded-full text-[11px] font-black border flex items-center gap-1 ${risqueColor}`}>
+                <AlertTriangle size={11} /> Risque {niveauRisque}
+              </span>
+              <span className={`px-2.5 py-1 rounded-full text-[11px] font-black border ${HAJJ_CURRENCY_MAP[pelerinDevise].badgeClass}`}>
+                {HAJJ_CURRENCY_MAP[pelerinDevise].shortLabel}
+              </span>
+            </div>
+
+            <p className="text-[11px] font-semibold text-slate-400 mt-2.5">
+              Réf : <span className="text-slate-700 font-bold">{p.reference || '—'}</span> •{' '}
+              <span className="text-slate-700 font-bold">{p.nom_package || 'Sur Mesure'}</span>
+            </p>
+          </div>
+
+          {/* 4 Actions rapides circulaires (1 tap) */}
+          <div className="mt-5 grid grid-cols-4 gap-2">
+            {p.telephone_pelerin ? (
+              <a
+                href={urlWhatsApp}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex flex-col items-center gap-1.5 py-2 rounded-2xl bg-emerald-50/80 text-emerald-700 active:scale-95 transition"
+              >
+                <div className="w-10 h-10 rounded-full bg-emerald-600 text-white flex items-center justify-center shadow-xs">
+                  <MessageCircle size={18} />
+                </div>
+                <span className="text-[11px] font-bold">WhatsApp</span>
+              </a>
+            ) : (
+              <div className="flex flex-col items-center gap-1.5 py-2 rounded-2xl bg-slate-50 text-slate-300 opacity-60">
+                <div className="w-10 h-10 rounded-full bg-slate-200 text-slate-400 flex items-center justify-center">
+                  <MessageCircle size={18} />
+                </div>
+                <span className="text-[11px] font-bold">WhatsApp</span>
+              </div>
+            )}
+
+            <button
+              type="button"
+              onClick={() => setShowScanModal(true)}
+              className="flex flex-col items-center gap-1.5 py-2 rounded-2xl bg-indigo-50/80 text-indigo-700 active:scale-95 transition cursor-pointer"
+            >
+              <div className="w-10 h-10 rounded-full bg-indigo-600 text-white flex items-center justify-center shadow-xs">
+                <Eye size={18} />
+              </div>
+              <span className="text-[11px] font-bold">Passeport</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setShowPdfExportModal(true)}
+              className="flex flex-col items-center gap-1.5 py-2 rounded-2xl bg-blue-50/80 text-blue-700 active:scale-95 transition cursor-pointer"
+            >
+              <div className="w-10 h-10 rounded-full bg-blue-600 text-white flex items-center justify-center shadow-xs">
+                <Download size={18} />
+              </div>
+              <span className="text-[11px] font-bold">Fiche PDF</span>
+            </button>
+
+            <Link
+              href={`/hajj/modifier-pelerin?id=${p.id}`}
+              className="flex flex-col items-center gap-1.5 py-2 rounded-2xl bg-slate-100/90 text-slate-700 active:scale-95 transition"
+            >
+              <div className="w-10 h-10 rounded-full bg-slate-900 text-white flex items-center justify-center shadow-xs">
+                <Pencil size={17} />
+              </div>
+              <span className="text-[11px] font-bold">Modifier</span>
+            </Link>
+          </div>
+        </div>
+
+        {/* 3. ONGLETS SEGMENTÉS NATIFS (Dossier | Paiements | Voyage) */}
+        <div className="sticky top-[64px] z-20 bg-slate-50/95 backdrop-blur-md px-5 py-3">
+          <div className="grid grid-cols-3 gap-1 p-1 bg-slate-200/75 rounded-2xl">
+            <button
+              type="button"
+              onClick={() => setMobileTab('dossier')}
+              className={`h-10 rounded-xl text-xs font-black flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                mobileTab === 'dossier' ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-600'
+              }`}
+            >
+              <User size={14} className={mobileTab === 'dossier' ? 'text-blue-600' : 'text-slate-400'} />
+              <span>Dossier</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setMobileTab('paiements')}
+              className={`h-10 rounded-xl text-xs font-black flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                mobileTab === 'paiements' ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-600'
+              }`}
+            >
+              <CreditCard size={14} className={mobileTab === 'paiements' ? 'text-emerald-600' : 'text-slate-400'} />
+              <span>Paiements</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setMobileTab('voyage')}
+              className={`h-10 rounded-xl text-xs font-black flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                mobileTab === 'voyage' ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-600'
+              }`}
+            >
+              <Plane size={14} className={mobileTab === 'voyage' ? 'text-indigo-600' : 'text-slate-400'} />
+              <span>Voyage</span>
+            </button>
+          </div>
+        </div>
+
+        {/* 4. CONTENU DES ONGLETS MOBILE */}
+        <div className="px-5 space-y-4">
+          {mobileTab === 'dossier' && (
+            <>
+              {/* Progression compacte 6 étapes en grille 3x2 (zéro scroll horizontal) */}
+              <div className="bg-white rounded-3xl border border-slate-100 shadow-xs p-5 space-y-4">
+                <div className="flex items-center justify-between gap-2">
+                  <h2 className="text-sm font-black text-slate-900">Progression</h2>
+                  <span className="text-xs font-black text-blue-600 bg-blue-50 px-2.5 py-1 rounded-full tabular-nums">
+                    {etapesReussies}/6 • {pourcentageProgression}%
+                  </span>
+                </div>
+                <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
+                  <div
+                    className="h-full bg-emerald-500 rounded-full transition-all duration-300"
+                    style={{ width: `${pourcentageProgression}%` }}
+                  />
+                </div>
+                <div className="grid grid-cols-3 gap-2">
+                  {[
+                    { label: 'Inscription', done: !!p.date_inscription, icon: <UserCheck size={16} /> },
+                    { label: 'Santé', done: !!p.vacciné && !!p.visite_medicale, icon: <Syringe size={16} /> },
+                    { label: 'Formation', done: !!p.formation_suivie, icon: <BookOpen size={16} /> },
+                    { label: 'Visa', done: !!p.visa_obtenu, icon: <Globe size={16} /> },
+                    { label: 'Départ', done: !!p.date_depart && new Date(p.date_depart) <= new Date(), icon: <Plane size={16} /> },
+                    { label: 'Retour', done: !!p.date_retour && new Date(p.date_retour) <= new Date(), icon: <CheckCircle2 size={16} /> },
+                  ].map((st, idx) => (
+                    <div
+                      key={idx}
+                      className={`p-2.5 rounded-2xl border flex flex-col items-center gap-1.5 text-center ${
+                        st.done
+                          ? 'bg-emerald-50/70 border-emerald-200 text-emerald-700'
+                          : 'bg-slate-50 border-slate-100 text-slate-400'
+                      }`}
+                    >
+                      {st.icon}
+                      <span className="text-[10px] font-black leading-tight">{st.label}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Identité & Passeport */}
+              <div className="bg-white rounded-3xl border border-slate-100 shadow-xs p-5 space-y-3">
+                <h2 className="text-sm font-black text-slate-900">Identité & Passeport</h2>
+                <div className="grid grid-cols-2 gap-2.5">
+                  <div className="bg-slate-50 rounded-2xl p-3.5">
+                    <p className="text-[10px] font-black uppercase text-slate-400">Âge</p>
+                    <p className="text-base font-black text-slate-900 mt-0.5">
+                      {age !== null ? `${age} ans` : '--'}
+                    </p>
+                  </div>
+                  <div className="bg-slate-50 rounded-2xl p-3.5">
+                    <p className="text-[10px] font-black uppercase text-slate-400">N° Passeport</p>
+                    <p className="text-sm font-black font-mono text-slate-900 mt-1 truncate">
+                      {p.num_passeport || '--'}
+                    </p>
+                  </div>
+                  <div
+                    className={`col-span-2 rounded-2xl p-3.5 border ${
+                      passeportDanger
+                        ? 'bg-rose-50 border-rose-200'
+                        : 'bg-slate-50 border-transparent'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <p className={`text-[10px] font-black uppercase ${passeportDanger ? 'text-rose-500' : 'text-slate-400'}`}>
+                        Expiration Passeport
+                      </p>
+                      <p className={`text-sm font-black tabular-nums ${passeportDanger ? 'text-rose-600' : 'text-slate-900'}`}>
+                        {p.date_expiration ? new Date(p.date_expiration).toLocaleDateString('fr-FR') : '--'}
+                      </p>
+                    </div>
+                    {passeportDanger && (
+                      <p className="text-[11px] font-bold text-rose-600 mt-1">
+                        ⚠️ Moins de 6 mois de validité restants
+                      </p>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* Formalités Sanitaires & Formation (liste style Réglages iOS) */}
+              <div className="bg-white rounded-3xl border border-slate-100 shadow-xs overflow-hidden">
+                <div className="px-5 pt-4 pb-2">
+                  <h2 className="text-sm font-black text-slate-900">Santé & Formation</h2>
+                </div>
+                <div className="divide-y divide-slate-100">
+                  <div
+                    onClick={() => handleChange('vacciné', !p.vacciné)}
+                    className="px-5 py-4 flex items-center justify-between gap-3 active:bg-slate-50 cursor-pointer"
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className="w-9 h-9 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center shrink-0">
+                        <Syringe size={16} />
+                      </div>
+                      <span className="text-sm font-bold text-slate-800">Carnet de Vaccination</span>
+                    </div>
+                    <ToggleSwitch checked={!!p.vacciné} activeColor="bg-emerald-500" />
+                  </div>
+
+                  <div
+                    onClick={() => handleChange('visite_medicale', !p.visite_medicale)}
+                    className="px-5 py-4 flex items-center justify-between gap-3 active:bg-slate-50 cursor-pointer"
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className="w-9 h-9 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center shrink-0">
+                        <UserCheck size={16} />
+                      </div>
+                      <span className="text-sm font-bold text-slate-800">Visite Médicale</span>
+                    </div>
+                    <ToggleSwitch checked={!!p.visite_medicale} activeColor="bg-emerald-500" />
+                  </div>
+
+                  <div
+                    onClick={() => handleChange('formation_suivie', !p.formation_suivie)}
+                    className="px-5 py-4 flex items-center justify-between gap-3 active:bg-slate-50 cursor-pointer"
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className="w-9 h-9 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center shrink-0">
+                        <BookOpen size={16} />
+                      </div>
+                      <span className="text-sm font-bold text-slate-800">Formation suivie</span>
+                    </div>
+                    <ToggleSwitch checked={!!p.formation_suivie} activeColor="bg-orange-500" />
+                  </div>
+                </div>
+
+                <div className="px-5 pb-5 pt-2 grid grid-cols-2 gap-2.5">
+                  <div>
+                    <label className="text-[10px] font-black uppercase text-slate-400 block mb-1">
+                      Date formation
+                    </label>
+                    <input
+                      type="date"
+                      value={p.date_formation || ''}
+                      onChange={(e) => handleChange('date_formation', e.target.value)}
+                      className="w-full h-11 px-3 bg-slate-50 rounded-xl font-bold text-xs border border-slate-200 outline-none focus:border-blue-600"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-black uppercase text-slate-400 block mb-1">
+                      Groupe
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="Ex: Convoi A"
+                      value={p.groupe_formation || ''}
+                      onChange={(e) => handleChange('groupe_formation', e.target.value)}
+                      className="w-full h-11 px-3 bg-slate-50 rounded-xl font-bold text-xs border border-slate-200 outline-none focus:border-blue-600"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Notes & Consignes */}
+              <div className="bg-white rounded-3xl border border-slate-100 shadow-xs p-5 space-y-2.5">
+                <h2 className="text-sm font-black text-slate-900">Notes & Consignes</h2>
+                <textarea
+                  rows={3}
+                  value={p.notes || ''}
+                  onChange={(e) => handleChange('notes', e.target.value)}
+                  placeholder="Régime alimentaire, demandes particulières, observations médicales…"
+                  className="w-full p-3.5 bg-slate-50 rounded-2xl font-medium text-sm border border-slate-200 focus:bg-white focus:border-blue-600 outline-none transition resize-none"
+                />
+              </div>
+
+              <button
+                type="button"
+                onClick={saveAdvancedData}
+                disabled={updating}
+                className="w-full h-12 rounded-2xl bg-slate-900 text-white font-black text-sm flex items-center justify-center gap-2 shadow-sm active:scale-[0.98] transition disabled:opacity-50 cursor-pointer"
+              >
+                {updating ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />}
+                <span>Enregistrer les modifications</span>
+              </button>
+            </>
+          )}
+
+          {mobileTab === 'paiements' && (
+            <>
+              {/* Carte Balance Comptable Fintech */}
+              <div className="bg-slate-900 text-white rounded-3xl p-5 shadow-md space-y-4">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-[11px] font-black uppercase tracking-wider text-slate-400">
+                    Reste à payer
+                  </span>
+                  <div className="inline-flex items-center gap-1 bg-white/10 p-1 rounded-xl">
+                    {HAJJ_CURRENCIES.map((cur) => (
+                      <button
+                        key={cur.code}
+                        type="button"
+                        disabled={updatingDevise}
+                        onClick={() => handleChangeDevise(cur.code)}
+                        className={`px-2.5 py-1 rounded-lg text-[11px] font-black transition cursor-pointer disabled:opacity-50 ${
+                          pelerinDevise === cur.code
+                            ? 'bg-white text-slate-900 shadow-xs'
+                            : 'text-slate-300'
+                        }`}
+                      >
+                        {cur.code === 'FCFA' ? 'CFA' : cur.symbol}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <p className="text-3xl font-black tabular-nums tracking-tight leading-none">
+                  {resteAPayer.toLocaleString('fr-FR')}{' '}
+                  <span className="text-sm font-bold text-slate-400">{deviseSymbol}</span>
+                </p>
+
+                <div className="space-y-1.5">
+                  <div className="flex justify-between text-[11px] font-bold text-slate-400">
+                    <span>Encaissement</span>
+                    <span className="text-emerald-400 font-black tabular-nums">
+                      {totalDue > 0 ? Math.min(100, Math.round((totalPaid / totalDue) * 100)) : 0}%
+                    </span>
+                  </div>
+                  <div className="w-full bg-white/10 h-2 rounded-full overflow-hidden">
+                    <div
+                      className="bg-emerald-400 h-full rounded-full transition-all duration-500"
+                      style={{ width: `${totalDue > 0 ? Math.min(100, (totalPaid / totalDue) * 100) : 0}%` }}
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4 pt-3.5 border-t border-white/10">
+                  <div>
+                    <p className="text-[11px] text-slate-400 font-semibold">Forfait fixé</p>
+                    <p className="text-sm font-black tabular-nums mt-0.5">
+                      {formatHajjMoney(totalDue, pelerinDevise, { compact: true })}
+                    </p>
+                  </div>
+                  <div className="border-l border-white/10 pl-4">
+                    <p className="text-[11px] text-emerald-400 font-semibold">Déjà versé</p>
+                    <p className="text-sm font-black text-emerald-400 tabular-nums mt-0.5">
+                      {formatHajjMoney(totalPaid, pelerinDevise, { compact: true })}
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Formulaire Nouveau Versement */}
+              <div className="bg-white rounded-3xl border border-slate-100 shadow-xs p-5 space-y-4">
+                <h2 className="text-sm font-black text-slate-900">
+                  Nouveau versement ({deviseSymbol})
+                </h2>
+
+                <form onSubmit={handleRecordPayment} className="space-y-3.5">
+                  <div>
+                    <label className="text-[11px] font-black uppercase text-slate-400 block mb-1.5">
+                      Montant ({deviseSymbol})
+                    </label>
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      value={paymentForm.amount}
+                      onChange={(e) => setPaymentForm({ ...paymentForm, amount: formatAmountInput(e.target.value) })}
+                      placeholder={pelerinDevise === 'FCFA' ? 'Ex : 500 000' : 'Ex : 1 500'}
+                      className="w-full h-12 px-4 rounded-2xl border border-slate-200 bg-slate-50 text-base font-black text-slate-900 outline-none focus:bg-white focus:border-blue-600 transition"
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2.5">
+                    <div>
+                      <label className="text-[11px] font-black uppercase text-slate-400 block mb-1.5">
+                        Mode
+                      </label>
+                      <select
+                        value={paymentForm.paymentMode}
+                        onChange={(e) => setPaymentForm({ ...paymentForm, paymentMode: e.target.value })}
+                        className="w-full h-11 px-3 rounded-xl border border-slate-200 bg-slate-50 text-xs font-bold outline-none focus:border-blue-600"
+                      >
+                        <option value="ESPECES">Espèces</option>
+                        <option value="VIREMENT">Virement</option>
+                        <option value="CARTE">Carte</option>
+                        <option value="AUTRE">Autre</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="text-[11px] font-black uppercase text-slate-400 block mb-1.5">
+                        Date
+                      </label>
+                      <input
+                        type="date"
+                        value={paymentForm.paymentDate}
+                        onChange={(e) => setPaymentForm({ ...paymentForm, paymentDate: e.target.value })}
+                        className="w-full h-11 px-3 rounded-xl border border-slate-200 bg-slate-50 text-xs font-bold outline-none focus:border-blue-600"
+                      />
+                    </div>
+                  </div>
+
+                  <button
+                    type="submit"
+                    disabled={savingPayment}
+                    className="w-full h-12 rounded-2xl bg-emerald-600 active:bg-emerald-700 text-white text-sm font-black shadow-md shadow-emerald-600/20 flex items-center justify-center gap-2 transition disabled:opacity-60 cursor-pointer"
+                  >
+                    {savingPayment ? <Loader2 size={16} className="animate-spin" /> : 'Enregistrer le paiement'}
+                  </button>
+                </form>
+              </div>
+
+              {/* Historique des versements */}
+              <div className="bg-white rounded-3xl border border-slate-100 shadow-xs p-5 space-y-3.5">
+                <div className="flex items-center justify-between gap-2">
+                  <h2 className="text-sm font-black text-slate-900">
+                    Historique ({payments.length + (initialDeposit > 0 ? 1 : 0)})
+                  </h2>
+                </div>
+
+                {payments.length === 0 && initialDeposit <= 0 ? (
+                  <p className="text-xs text-slate-400 font-medium text-center py-6">
+                    Aucun versement enregistré pour le moment.
+                  </p>
+                ) : (
+                  <div className="divide-y divide-slate-100 -mx-5">
+                    {payments.map((item) => {
+                      const roleLabel = formatProfileRoleLabel(item.recorded_by_role)
+                      return (
+                        <div key={item.id} className="px-5 py-3.5 flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <p className="text-sm font-black text-slate-900 tabular-nums">
+                              {formatHajjMoney(Number(item.amount || 0), pelerinDevise)}
+                            </p>
+                            <p className="text-xs text-slate-400 font-medium mt-0.5">
+                              {item.payment_mode} • {item.payment_date || '-'}
+                            </p>
+                            {item.recorded_by_name && (
+                              <p className="text-[11px] text-slate-600 font-semibold mt-1 flex items-center gap-1.5 flex-wrap">
+                                <span>
+                                  Par <strong className="text-slate-900">{item.recorded_by_name}</strong>
+                                </span>
+                                {roleLabel && (
+                                  <span
+                                    className={`px-1.5 py-0.5 rounded border text-[9px] font-black uppercase ${getProfileRoleBadgeClass(
+                                      item.recorded_by_role,
+                                    )}`}
+                                  >
+                                    {roleLabel}
+                                  </span>
+                                )}
+                              </p>
+                            )}
+                          </div>
+                          <span className="text-[10px] font-black text-emerald-700 bg-emerald-50 px-2.5 py-1 rounded-full shrink-0">
+                            Reçu
+                          </span>
+                        </div>
+                      )
+                    })}
+
+                    {initialDeposit > 0 && (
+                      <div className="px-5 py-3.5 bg-blue-50/30 flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="text-sm font-black text-slate-900 tabular-nums">
+                            {formatHajjMoney(initialDeposit, pelerinDevise)}
+                          </p>
+                          <p className="text-xs text-slate-500 font-medium mt-0.5">
+                            Acompte à l'inscription •{' '}
+                            {p.date_inscription ? new Date(p.date_inscription).toLocaleDateString('fr-FR') : '-'}
+                          </p>
+                          {p.created_by_name && (
+                            <p className="text-[11px] text-slate-600 font-semibold mt-1 flex items-center gap-1.5 flex-wrap">
+                              <span>
+                                Par <strong className="text-slate-900">{p.created_by_name}</strong>
+                              </span>
+                              {formatProfileRoleLabel(p.created_by_role) && (
+                                <span
+                                  className={`px-1.5 py-0.5 rounded border text-[9px] font-black uppercase ${getProfileRoleBadgeClass(
+                                    p.created_by_role,
+                                  )}`}
+                                >
+                                  {formatProfileRoleLabel(p.created_by_role)}
+                                </span>
+                              )}
+                            </p>
+                          )}
+                        </div>
+                        <span className="text-[10px] font-black text-blue-700 bg-blue-50 px-2.5 py-1 rounded-full shrink-0">
+                          Initial
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {(payments.length > 0 || initialDeposit > 0) && (
+                  <button
+                    type="button"
+                    onClick={handleGenerateTotalReceipt}
+                    className="w-full h-12 rounded-2xl bg-slate-900 text-white text-xs font-black uppercase tracking-wide flex items-center justify-center gap-2 active:scale-[0.98] transition cursor-pointer"
+                  >
+                    <Receipt size={16} />
+                    <span>Générer le reçu total</span>
+                  </button>
+                )}
+              </div>
+            </>
+          )}
+
+          {mobileTab === 'voyage' && (
+            <>
+              {/* Hébergements KSA */}
+              <div className="bg-white rounded-3xl border border-slate-100 shadow-xs p-5 space-y-4">
+                <div className="flex items-center justify-between gap-2">
+                  <h2 className="text-sm font-black text-slate-900">Hôtels & Chambres</h2>
+                  {(p.chambre_mecque_id || p.chambre_medine_id) && (
+                    <span className="text-[10px] font-black bg-purple-50 text-purple-700 px-2.5 py-1 rounded-full">
+                      Auto-attribué
+                    </span>
+                  )}
+                </div>
+
+                <div className="space-y-3">
+                  <div>
+                    <div className="flex items-center justify-between mb-1.5">
+                      <label className="text-[11px] font-black uppercase text-slate-400">
+                        Hôtel La Mecque
+                      </label>
+                      {p.chambre_mecque_num && (
+                        <span className="text-[10px] font-black bg-purple-100 text-purple-800 px-2 py-0.5 rounded-full">
+                          Chambre {p.chambre_mecque_num}
+                        </span>
+                      )}
+                    </div>
+                    <input
+                      type="text"
+                      placeholder="Nom Hôtel La Mecque"
+                      value={p.hotel_mecque || ''}
+                      onChange={(e) => handleChange('hotel_mecque', e.target.value)}
+                      className="w-full h-12 px-4 bg-slate-50 rounded-2xl font-bold text-sm border border-slate-200 outline-none focus:bg-white focus:border-purple-500 transition"
+                    />
+                  </div>
+
+                  <div>
+                    <div className="flex items-center justify-between mb-1.5">
+                      <label className="text-[11px] font-black uppercase text-slate-400">
+                        Hôtel Médine
+                      </label>
+                      {p.chambre_medine_num && (
+                        <span className="text-[10px] font-black bg-purple-100 text-purple-800 px-2 py-0.5 rounded-full">
+                          Chambre {p.chambre_medine_num}
+                        </span>
+                      )}
+                    </div>
+                    <input
+                      type="text"
+                      placeholder="Nom Hôtel Médine"
+                      value={p.hotel_medine || ''}
+                      onChange={(e) => handleChange('hotel_medine', e.target.value)}
+                      className="w-full h-12 px-4 bg-slate-50 rounded-2xl font-bold text-sm border border-slate-200 outline-none focus:bg-white focus:border-purple-500 transition"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="text-[11px] font-black uppercase text-slate-400 block mb-1.5">
+                      Guide / Encadreur
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="Nom du Guide assigné"
+                      value={p.groupe_encadrement || ''}
+                      onChange={(e) => handleChange('groupe_encadrement', e.target.value)}
+                      className="w-full h-12 px-4 bg-slate-50 rounded-2xl font-bold text-sm border border-slate-200 outline-none focus:bg-white focus:border-purple-500 transition"
+                    />
+                  </div>
+
+                  <div
+                    onClick={() => handleChange('hotel_statut', !p.hotel_statut)}
+                    className="flex items-center justify-between p-4 bg-slate-50 rounded-2xl cursor-pointer active:bg-slate-100"
+                  >
+                    <span className="text-xs font-bold text-slate-700">Chambres validées et attribuées</span>
+                    <ToggleSwitch checked={!!p.hotel_statut} activeColor="bg-purple-500" />
+                  </div>
+                </div>
+              </div>
+
+              {/* Plan de Vol & Visa */}
+              <div className="bg-white rounded-3xl border border-slate-100 shadow-xs p-5 space-y-4">
+                <h2 className="text-sm font-black text-slate-900">Plan de Vol & Visa</h2>
+
+                {joursAvantDepart !== null && joursAvantDepart > 0 && (
+                  <div className="bg-indigo-50/70 border border-indigo-100 p-3.5 rounded-2xl flex items-center gap-3">
+                    <div className="w-9 h-9 rounded-xl bg-indigo-600 text-white flex items-center justify-center shrink-0">
+                      <Clock size={18} />
+                    </div>
+                    <div>
+                      <p className="text-[10px] font-black uppercase text-indigo-400">Compte à rebours</p>
+                      <p className="text-xs font-black text-indigo-900">
+                        {joursAvantDepart} jour{joursAvantDepart > 1 ? 's' : ''} avant le départ
+                      </p>
+                    </div>
+                  </div>
+                )}
+
+                <div className="space-y-3">
+                  <div>
+                    <label className="text-[11px] font-black uppercase text-slate-400 block mb-1.5">
+                      Vol Aller
+                    </label>
+                    <input
+                      type="datetime-local"
+                      value={p.date_depart ? p.date_depart.slice(0, 16) : ''}
+                      onChange={(e) => handleChange('date_depart', e.target.value)}
+                      className="w-full h-12 px-4 bg-slate-50 rounded-2xl font-bold text-sm border border-slate-200 outline-none focus:bg-white focus:border-indigo-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="text-[11px] font-black uppercase text-slate-400 block mb-1.5">
+                      Vol Retour
+                    </label>
+                    <input
+                      type="datetime-local"
+                      value={p.date_retour ? p.date_retour.slice(0, 16) : ''}
+                      onChange={(e) => handleChange('date_retour', e.target.value)}
+                      className="w-full h-12 px-4 bg-slate-50 rounded-2xl font-bold text-sm border border-slate-200 outline-none focus:bg-white focus:border-indigo-500"
+                    />
+                  </div>
+
+                  <div
+                    onClick={() => handleChange('visa_obtenu', !p.visa_obtenu)}
+                    className="flex items-center justify-between p-4 bg-slate-50 rounded-2xl cursor-pointer active:bg-slate-100"
+                  >
+                    <span className="text-xs font-bold text-slate-800 flex items-center gap-2">
+                      <ShieldCheck size={16} className="text-indigo-600" /> Visa Hajj obtenu
+                    </span>
+                    <ToggleSwitch checked={!!p.visa_obtenu} activeColor="bg-indigo-600" />
+                  </div>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={saveAdvancedData}
+                disabled={updating}
+                className="w-full h-12 rounded-2xl bg-slate-900 text-white font-black text-sm flex items-center justify-center gap-2 shadow-sm active:scale-[0.98] transition disabled:opacity-50 cursor-pointer"
+              >
+                {updating ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />}
+                <span>Enregistrer les modifications</span>
+              </button>
+            </>
+          )}
+
+          {/* 5. PIED DE FICHE PERMANENT : AGENCE & TRAÇABILITÉ D'ENREGISTREMENT */}
+          <div className="bg-white rounded-3xl border border-slate-100 shadow-xs p-4 space-y-3">
+            <div className="flex items-center justify-between gap-3 pb-3 border-b border-slate-100">
+              <span className="text-[11px] font-bold text-slate-400">Agence</span>
+              <span className="text-xs font-black text-slate-800 uppercase truncate">
+                {p.agences?.nom_agence || 'Aucune agence rattachée'}
+              </span>
+            </div>
+
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-2xl bg-slate-100 text-slate-600 flex items-center justify-center shrink-0">
+                <UserCheck size={18} />
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="text-[10px] font-black uppercase tracking-wider text-slate-400">
+                  Dossier enregistré par
+                </p>
+                <div className="flex items-center gap-1.5 flex-wrap mt-0.5">
+                  <p className="text-sm font-black text-slate-900 truncate">
+                    {p.created_by_name || 'Non renseigné (dossier antérieur)'}
+                  </p>
+                  {p.created_by_name && formatProfileRoleLabel(p.created_by_role) && (
+                    <span
+                      className={`px-2 py-0.5 rounded-md border text-[9px] font-black uppercase ${getProfileRoleBadgeClass(
+                        p.created_by_role,
+                      )}`}
+                    >
+                      {formatProfileRoleLabel(p.created_by_role)}
+                    </span>
+                  )}
+                </div>
+                {p.created_at && (
+                  <p className="text-[11px] font-medium text-slate-400 mt-0.5">
+                    Le {new Date(p.created_at).toLocaleDateString('fr-FR', { day: '2-digit', month: 'long', year: 'numeric' })}
+                  </p>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* =================================================================== */}
+      {/* 💻 VERSION PC / TABLETTE (100% INCHANGÉE `hidden md:block`)         */}
+      {/* =================================================================== */}
+      <div className="hidden md:block max-w-7xl mx-auto px-4 py-6 md:py-8 space-y-6 animate-fadeIn">
         
         {/* --- HEADER ACTIONS ET STATUTS CONTEXTUELS --- */}
         <div className="bg-white p-6 md:p-8 rounded-[2rem] shadow-xl shadow-slate-200/60 border border-slate-100/80 relative overflow-hidden transition-transform duration-300 hover:shadow-2xl">
@@ -1514,36 +2283,47 @@ export default function DetailsPelerin() {
         </div>
       </div>
 
-      {/* 📄 4. MODAL D'EXPORT PDF DU DOSSIER COMPLET (AVEC OPTION FINANCES) */}
+      {/* 📄 4. MODAL D'EXPORT PDF DU DOSSIER COMPLET (Bottom Sheet mobile / Modale PC) */}
       {showReceiptModal && lastReceipt && (
-        <div className="fixed inset-0 z-[9999] bg-black/70 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
-          <div className="bg-white rounded-[1.5rem] border border-slate-200 w-full max-w-xl overflow-hidden shadow-2xl my-auto max-h-[95vh]">
-            <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100 bg-slate-50">
-              <div>
-                <h3 className="font-black text-slate-900 text-xs uppercase tracking-wider">
-                  {lastReceipt.kind === 'total' ? 'Reçu récapitulatif des paiements' : 'Reçu de paiement'}
-                </h3>
-                <p className="text-[10px] text-slate-400">Réf: {lastReceipt.ref}</p>
+        <div
+          onClick={() => setShowReceiptModal(false)}
+          className="fixed inset-0 z-[9999] bg-black/70 backdrop-blur-xs flex items-end md:items-center justify-center p-0 md:p-4 overflow-y-auto"
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="bg-white rounded-t-[2rem] md:rounded-[1.5rem] border border-slate-200 w-full md:max-w-xl overflow-hidden shadow-2xl md:my-auto max-h-[94dvh] md:max-h-[95vh] flex flex-col animate-in slide-in-from-bottom md:zoom-in-95 duration-200"
+          >
+            <div className="px-4 pt-3 pb-3 md:py-3 border-b border-slate-100 bg-slate-50 shrink-0">
+              <div className="w-12 h-1.5 bg-slate-200 rounded-full mx-auto mb-2.5 md:hidden" />
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="font-black text-slate-900 text-xs uppercase tracking-wider">
+                    {lastReceipt.kind === 'total' ? 'Reçu récapitulatif des paiements' : 'Reçu de paiement'}
+                  </h3>
+                  <p className="text-[10px] text-slate-400">Réf: {lastReceipt.ref}</p>
+                </div>
+                <button onClick={() => setShowReceiptModal(false)} className="w-8 h-8 rounded-full md:rounded-lg bg-slate-200/70 md:bg-transparent flex items-center justify-center text-slate-500 hover:text-slate-600 cursor-pointer">
+                  <X size={16} />
+                </button>
               </div>
-              <button onClick={() => setShowReceiptModal(false)} className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600"> <X size={16} /> </button>
             </div>
-            <div className="p-3 bg-slate-50/60 overflow-y-auto">
+            <div className="p-3 bg-slate-50/60 overflow-y-auto flex-1">
               <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
-                <iframe srcDoc={buildPelerinRecuHTML()} title="Aperçu du reçu" className="w-full border-none" style={{ minHeight: '500px', height: '560px', display: 'block' }} />
+                <iframe srcDoc={buildPelerinRecuHTML()} title="Aperçu du reçu" className="w-full border-none" style={{ minHeight: '420px', height: '520px', display: 'block' }} />
               </div>
             </div>
-            <div className="grid grid-cols-2 gap-2 p-3 border-t border-slate-100 bg-white">
-              <button onClick={handleShareReceiptWhatsApp} className="flex items-center justify-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs py-3 rounded-xl">
+            <div className="grid grid-cols-2 gap-2 p-3 border-t border-slate-100 bg-white shrink-0">
+              <button onClick={handleShareReceiptWhatsApp} className="flex items-center justify-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs h-12 md:h-auto md:py-3 rounded-2xl md:rounded-xl cursor-pointer">
                 <MessageCircle size={15} /> WhatsApp
               </button>
-              <button onClick={handlePrintReceipt} className="flex items-center justify-center gap-1.5 bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs py-3 rounded-xl">
+              <button onClick={handlePrintReceipt} className="flex items-center justify-center gap-1.5 bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs h-12 md:h-auto md:py-3 rounded-2xl md:rounded-xl cursor-pointer">
                 <Printer size={15} /> Imprimer
               </button>
             </div>
-            <div className="px-3 pb-3 bg-white">
+            <div className="px-3 pb-[max(1rem,env(safe-area-inset-bottom))] md:pb-3 bg-white shrink-0">
               <button
                 onClick={() => setShowReceiptModal(false)}
-                className="w-full bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs py-3 rounded-xl"
+                className="w-full bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs h-11 md:h-auto md:py-3 rounded-2xl md:rounded-xl cursor-pointer"
               >
                 Terminer
               </button>
@@ -1553,14 +2333,22 @@ export default function DetailsPelerin() {
       )}
 
       {showPdfExportModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-fadeIn">
-          <div className="bg-white rounded-[2rem] shadow-2xl border border-slate-100 max-w-md w-full overflow-hidden p-6 space-y-4">
+        <div
+          onClick={() => setShowPdfExportModal(false)}
+          className="fixed inset-0 z-[9999] md:z-50 flex items-end md:items-center justify-center p-0 md:p-4 bg-slate-900/60 backdrop-blur-sm animate-fadeIn"
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="bg-white rounded-t-[2rem] md:rounded-[2rem] shadow-2xl border border-slate-100 md:max-w-md w-full overflow-hidden px-5 pt-3 pb-[max(1.5rem,env(safe-area-inset-bottom))] md:p-6 space-y-4 animate-in slide-in-from-bottom md:zoom-in-95 duration-200"
+          >
+            <div className="w-12 h-1.5 bg-slate-200 rounded-full mx-auto md:hidden" />
+
             <div className="flex items-center justify-between pb-3 border-b border-slate-100">
               <div className="flex items-center gap-2">
                 <Download className="text-emerald-600" size={20} />
                 <h3 className="font-black text-slate-800 text-sm uppercase">Exportation Fiche Pèlerin (PDF)</h3>
               </div>
-              <button onClick={() => setShowPdfExportModal(false)} className="text-slate-400 hover:text-slate-600 cursor-pointer">
+              <button onClick={() => setShowPdfExportModal(false)} className="w-9 h-9 md:w-auto md:h-auto rounded-full md:rounded-none bg-slate-100 md:bg-transparent flex items-center justify-center text-slate-500 md:text-slate-400 hover:text-slate-600 cursor-pointer">
                 <X size={18} />
               </button>
             </div>
@@ -1579,23 +2367,23 @@ export default function DetailsPelerin() {
                   type="checkbox"
                   checked={pdfIncludeFinances}
                   onChange={(e) => setPdfIncludeFinances(e.target.checked)}
-                  className="w-4 h-4 text-blue-600 rounded cursor-pointer"
+                  className="w-5 h-5 md:w-4 md:h-4 text-blue-600 rounded cursor-pointer"
                 />
               </label>
             </div>
 
-            <div className="flex gap-2 pt-2">
+            <div className="flex gap-2.5 md:gap-2 pt-2">
               <button
                 type="button"
                 onClick={() => setShowPdfExportModal(false)}
-                className="flex-1 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl cursor-pointer"
+                className="flex-1 h-12 md:h-auto md:py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-2xl md:rounded-xl cursor-pointer"
               >
                 Annuler
               </button>
               <button
                 type="button"
                 onClick={exporterFichePelerinPDF}
-                className="flex-1 py-3 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl flex items-center justify-center gap-1.5 cursor-pointer shadow-md"
+                className="flex-1 h-12 md:h-auto md:py-3 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-2xl md:rounded-xl flex items-center justify-center gap-1.5 cursor-pointer shadow-md"
               >
                 <Download size={14} /> Télécharger le PDF
               </button>
@@ -1604,26 +2392,35 @@ export default function DetailsPelerin() {
         </div>
       )}
 
-      {/* MODAL POUR VOIR LE SCAN DU PASSEPORT */}
+      {/* MODAL POUR VOIR LE SCAN DU PASSEPORT (Bottom Sheet mobile / Modale PC) */}
       {showScanModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-fadeIn">
-          <div className="bg-white rounded-[2rem] shadow-2xl border border-slate-100 max-w-2xl w-full max-h-[90vh] flex flex-col overflow-hidden">
-            <div className="p-6 border-b border-slate-100 flex items-center justify-between bg-slate-50">
-              <div>
-                <h3 className="font-black text-slate-800 text-lg uppercase tracking-wide flex items-center gap-2">
-                  <FileCheck className="text-indigo-600" size={20} /> Scan de Document du Pèlerin
-                </h3>
-                <p className="text-xs font-bold text-slate-400 uppercase mt-0.5">{p.prenom} {p.nom_complet} — Réf {p.reference || 'Non spécifiée'}</p>
+        <div
+          onClick={() => setShowScanModal(false)}
+          className="fixed inset-0 z-[9999] md:z-50 flex items-end md:items-center justify-center p-0 md:p-4 bg-slate-900/60 backdrop-blur-sm animate-fadeIn"
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="bg-white rounded-t-[2rem] md:rounded-[2rem] shadow-2xl border border-slate-100 md:max-w-2xl w-full max-h-[92dvh] md:max-h-[90vh] flex flex-col overflow-hidden animate-in slide-in-from-bottom md:zoom-in-95 duration-200"
+          >
+            <div className="px-5 pt-3 pb-4 md:p-6 border-b border-slate-100 bg-slate-50 shrink-0">
+              <div className="w-12 h-1.5 bg-slate-200 rounded-full mx-auto mb-3 md:hidden" />
+              <div className="flex items-center justify-between gap-2">
+                <div className="min-w-0">
+                  <h3 className="font-black text-slate-800 text-base md:text-lg uppercase tracking-wide flex items-center gap-2">
+                    <FileCheck className="text-indigo-600 shrink-0" size={20} /> <span className="truncate">Scan de Document</span>
+                  </h3>
+                  <p className="text-xs font-bold text-slate-400 uppercase mt-0.5 truncate">{p.prenom} {p.nom_complet} — Réf {p.reference || 'Non spécifiée'}</p>
+                </div>
+                <button 
+                  onClick={() => setShowScanModal(false)}
+                  className="w-9 h-9 rounded-full border border-slate-200 flex items-center justify-center text-slate-500 hover:bg-slate-100 font-bold cursor-pointer shrink-0"
+                >
+                  ✕
+                </button>
               </div>
-              <button 
-                onClick={() => setShowScanModal(false)}
-                className="w-9 h-9 rounded-full border border-slate-200 flex items-center justify-center text-slate-500 hover:bg-slate-100 font-bold cursor-pointer"
-              >
-                ✕
-              </button>
             </div>
 
-            <div className="p-6 overflow-y-auto flex-1 flex flex-col items-center justify-center bg-slate-50 min-h-[350px]">
+            <div className="p-5 md:p-6 overflow-y-auto flex-1 flex flex-col items-center justify-center bg-slate-50 min-h-[300px] md:min-h-[350px]">
               {scanUrl ? (
                 <div className="w-full h-full flex flex-col items-center gap-4">
                   <div className="border border-slate-200 rounded-2xl overflow-hidden shadow-inner max-h-[50vh] w-full flex items-center justify-center bg-white p-2">
@@ -1639,13 +2436,13 @@ export default function DetailsPelerin() {
                       download={`passeport_${p.nom_complet?.replace(/\s+/g, '_') || 'pelerin'}.jpg`}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="bg-indigo-50 text-indigo-700 border border-indigo-200 px-4 py-2 rounded-xl text-xs font-black uppercase hover:bg-indigo-100 transition-all flex items-center gap-1.5 cursor-pointer"
+                      className="bg-indigo-50 text-indigo-700 border border-indigo-200 px-4 py-2.5 md:py-2 rounded-xl text-xs font-black uppercase hover:bg-indigo-100 transition-all flex items-center gap-1.5 cursor-pointer"
                     >
                       ⬇ Télécharger
                     </a>
                     <button 
                       onClick={() => { handleChange('document_url', ''); }}
-                      className="bg-red-50 text-red-600 border border-red-100 px-4 py-2 rounded-xl text-xs font-black uppercase hover:bg-red-100 transition-all flex items-center gap-1.5 cursor-pointer"
+                      className="bg-red-50 text-red-600 border border-red-100 px-4 py-2.5 md:py-2 rounded-xl text-xs font-black uppercase hover:bg-red-100 transition-all flex items-center gap-1.5 cursor-pointer"
                     >
                       ✕ Supprimer le scan
                     </button>
@@ -1688,10 +2485,10 @@ export default function DetailsPelerin() {
               )}
             </div>
 
-            <div className="p-5 bg-slate-50 border-t border-slate-100 flex items-center justify-end gap-3">
+            <div className="px-5 pt-3.5 pb-[max(1.25rem,env(safe-area-inset-bottom))] md:p-5 bg-slate-50 border-t border-slate-100 flex items-center justify-end gap-2.5 md:gap-3 shrink-0">
               <button 
                 onClick={() => setShowScanModal(false)}
-                className="bg-slate-200 hover:bg-slate-300 text-slate-700 px-5 py-2.5 rounded-xl text-xs font-black uppercase cursor-pointer"
+                className="flex-1 md:flex-none bg-slate-200 hover:bg-slate-300 text-slate-700 h-12 md:h-auto md:px-5 md:py-2.5 rounded-2xl md:rounded-xl text-xs font-black uppercase cursor-pointer"
               >
                 Fermer
               </button>
@@ -1700,7 +2497,7 @@ export default function DetailsPelerin() {
                   saveAdvancedData();
                   setShowScanModal(false);
                 }}
-                className="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2.5 rounded-xl text-xs font-black uppercase cursor-pointer"
+                className="flex-1 md:flex-none bg-indigo-600 hover:bg-indigo-700 text-white h-12 md:h-auto md:px-5 md:py-2.5 rounded-2xl md:rounded-xl text-xs font-black uppercase cursor-pointer"
               >
                 Enregistrer
               </button>

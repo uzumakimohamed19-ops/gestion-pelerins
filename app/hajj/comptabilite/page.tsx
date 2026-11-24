@@ -9,6 +9,7 @@ import { YearSelector } from '@/components/YearSelector'
 import { HajjCurrencyTabs } from '@/components/HajjCurrencySelector'
 import { formatAuthorInline, formatProfileRoleLabel, getProfileRoleBadgeClass } from '@/lib/profileAuthor'
 import {
+  HAJJ_CURRENCIES,
   HAJJ_CURRENCY_MAP,
   countByCurrency,
   getHajjCurrencySymbol,
@@ -17,7 +18,7 @@ import {
 } from '@/lib/hajjCurrency'
 import type { LucideIcon } from 'lucide-react'
 import {
-  TrendingUp, Package, Wallet, CreditCard, BarChart2, ChevronDown, ChevronUp,
+  TrendingUp, Package, Wallet, CreditCard, BarChart2, ChevronDown, ChevronUp, ChevronRight,
   Plus, Trash2, Landmark, DollarSign, Search, Users, Check, X, Building2, Tag,
   Layers, Pencil, Copy, Download, ArrowUpDown, Receipt, LayoutDashboard, UserCheck,
   ListChecks, UserPlus, RefreshCw, SlidersHorizontal,
@@ -251,9 +252,9 @@ function Sheet({
   return (
     <div className={`fixed inset-0 ${z} flex items-end md:items-center justify-center p-0 md:p-4`}>
       <div className="absolute inset-0 bg-slate-900/50 backdrop-blur-[2px] animate-in fade-in duration-150" onClick={onClose} />
-      <div className="relative w-full md:max-w-xl bg-white rounded-t-3xl md:rounded-2xl shadow-2xl flex flex-col max-h-[92dvh] md:max-h-[88vh] animate-in slide-in-from-bottom md:zoom-in-95 duration-200">
-        <div className="md:hidden flex justify-center pt-2.5">
-          <div className="w-10 h-1 rounded-full bg-slate-200" />
+      <div className="relative w-full md:max-w-xl bg-white rounded-t-[2rem] md:rounded-2xl shadow-2xl flex flex-col max-h-[92dvh] md:max-h-[88vh] animate-in slide-in-from-bottom md:zoom-in-95 duration-200">
+        <div className="md:hidden flex justify-center pt-3">
+          <div className="w-12 h-1.5 rounded-full bg-slate-200" />
         </div>
         <div className="flex items-start justify-between gap-3 px-4 sm:px-5 pt-3 md:pt-5 pb-3 border-b border-slate-100">
           <div className="min-w-0">
@@ -1263,28 +1264,28 @@ export default function ComptabiliteHajj() {
       <button
         type="button"
         onClick={() => openAdd(r)}
-        className="h-10 rounded-xl bg-blue-600 active:bg-blue-700 text-white text-xs font-black flex items-center justify-center gap-1.5 cursor-pointer"
+        className="h-11 md:h-10 rounded-2xl md:rounded-xl bg-blue-600 active:bg-blue-700 text-white text-xs font-black flex items-center justify-center gap-1.5 cursor-pointer"
       >
         <UserPlus size={14} /> Ajouter
       </button>
       <button
         type="button"
         onClick={() => openEdit(r)}
-        className="h-10 rounded-xl bg-slate-900 active:bg-slate-800 text-white text-xs font-black flex items-center justify-center gap-1.5 cursor-pointer"
+        className="h-11 md:h-10 rounded-2xl md:rounded-xl bg-slate-900 active:bg-slate-800 text-white text-xs font-black flex items-center justify-center gap-1.5 cursor-pointer"
       >
         <Pencil size={13} /> Modifier
       </button>
       <button
         type="button"
         onClick={() => openEdit(r, true)}
-        className="h-10 rounded-xl bg-white border border-slate-200 active:bg-slate-100 text-slate-700 text-xs font-black flex items-center justify-center gap-1.5 cursor-pointer"
+        className="h-11 md:h-10 rounded-2xl md:rounded-xl bg-white border border-slate-200 active:bg-slate-100 text-slate-700 text-xs font-black flex items-center justify-center gap-1.5 cursor-pointer"
       >
         <Copy size={13} /> Dupliquer
       </button>
       <button
         type="button"
         onClick={() => handleDeleteDepense(r.d.id)}
-        className="h-10 rounded-xl bg-white border border-rose-200 active:bg-rose-50 text-rose-600 text-xs font-black flex items-center justify-center gap-1.5 cursor-pointer"
+        className="h-11 md:h-10 rounded-2xl md:rounded-xl bg-white border border-rose-200 active:bg-rose-50 text-rose-600 text-xs font-black flex items-center justify-center gap-1.5 cursor-pointer"
       >
         <Trash2 size={13} /> Supprimer
       </button>
@@ -1403,8 +1404,775 @@ export default function ComptabiliteHajj() {
   const detailRow = detailId ? rows.find(r => r.d.id === detailId) : undefined
 
   /* ───────────────────────────── Rendu ───────────────────────────── */
+  const handleSelectDevise = (next: HajjCurrency) => {
+    setSelectedDevise(next)
+    setExpandedAgence(null)
+    setExpandedDepense(null)
+    setExpandedPelerin(null)
+    setDetailId(null)
+    resetFilters()
+  }
+
   return (
-    <div className="w-full min-w-0 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 md:py-8 pb-24 overflow-x-hidden text-slate-800">
+    <div className="min-h-screen bg-slate-50/70 md:bg-transparent text-slate-800">
+      {/* =================================================================== */}
+      {/* 📱 VERSION MOBILE NATIVE FINTECH (`md:hidden`)                      */}
+      {/* =================================================================== */}
+      <div className="md:hidden pb-32">
+        {/* 1. EN-TÊTE FINTECH BLEU ÉPURÉ & SOLDE HERO */}
+        <div className="bg-gradient-to-b from-blue-600 via-blue-600 to-blue-700 text-white rounded-b-[2.25rem] px-5 pt-5 pb-6 shadow-lg shadow-blue-600/15 relative overflow-hidden">
+          <div className="absolute -right-10 -bottom-12 text-white/[0.06] pointer-events-none select-none">
+            <Wallet size={170} />
+          </div>
+
+          {/* Barre supérieure sobre */}
+          <div className="flex items-center justify-between gap-3 relative z-10">
+            <div className="min-w-0">
+              <h1 className="text-xl font-black tracking-tight leading-tight">
+                Comptabilité
+              </h1>
+              <p className="text-xs text-blue-100/90 font-semibold mt-0.5 truncate">
+                {data.length} pèlerin{data.length > 1 ? 's' : ''}
+                {selectedYear !== 'all' ? ` • Campagne ${selectedYear}` : ' • Toutes campagnes'}
+              </p>
+            </div>
+
+            <div className="flex items-center gap-2 shrink-0">
+              {depenses.length > 0 && (
+                <button
+                  type="button"
+                  onClick={exportCsv}
+                  disabled={filteredRows.length === 0}
+                  aria-label="Exporter en CSV"
+                  className="w-10 h-10 rounded-full bg-white/15 border border-white/20 text-white flex items-center justify-center active:scale-90 transition disabled:opacity-40 cursor-pointer"
+                >
+                  <Download size={17} />
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => {
+                  setTab('depenses')
+                  openNew()
+                }}
+                aria-label="Nouvelle dépense"
+                className="w-11 h-11 rounded-full bg-white text-blue-600 shadow-md shadow-blue-900/15 flex items-center justify-center active:scale-90 transition cursor-pointer"
+              >
+                <Plus size={22} strokeWidth={2.6} />
+              </button>
+            </div>
+          </div>
+
+          {/* Sélecteur de devise natif (3 segments stricts FCFA | EUR | USD) */}
+          <div className="mt-5 grid grid-cols-3 gap-1 p-1 bg-white/15 border border-white/15 rounded-2xl backdrop-blur-xs relative z-10">
+            {HAJJ_CURRENCIES.map(cur => {
+              const active = selectedDevise === cur.code
+              const count = deviseCounts[cur.code] ?? 0
+              return (
+                <button
+                  key={cur.code}
+                  type="button"
+                  onClick={() => handleSelectDevise(cur.code)}
+                  className={`h-10 rounded-xl text-xs font-black flex items-center justify-center gap-1.5 transition-all active:scale-[0.98] cursor-pointer ${
+                    active ? 'bg-white text-blue-700 shadow-sm' : 'text-blue-100'
+                  }`}
+                >
+                  <span>{cur.shortLabel}</span>
+                  <span
+                    className={`text-[10px] px-1.5 py-0.5 rounded-full tabular-nums ${
+                      active ? 'bg-blue-50 text-blue-700' : 'bg-white/15 text-white'
+                    }`}
+                  >
+                    {count}
+                  </span>
+                </button>
+              )
+            })}
+          </div>
+
+          {/* Solde Hero : un seul chiffre fort, zéro encombrement */}
+          <div className="mt-6 relative z-10">
+            <p className="text-[11px] font-bold uppercase tracking-wider text-blue-100/90">
+              Bénéfice réel • {HAJJ_CURRENCY_MAP[selectedDevise].label}
+            </p>
+            <p className="text-[2rem] leading-none font-black tabular-nums tracking-tight mt-1.5">
+              {beneficeReel > 0 ? '+' : ''}
+              {fmt(beneficeReel)}{' '}
+              <span className="text-base font-bold text-blue-200">{curSymbol}</span>
+            </p>
+
+            <div className="grid grid-cols-2 gap-4 pt-4 mt-5 border-t border-white/15">
+              <div>
+                <p className="text-[11px] font-semibold text-blue-100/80">
+                  Encaissé ({tauxRecouvrement}%)
+                </p>
+                <p className="text-base font-black tabular-nums mt-0.5">
+                  {fmt(totalEncaisse)} <span className="text-xs font-bold text-blue-200">{curShort}</span>
+                </p>
+              </div>
+              <div className="border-l border-white/15 pl-4">
+                <p className="text-[11px] font-semibold text-blue-100/80">
+                  Dépensé ({depenses.length})
+                </p>
+                <p className="text-base font-black tabular-nums mt-0.5">
+                  -{fmt(totalDepenses)} <span className="text-xs font-bold text-blue-200">{curShort}</span>
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* 2. ONGLET SEGMENTÉ COLLANT (iOS style) */}
+        <div className="sticky top-0 z-30 bg-slate-50/95 backdrop-blur-md px-5 py-3.5">
+          <div className="grid grid-cols-2 gap-1 p-1 bg-slate-200/75 rounded-2xl">
+            <button
+              type="button"
+              onClick={() => setTab('depenses')}
+              className={`h-10 rounded-xl text-xs font-black flex items-center justify-center gap-2 transition-all active:scale-[0.98] cursor-pointer ${
+                tab === 'depenses' ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-600'
+              }`}
+            >
+              <Receipt size={15} className={tab === 'depenses' ? 'text-blue-600' : 'text-slate-400'} />
+              <span>Dépenses</span>
+              <span
+                className={`text-[10px] px-1.5 py-0.5 rounded-full tabular-nums ${
+                  tab === 'depenses' ? 'bg-blue-50 text-blue-700' : 'bg-slate-300/80 text-slate-600'
+                }`}
+              >
+                {depenses.length}
+              </span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setTab('apercu')}
+              className={`h-10 rounded-xl text-xs font-black flex items-center justify-center gap-2 transition-all active:scale-[0.98] cursor-pointer ${
+                tab === 'apercu' ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-600'
+              }`}
+            >
+              <LayoutDashboard size={15} className={tab === 'apercu' ? 'text-blue-600' : 'text-slate-400'} />
+              <span>Vue d'ensemble</span>
+            </button>
+          </div>
+        </div>
+
+        {/* 3. CONTENU MOBILE AÉRÉ */}
+        <div className="px-5 space-y-5">
+          {loading ? (
+            <div className="flex items-center justify-center py-24">
+              <div className="w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full animate-spin" />
+            </div>
+          ) : tab === 'apercu' ? (
+            <>
+              {/* Carte Recouvrement épurée */}
+              <div className="bg-white rounded-3xl border border-slate-100 shadow-xs p-5 space-y-4">
+                <div className="flex items-end justify-between gap-3">
+                  <div>
+                    <p className="text-[11px] font-black uppercase tracking-wider text-slate-400">
+                      Recouvrement
+                    </p>
+                    <p className="text-2xl font-black text-slate-900 tabular-nums mt-0.5">
+                      {tauxRecouvrement}%
+                    </p>
+                  </div>
+                  <span className="text-xs font-bold text-blue-600 bg-blue-50 px-3 py-1 rounded-full">
+                    {enAttente.length} en attente
+                  </span>
+                </div>
+
+                <div className="h-2.5 bg-slate-100 rounded-full overflow-hidden">
+                  <div
+                    className="h-full bg-blue-600 rounded-full transition-all duration-300"
+                    style={{ width: `${Math.min(100, tauxRecouvrement)}%` }}
+                  />
+                </div>
+
+                <div className="grid grid-cols-2 gap-4 pt-3.5 border-t border-slate-100">
+                  <div>
+                    <p className="text-[11px] font-semibold text-slate-400">Reste à recouvrer</p>
+                    <p className="text-base font-black text-amber-600 tabular-nums mt-0.5">
+                      {fmt(totalRestant)} <span className="text-xs font-bold text-slate-400">{curShort}</span>
+                    </p>
+                  </div>
+                  <div className="border-l border-slate-100 pl-4">
+                    <p className="text-[11px] font-semibold text-slate-400">Total attendu</p>
+                    <p className="text-base font-black text-slate-900 tabular-nums mt-0.5">
+                      {fmt(totalAttendu)} <span className="text-xs font-bold text-slate-400">{curShort}</span>
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Carte Dépenses par nature */}
+              <div className="bg-white rounded-3xl border border-slate-100 shadow-xs p-5 space-y-4">
+                <div className="flex items-center justify-between gap-2">
+                  <h2 className="text-sm font-black text-slate-900">Dépenses par nature</h2>
+                  <button
+                    type="button"
+                    onClick={() => setTab('depenses')}
+                    className="text-xs font-black text-blue-600 active:opacity-70 py-1 cursor-pointer"
+                  >
+                    Tout voir →
+                  </button>
+                </div>
+                {natures.length === 0 ? (
+                  <p className="text-xs text-slate-400 font-semibold text-center py-6">
+                    Aucune dépense enregistrée en {HAJJ_CURRENCY_MAP[selectedDevise].label}.
+                  </p>
+                ) : (
+                  renderNatureBars(5)
+                )}
+              </div>
+
+              {/* Section Forfaits / Packages */}
+              {Object.keys(packages).length > 0 && (
+                <div className="space-y-3">
+                  <h2 className="text-xs font-black uppercase tracking-wider text-slate-400 px-1">
+                    Forfaits & Packages
+                  </h2>
+                  <div className="space-y-2.5">
+                    {Object.entries(packages).map(([nom, pkg]) => {
+                      const taux = pkg.attendu > 0 ? Math.round((pkg.encaisse / pkg.attendu) * 100) : 0
+                      return (
+                        <div
+                          key={nom}
+                          className="bg-white rounded-3xl border border-slate-100 shadow-xs p-4 space-y-3"
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <p className="font-black text-slate-900 text-sm truncate">{nom}</p>
+                            <span className="text-[11px] font-bold text-slate-500 bg-slate-100 px-2.5 py-0.5 rounded-full shrink-0">
+                              {pkg.count} pers.
+                            </span>
+                          </div>
+
+                          <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
+                            <div
+                              className="h-full bg-blue-600 rounded-full transition-all"
+                              style={{ width: `${Math.min(100, taux)}%` }}
+                            />
+                          </div>
+
+                          <div className="flex items-center justify-between text-xs">
+                            <span className="font-black text-emerald-700 tabular-nums">
+                              {fmt(pkg.encaisse)} {curShort}
+                            </span>
+                            <span className="font-semibold text-slate-400 tabular-nums">
+                              Reste {fmt(pkg.attendu - pkg.encaisse)} {curShort} • {taux}%
+                            </span>
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* Section Agences & Partenaires */}
+              {Object.keys(agences).length > 0 && (
+                <div className="space-y-3">
+                  <h2 className="text-xs font-black uppercase tracking-wider text-slate-400 px-1">
+                    Agences & Partenaires
+                  </h2>
+                  <div className="space-y-2.5">
+                    {Object.entries(agences)
+                      .sort((a, b) => b[1].encaisse - a[1].encaisse)
+                      .map(([nom, agc]) => {
+                        const taux = agc.attendu > 0 ? Math.round((agc.encaisse / agc.attendu) * 100) : 0
+                        const isOpen = expandedAgence === nom
+                        return (
+                          <div
+                            key={nom}
+                            className="bg-white rounded-3xl border border-slate-100 shadow-xs overflow-hidden"
+                          >
+                            <button
+                              type="button"
+                              onClick={() => setExpandedAgence(isOpen ? null : nom)}
+                              className="w-full p-4 flex items-center justify-between gap-3 text-left active:bg-slate-50 transition cursor-pointer"
+                            >
+                              <div className="min-w-0">
+                                <p className="font-black text-slate-900 text-sm truncate">{nom}</p>
+                                <p className="text-xs text-slate-400 font-semibold mt-0.5">
+                                  {agc.pelerins.length} pèlerin{agc.pelerins.length > 1 ? 's' : ''} • {taux}%
+                                </p>
+                              </div>
+                              <div className="flex items-center gap-2 shrink-0">
+                                <p className="text-sm font-black text-emerald-700 tabular-nums">
+                                  {fmt(agc.encaisse)} {curShort}
+                                </p>
+                                <ChevronDown
+                                  size={16}
+                                  className={`text-slate-400 transition-transform ${isOpen ? 'rotate-180' : ''}`}
+                                />
+                              </div>
+                            </button>
+
+                            {isOpen && (
+                              <div className="border-t border-slate-100 divide-y divide-slate-100 bg-slate-50/50">
+                                {agc.pelerins.map((p, i) => {
+                                  const restant = (Number(p.prix_package) || 0) - (Number(p.total_paye) || 0)
+                                  const solde = restant <= 0
+                                  return (
+                                    <div
+                                      key={p.id || i}
+                                      className="flex items-center justify-between gap-3 px-4 py-3"
+                                    >
+                                      <div className="min-w-0">
+                                        <p className="text-xs font-bold text-slate-900 truncate">
+                                          {p.prenom} {p.nom_complet || p.nom}
+                                        </p>
+                                        <p className="text-[11px] text-slate-400 font-mono truncate">
+                                          {p.num_passeport || 'Sans passeport'}
+                                        </p>
+                                      </div>
+                                      <span
+                                        className={`text-[11px] font-black px-2.5 py-1 rounded-full shrink-0 tabular-nums ${
+                                          solde
+                                            ? 'bg-emerald-50 text-emerald-700'
+                                            : 'bg-amber-50 text-amber-700'
+                                        }`}
+                                      >
+                                        {solde ? 'Soldé' : `-${fmt(restant)} ${curShort}`}
+                                      </span>
+                                    </div>
+                                  )
+                                })}
+                              </div>
+                            )}
+                          </div>
+                        )
+                      })}
+                  </div>
+                </div>
+              )}
+            </>
+          ) : (
+            <>
+              {/* Ligne d'info ultra-légère : coût moyen + bascule répartition */}
+              <div className="flex items-center justify-between gap-2 px-1">
+                <p className="text-xs font-semibold text-slate-500">
+                  Moy.{' '}
+                  <span className="font-black text-slate-900 tabular-nums">
+                    {fmt(data.length ? totalDepenses / data.length : 0)} {curShort}
+                  </span>{' '}
+                  / pèlerin
+                </p>
+                {natures.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setShowNatureBars(v => !v)}
+                    className="inline-flex items-center gap-1 text-xs font-black text-blue-600 active:opacity-70 cursor-pointer"
+                  >
+                    <span>Répartition</span>
+                    <ChevronDown
+                      size={14}
+                      className={`transition-transform ${showNatureBars ? 'rotate-180' : ''}`}
+                    />
+                  </button>
+                )}
+              </div>
+
+              {/* Répartition par nature (à la demande pour garder l'écran aéré) */}
+              {showNatureBars && natures.length > 0 && (
+                <div className="bg-white rounded-3xl border border-slate-100 shadow-xs p-5 space-y-3 animate-in fade-in slide-in-from-top-2 duration-150">
+                  <div className="flex items-center justify-between">
+                    <p className="text-xs font-black uppercase tracking-wider text-slate-400">
+                      Répartition par nature
+                    </p>
+                    {effectiveNature !== 'all' && (
+                      <button
+                        type="button"
+                        onClick={() => setFilterNature('all')}
+                        className="text-xs font-bold text-blue-600 cursor-pointer"
+                      >
+                        Tout afficher
+                      </button>
+                    )}
+                  </div>
+                  {renderNatureBars()}
+                </div>
+              )}
+
+              {/* Recherche + bouton Filtres spacieux */}
+              <div className="flex items-center gap-2.5">
+                <div className="relative flex-1 min-w-0">
+                  <Search
+                    size={17}
+                    className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none"
+                  />
+                  <input
+                    type="text"
+                    placeholder="Rechercher une dépense, pèlerin…"
+                    value={filterDepenseSearch}
+                    onChange={e => setFilterDepenseSearch(e.target.value)}
+                    className="w-full h-12 pl-11 pr-10 bg-white border border-slate-200/80 rounded-2xl text-sm font-semibold text-slate-800 shadow-xs outline-none focus:border-blue-600 transition"
+                  />
+                  {filterDepenseSearch && (
+                    <button
+                      type="button"
+                      onClick={() => setFilterDepenseSearch('')}
+                      aria-label="Effacer"
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 w-7 h-7 rounded-full bg-slate-100 text-slate-500 flex items-center justify-center"
+                    >
+                      <X size={14} />
+                    </button>
+                  )}
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setShowFilters(true)}
+                  aria-label="Filtrer et trier"
+                  className="relative w-12 h-12 shrink-0 rounded-2xl bg-white border border-slate-200/80 shadow-xs text-slate-700 flex items-center justify-center active:scale-95 transition cursor-pointer"
+                >
+                  <SlidersHorizontal size={18} />
+                  {activeFilterCount > 0 && (
+                    <span className="absolute -top-1 -right-1 min-w-[19px] h-[19px] px-1 rounded-full bg-blue-600 text-white text-[10px] font-black flex items-center justify-center shadow-xs">
+                      {activeFilterCount}
+                    </span>
+                  )}
+                </button>
+              </div>
+
+              {/* Sélecteur de vue fluide (Journal / Par nature / Par pèlerin) */}
+              <div className="grid grid-cols-3 gap-1 p-1 bg-slate-200/70 rounded-2xl">
+                {([
+                  ['liste', 'Journal', Receipt],
+                  ['nature', 'Nature', Layers],
+                  ['pelerin', 'Pèlerin', UserCheck],
+                ] as const).map(([id, label, Icon]) => (
+                  <button
+                    key={id}
+                    type="button"
+                    onClick={() => setViewMode(id)}
+                    className={`h-9 rounded-xl text-xs font-black flex items-center justify-center gap-1.5 transition-all active:scale-[0.98] cursor-pointer ${
+                      viewMode === id ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-500'
+                    }`}
+                  >
+                    <Icon size={13} />
+                    <span>{label}</span>
+                  </button>
+                ))}
+              </div>
+
+              {/* Pills de natures sur 1 seule ligne défilable horizontalement */}
+              {natures.length > 0 && (
+                <div className="-mx-5 px-5 flex items-center gap-2 overflow-x-auto pb-1">
+                  <button
+                    type="button"
+                    onClick={() => setFilterNature('all')}
+                    className={`h-9 px-3.5 rounded-full text-xs font-bold whitespace-nowrap shrink-0 transition active:scale-95 cursor-pointer ${
+                      effectiveNature === 'all'
+                        ? 'bg-slate-900 text-white shadow-xs'
+                        : 'bg-white text-slate-600 border border-slate-200/80'
+                    }`}
+                  >
+                    Toutes
+                  </button>
+                  {natures.map(n => {
+                    const active = effectiveNature === n.libelle
+                    return (
+                      <button
+                        key={n.libelle}
+                        type="button"
+                        onClick={() => setFilterNature(active ? 'all' : n.libelle)}
+                        className={`h-9 px-3.5 rounded-full text-xs font-bold whitespace-nowrap shrink-0 transition active:scale-95 cursor-pointer ${
+                          active
+                            ? 'bg-blue-600 text-white shadow-xs'
+                            : 'bg-white text-slate-600 border border-slate-200/80'
+                        }`}
+                      >
+                        {n.libelle}{' '}
+                        <span className={active ? 'text-blue-200' : 'text-slate-400'}>
+                          ({n.count})
+                        </span>
+                      </button>
+                    )
+                  })}
+                </div>
+              )}
+
+              {/* Ligne résultat sobre */}
+              <div className="flex items-center justify-between px-1">
+                <div className="flex items-center gap-2 text-xs font-bold text-slate-500">
+                  <span>
+                    {filteredRows.length} écriture{filteredRows.length > 1 ? 's' : ''}
+                  </span>
+                  {hasActiveFilter && (
+                    <button
+                      type="button"
+                      onClick={resetFilters}
+                      className="text-blue-600 font-black active:opacity-70 cursor-pointer"
+                    >
+                      • Effacer
+                    </button>
+                  )}
+                </div>
+                <span className="text-sm font-black text-rose-600 tabular-nums">
+                  -{fmt(filteredTotal)} {curShort}
+                </span>
+              </div>
+
+              {/* Liste des transactions style Fintech */}
+              {filteredRows.length === 0 ? (
+                <div className="bg-white rounded-3xl border border-dashed border-slate-200 py-14 px-6 text-center space-y-3">
+                  <div className="w-12 h-12 rounded-2xl bg-slate-100 text-slate-400 flex items-center justify-center mx-auto">
+                    <Receipt size={22} />
+                  </div>
+                  <p className="text-sm font-black text-slate-700">
+                    {depenses.length === 0
+                      ? `Aucune dépense en ${HAJJ_CURRENCY_MAP[selectedDevise].label}`
+                      : 'Aucun résultat trouvé'}
+                  </p>
+                  <p className="text-xs text-slate-400 font-medium">
+                    {depenses.length === 0
+                      ? 'Ajoutez votre première sortie de trésorerie pour démarrer le suivi.'
+                      : 'Essayez de modifier vos filtres ou votre recherche.'}
+                  </p>
+                  {depenses.length === 0 && (
+                    <button
+                      type="button"
+                      onClick={openNew}
+                      className="mt-2 inline-flex items-center gap-2 h-11 px-5 rounded-2xl bg-blue-600 text-white text-xs font-black shadow-md shadow-blue-600/20 active:scale-95 transition cursor-pointer"
+                    >
+                      <Plus size={16} />
+                      <span>Nouvelle dépense ({curSymbol})</span>
+                    </button>
+                  )}
+                </div>
+              ) : viewMode === 'liste' ? (
+                <div className="bg-white rounded-3xl border border-slate-100 shadow-xs divide-y divide-slate-100 overflow-hidden">
+                  {filteredRows.map(r => {
+                    const meta = TYPE_META[r.d.type_cible] ?? TYPE_META.global
+                    const Icon = meta.icon
+                    return (
+                      <button
+                        key={r.d.id}
+                        type="button"
+                        onClick={() => setDetailId(r.d.id)}
+                        className="w-full px-4 py-4 flex items-center gap-3.5 text-left active:bg-slate-50 transition cursor-pointer"
+                      >
+                        <div className="w-11 h-11 rounded-2xl bg-blue-50/80 text-blue-600 flex items-center justify-center shrink-0">
+                          <Icon size={18} />
+                        </div>
+
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-1.5">
+                            <p className="font-black text-slate-900 text-sm truncate">
+                              {r.d.libelle}
+                            </p>
+                            {r.dyn && <RefreshCw size={12} className="text-blue-600 shrink-0" />}
+                          </div>
+                          <p className="text-xs text-slate-500 font-medium truncate mt-0.5">
+                            {r.label}
+                          </p>
+                          <p className="text-[11px] text-slate-400 font-medium mt-1 truncate">
+                            {r.targets.length === 0 && !r.isList ? 'Cible introuvable' : `${r.count} pers.`}
+                            {r.d.created_at &&
+                              ` • ${new Date(r.d.created_at).toLocaleDateString('fr-FR', {
+                                day: '2-digit',
+                                month: 'short',
+                              })}`}
+                            {r.d.recorded_by_name && ` • ${r.d.recorded_by_name}`}
+                          </p>
+                        </div>
+
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          <div className="text-right">
+                            <p className="text-sm font-black text-rose-600 tabular-nums">
+                              -{fmt(r.montant)}
+                            </p>
+                            <p className="text-[10px] font-bold text-slate-400">{curShort}</p>
+                          </div>
+                          <ChevronRight size={16} className="text-slate-300" />
+                        </div>
+                      </button>
+                    )
+                  })}
+                </div>
+              ) : viewMode === 'nature' ? (
+                <div className="space-y-3">
+                  {groupedByNature.map(g => {
+                    const collapsed = collapsedNatures.includes(g.libelle)
+                    const pct = filteredTotal > 0 ? Math.round((g.total / filteredTotal) * 100) : 0
+                    return (
+                      <div
+                        key={g.libelle}
+                        className="bg-white rounded-3xl border border-slate-100 shadow-xs overflow-hidden"
+                      >
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setCollapsedNatures(c =>
+                              c.includes(g.libelle)
+                                ? c.filter(x => x !== g.libelle)
+                                : [...c, g.libelle],
+                            )
+                          }
+                          className="w-full p-4 text-left active:bg-slate-50 transition cursor-pointer"
+                        >
+                          <div className="flex items-center justify-between gap-3">
+                            <div className="min-w-0">
+                              <p className="font-black text-slate-900 text-sm truncate">
+                                {g.libelle}
+                              </p>
+                              <p className="text-xs text-slate-400 font-semibold mt-0.5">
+                                {g.rows.length} écriture{g.rows.length > 1 ? 's' : ''} • {pct}%
+                              </p>
+                            </div>
+                            <div className="flex items-center gap-2 shrink-0">
+                              <p className="text-sm font-black text-rose-600 tabular-nums">
+                                -{fmt(g.total)} {curShort}
+                              </p>
+                              <ChevronDown
+                                size={16}
+                                className={`text-slate-400 transition-transform ${
+                                  collapsed ? '' : 'rotate-180'
+                                }`}
+                              />
+                            </div>
+                          </div>
+                          <div className="mt-3 h-2 bg-slate-100 rounded-full overflow-hidden">
+                            <div
+                              className="h-full bg-amber-500 rounded-full"
+                              style={{ width: `${pct}%` }}
+                            />
+                          </div>
+                        </button>
+
+                        {!collapsed && (
+                          <div className="border-t border-slate-100 divide-y divide-slate-100 bg-slate-50/40">
+                            {g.rows.map(r => (
+                              <button
+                                key={r.d.id}
+                                type="button"
+                                onClick={() => setDetailId(r.d.id)}
+                                className="w-full px-4 py-3.5 flex items-center justify-between gap-3 text-left active:bg-slate-100/70 transition cursor-pointer"
+                              >
+                                <div className="min-w-0">
+                                  <p className="text-xs font-bold text-slate-800 truncate">
+                                    {r.label}
+                                  </p>
+                                  <p className="text-[11px] text-slate-400 mt-0.5 truncate">
+                                    {r.count} pers.
+                                    {r.d.created_at &&
+                                      ` • ${new Date(r.d.created_at).toLocaleDateString('fr-FR', {
+                                        day: '2-digit',
+                                        month: 'short',
+                                      })}`}
+                                  </p>
+                                </div>
+                                <div className="flex items-center gap-1 shrink-0">
+                                  <span className="text-xs font-black text-rose-600 tabular-nums">
+                                    -{fmt(r.montant)} {curShort}
+                                  </span>
+                                  <ChevronRight size={14} className="text-slate-300" />
+                                </div>
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )
+                  })}
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  <p className="text-xs text-slate-400 font-semibold px-1">
+                    {perPelerin.length} pèlerin{perPelerin.length > 1 ? 's' : ''} concerné
+                    {perPelerin.length > 1 ? 's' : ''}
+                  </p>
+                  {perPelerin.map(({ p, cout, lignes }) => {
+                    const k = String(p.id)
+                    const open = expandedPelerin === k
+                    const paye = Number(p.total_paye) || 0
+                    const net = paye - cout
+                    const initiales =
+                      `${p.prenom?.charAt(0) || ''}${(p.nom_complet || p.nom || '').charAt(0)}`.toUpperCase() ||
+                      'P'
+                    return (
+                      <div
+                        key={k}
+                        className="bg-white rounded-3xl border border-slate-100 shadow-xs overflow-hidden"
+                      >
+                        <button
+                          type="button"
+                          onClick={() => setExpandedPelerin(open ? null : k)}
+                          className="w-full p-4 flex items-center gap-3 text-left active:bg-slate-50 transition cursor-pointer"
+                        >
+                          <div className="w-10 h-10 rounded-full bg-blue-50 text-blue-700 font-black text-xs flex items-center justify-center shrink-0">
+                            {initiales}
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <p className="font-black text-slate-900 text-sm truncate">
+                              {pName(p)}
+                            </p>
+                            <p className="text-xs text-slate-400 font-medium mt-0.5 truncate">
+                              Payé {fmt(paye)} {curShort} • {lignes.length} charge
+                              {lignes.length > 1 ? 's' : ''}
+                            </p>
+                          </div>
+                          <div className="text-right shrink-0">
+                            <p className="text-sm font-black text-rose-600 tabular-nums">
+                              -{fmt(cout)} {curShort}
+                            </p>
+                            <span
+                              className={`inline-block mt-1 text-[10px] font-black px-2 py-0.5 rounded-full tabular-nums ${
+                                net >= 0
+                                  ? 'bg-emerald-50 text-emerald-700'
+                                  : 'bg-rose-50 text-rose-700'
+                              }`}
+                            >
+                              {net > 0 ? '+' : ''}
+                              {fmt(net)} {curShort}
+                            </span>
+                          </div>
+                        </button>
+
+                        {open && (
+                          <div className="border-t border-slate-100 bg-slate-50/60 px-4 py-3 space-y-2">
+                            {lignes.map((l, i) => (
+                              <div
+                                key={`${l.id}-${i}`}
+                                className="flex items-center justify-between text-xs bg-white rounded-2xl border border-slate-100 px-3.5 py-2.5"
+                              >
+                                <span className="font-bold text-slate-700 truncate pr-2">
+                                  {l.libelle}
+                                </span>
+                                <span className="font-black text-rose-600 tabular-nums shrink-0">
+                                  -{fmt(l.part)} {curShort}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+            </>
+          )}
+        </div>
+
+        {/* Bouton flottant rapide en zone de pouce */}
+        {!anySheetOpen && !loading && (
+          <button
+            type="button"
+            onClick={() => {
+              setTab('depenses')
+              openNew()
+            }}
+            className="fixed right-4 bottom-24 z-30 h-12 px-4 rounded-full bg-blue-600 text-white font-black text-xs shadow-lg shadow-blue-600/30 flex items-center gap-1.5 active:scale-95 transition cursor-pointer"
+          >
+            <Plus size={18} strokeWidth={2.5} />
+            <span>Dépense ({curShort})</span>
+          </button>
+        )}
+      </div>
+
+      {/* =================================================================== */}
+      {/* 💻 VERSION PC / TABLETTE (100% INCHANGÉE `hidden md:block`)         */}
+      {/* =================================================================== */}
+      <div className="hidden md:block w-full min-w-0 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 md:py-8 pb-24 overflow-x-hidden text-slate-800">
 
       {/* HEADER RESPONSIVE (Sélecteur d'année masqué sur mobile) */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4 md:mb-5">
@@ -1886,6 +2654,7 @@ export default function ComptabiliteHajj() {
           )}
         </>
       )}
+      </div>
 
       {/* ===================== FILTRES (mobile) ===================== */}
       <Sheet
