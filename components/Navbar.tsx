@@ -23,7 +23,8 @@ import {
   Globe,
   LockKeyhole,
   BedDouble,
-  Bell
+  Bell,
+  Landmark
 } from 'lucide-react'
 import { useWorkProfile } from '@/lib/ProfileContext'
 import { useQuery } from '@powersync/react'
@@ -175,6 +176,7 @@ export default function Navbar() {
     { name: 'Plateforme MDH et nusuk', href: '/hajj/nusuk', icon: Globe }, 
     ...(isDirection ? [{ name: 'État général', href: '/hajj/etat-general', icon: BarChart3 }] : []),
     ...(canAccessCompta ? [{ name: 'Comptabilité', href: '/hajj/comptabilite', icon: PieChart }] : []),
+    ...(canAccessCompta ? [{ name: 'Virements', href: '/hajj/virements', icon: Landmark }] : []),
     { name: 'Quitter', href: '/', icon: SquareArrowRight },
   ]
 

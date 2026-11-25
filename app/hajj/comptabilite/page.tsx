@@ -8,6 +8,7 @@ import { useWorkProfile } from '@/lib/ProfileContext'
 import { YearSelector } from '@/components/YearSelector'
 import { HajjCurrencyTabs } from '@/components/HajjCurrencySelector'
 import { formatAuthorInline, formatProfileRoleLabel, getProfileRoleBadgeClass } from '@/lib/profileAuthor'
+import { getPassportPublicUrl } from '@/lib/hajjPassport'
 import {
   HAJJ_CURRENCIES,
   HAJJ_CURRENCY_MAP,
@@ -21,7 +22,8 @@ import {
   TrendingUp, Package, Wallet, CreditCard, BarChart2, ChevronDown, ChevronUp, ChevronRight,
   Plus, Trash2, Landmark, DollarSign, Search, Users, Check, X, Building2, Tag,
   Layers, Pencil, Copy, Download, ArrowUpDown, Receipt, LayoutDashboard, UserCheck,
-  ListChecks, UserPlus, RefreshCw, SlidersHorizontal,
+  ListChecks, UserPlus, RefreshCw, SlidersHorizontal, ArrowLeft, CheckCircle2, AlertCircle,
+  Plane, ShieldCheck, BedDouble, Utensils, Bus, FileText, Sparkles,
 } from 'lucide-react'
 
 /* ───────────────────────────── Types ───────────────────────────── */
@@ -39,6 +41,9 @@ type Pelerin = {
   reference?: string
   agence_ou_personne_associee?: string
   num_passeport?: string
+  photo_url?: string | null
+  sur_plateforme_gouv?: boolean | number | null
+  sur_plateforme_nusuk?: boolean | number | null
   campagne?: number | string
   agences?: { nom_agence?: string } | null
   [key: string]: unknown
@@ -92,6 +97,31 @@ const LIBELLES = [
   'Transport terrestre (Bus)',
   'Frais de dossier / Passeport',
 ]
+
+const LIBELLE_ICON: Record<string, LucideIcon> = {
+  "Billet d'avion": Plane,
+  'Visa & Nusuk': ShieldCheck,
+  'Hébergement Makkah': BedDouble,
+  'Hébergement Médine': BedDouble,
+  'Restauration & Vivres': Utensils,
+  'Transport terrestre (Bus)': Bus,
+  'Frais de dossier / Passeport': FileText,
+}
+
+function getDateGroupLabel(iso?: string): string {
+  if (!iso) return 'Sans date'
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return 'Sans date'
+  const now = new Date()
+  const todayKey = `${now.getFullYear()}-${now.getMonth()}-${now.getDate()}`
+  const yest = new Date(now)
+  yest.setDate(now.getDate() - 1)
+  const yestKey = `${yest.getFullYear()}-${yest.getMonth()}-${yest.getDate()}`
+  const dKey = `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`
+  if (dKey === todayKey) return "Aujourd'hui"
+  if (dKey === yestKey) return 'Hier'
+  return d.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short', year: d.getFullYear() !== now.getFullYear() ? 'numeric' : undefined })
+}
 
 const TYPE_META: Record<TypeCible, { label: string; short: string; desc: string; icon: LucideIcon }> = {
   pelerin: { label: 'Pèlerin unique', short: 'Pèlerin', desc: '1 personne', icon: Users },
@@ -298,22 +328,105 @@ function TargetPicker({
 }) {
   const [search, setSearch] = useState('')
   const [statut, setStatut] = useState<'all' | Statut>('all')
+  const [plateforme, setPlateforme] = useState<'all' | 'gouv' | 'nusuk'>('all')
+  const [pkgFilter, setPkgFilter] = useState<string>('all')
+  const [partnerFilter, setPartnerFilter] = useState<string>('all')
+  const [onlySelected, setOnlySelected] = useState(false)
+  const [sortBy, setSortBy] = useState<'alpha' | 'recent'>(recentFirst ? 'recent' : 'alpha')
   const [sel, setSel] = useState<string[]>(selectedIds)
+  const [visibleCount, setVisibleCount] = useState(50)
+  const loadMoreRef = useRef<HTMLDivElement | null>(null)
+  const listScrollRef = useRef<HTMLDivElement | null>(null)
+
   const q = search.trim().toLowerCase()
+  const isPelerinMode = mode === 'pelerin' || mode === 'groupe'
+  const list = mode === 'reference' ? referencesList : associesList
+
+  // Verrouiller le scroll arrière-plan tant que le sélecteur est ouvert
+  useEffect(() => {
+    const prev = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    return () => {
+      document.body.style.overflow = prev
+    }
+  }, [])
+
+  // Options dynamiques Forfait & Partenaire pour filtrer rapidement sur des centaines de pèlerins
+  const availablePackages = useMemo(() => {
+    const set = new Set<string>()
+    data.forEach(p => {
+      const pkg = (p.nom_package || '').trim()
+      if (pkg) set.add(pkg)
+    })
+    return Array.from(set).sort((a, b) => a.localeCompare(b, 'fr'))
+  }, [data])
+
+  const availablePartners = useMemo(() => {
+    const set = new Set<string>()
+    data.forEach(p => {
+      const part = assocOf(p)
+      if (part) set.add(part)
+    })
+    return Array.from(set).sort((a, b) => a.localeCompare(b, 'fr'))
+  }, [data])
+
+  const selectedSet = useMemo(() => new Set(sel), [sel])
+
+  const pelerinById = useMemo(() => {
+    const m = new Map<string, Pelerin>()
+    data.forEach(p => m.set(String(p.id), p))
+    return m
+  }, [data])
 
   const visible = useMemo(() => {
     return data
       .filter(p => {
+        const id = String(p.id)
+        if (onlySelected && !selectedSet.has(id)) return false
         if (statut !== 'all' && statusOf(p) !== statut) return false
+        if (plateforme === 'gouv' && !p.sur_plateforme_gouv) return false
+        if (plateforme === 'nusuk' && !p.sur_plateforme_nusuk) return false
+        if (pkgFilter !== 'all' && (p.nom_package || '').trim() !== pkgFilter) return false
+        if (partnerFilter !== 'all' && assocOf(p) !== partnerFilter) return false
         if (!q) return true
         const blob = `${pName(p)} ${p.num_passeport || ''} ${p.reference || ''} ${p.nom_package || ''} ${assocOf(p)} ${p.telephone_pelerin || ''}`
         return blob.toLowerCase().includes(q)
       })
-      .sort((a, b) => (recentFirst ? createdTime(b) - createdTime(a) : pName(a).localeCompare(pName(b), 'fr')))
-  }, [data, q, statut, recentFirst])
+      .sort((a, b) => (sortBy === 'recent' ? createdTime(b) - createdTime(a) : pName(a).localeCompare(pName(b), 'fr')))
+  }, [data, q, statut, plateforme, pkgFilter, partnerFilter, onlySelected, selectedSet, sortBy])
+
+  // Réinitialiser la pagination progressive et remonter la liste quand un filtre change
+  useEffect(() => {
+    setVisibleCount(50)
+    if (listScrollRef.current) {
+      listScrollRef.current.scrollTop = 0
+    }
+  }, [q, statut, plateforme, pkgFilter, partnerFilter, onlySelected, sortBy])
+
+  // Chargement progressif fluide par tranches de 50 (60fps même avec 500+ pèlerins)
+  useEffect(() => {
+    const sentinel = loadMoreRef.current
+    const root = listScrollRef.current
+    if (!sentinel || !root || visibleCount >= visible.length) return
+    const observer = new IntersectionObserver(
+      entries => {
+        if (entries[0]?.isIntersecting) {
+          setVisibleCount(prev => Math.min(prev + 50, visible.length))
+        }
+      },
+      { root, rootMargin: '300px' },
+    )
+    observer.observe(sentinel)
+    return () => observer.disconnect()
+  }, [visibleCount, visible.length])
+
+  const renderedPelerins = useMemo(
+    () => visible.slice(0, visibleCount),
+    [visible, visibleCount],
+  )
 
   const toggle = (id: string) => setSel(s => (s.includes(id) ? s.filter(x => x !== id) : [...s, id]))
-  const allVisibleSelected = visible.length > 0 && visible.every(p => sel.includes(String(p.id)))
+  const allVisibleSelected = visible.length > 0 && visible.every(p => selectedSet.has(String(p.id)))
   const toggleAllVisible = () =>
     setSel(s =>
       allVisibleSelected
@@ -321,167 +434,482 @@ function TargetPicker({
         : Array.from(new Set([...s, ...visible.map(p => String(p.id))])),
     )
 
+  const hasExtraFilters =
+    statut !== 'all' ||
+    plateforme !== 'all' ||
+    pkgFilter !== 'all' ||
+    partnerFilter !== 'all' ||
+    onlySelected ||
+    q !== ''
+
+  const clearPickerFilters = () => {
+    setSearch('')
+    setStatut('all')
+    setPlateforme('all')
+    setPkgFilter('all')
+    setPartnerFilter('all')
+    setOnlySelected(false)
+  }
+
+  const getInit = (p: Pelerin) => {
+    const a = (p.prenom || '').trim().charAt(0).toUpperCase()
+    const b = (p.nom_complet || p.nom || '').trim().charAt(0).toUpperCase()
+    return `${a}${b}` || 'P'
+  }
+
   const titles = {
     pelerin: 'Choisir un pèlerin',
     groupe: 'Sélectionner des pèlerins',
     reference: 'Choisir un dossier / réf',
     associe: 'Choisir un partenaire',
   }
-  const isPelerinMode = mode === 'pelerin' || mode === 'groupe'
-  const list = mode === 'reference' ? referencesList : associesList
+
+  const filteredList = useMemo(
+    () => list.filter(x => x.valeur.toLowerCase().includes(q)),
+    [list, q],
+  )
 
   return (
-    <Sheet
-      open
-      onClose={onClose}
-      z="z-[10000]"
-      title={titles[mode]}
-      subtitle={
-        isPelerinMode
-          ? `${visible.length} sur ${data.length} pèlerin(s)${mode === 'groupe' ? ` • ${sel.length} sélectionné(s)` : ''}`
-          : `${list.length} disponible(s)`
-      }
-      footer={
-        mode === 'groupe' ? (
-          <button
-            type="button"
-            onClick={() => onConfirmIds(sel)}
-            className="w-full py-3.5 bg-blue-600 active:bg-blue-700 text-white font-black text-xs sm:text-sm rounded-2xl cursor-pointer"
-          >
-            Valider la sélection ({sel.length})
-          </button>
-        ) : undefined
-      }
-    >
-      <div className="sticky top-0 bg-white z-10 pb-2.5 space-y-2.5">
-        <div className="relative">
-          <Search size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
-          <input
-            type="text"
-            autoFocus
-            placeholder={isPelerinMode ? 'Nom, passeport, réf, package…' : 'Rechercher…'}
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-            className="w-full pl-10 pr-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs sm:text-sm font-semibold outline-none focus:border-blue-600"
-          />
-        </div>
-
-        {isPelerinMode && (
-          <div className="flex flex-wrap gap-1.5">
-            {([
-              ['all', 'Tous'],
-              ['solde', 'Soldés'],
-              ['partiel', 'Partiels'],
-              ['non_paye', 'Non payés'],
-            ] as const).map(([id, label]) => (
+    <div className="fixed inset-0 z-[10000] flex items-stretch md:items-center justify-center md:p-4 bg-white md:bg-slate-900/55 md:backdrop-blur-[2px] animate-in fade-in duration-150">
+      <div className="w-full h-full md:h-auto md:max-h-[90vh] md:max-w-xl bg-white md:rounded-3xl md:shadow-2xl flex flex-col overflow-hidden">
+        {/* ═══ 1. EN-TÊTE FIXE (strictement séparé de la liste : 0 conflit au scroll) ═══ */}
+        <div className="shrink-0 bg-white border-b border-slate-200/80 z-20">
+          {/* Barre supérieure façon WhatsApp */}
+          <div className="px-4 pt-[max(0.85rem,env(safe-area-inset-top))] md:pt-4 pb-2.5 flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2.5 min-w-0">
               <button
-                key={id}
                 type="button"
-                onClick={() => setStatut(id)}
-                className={`px-3 py-1 rounded-full text-[11px] font-bold border transition-colors cursor-pointer ${statut === id ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-600 border-slate-200'
-                  }`}
+                onClick={onClose}
+                aria-label="Retour"
+                className="w-9 h-9 rounded-full bg-slate-100 text-slate-700 flex items-center justify-center active:scale-90 transition shrink-0 cursor-pointer"
               >
-                {label}
+                <ArrowLeft size={18} />
               </button>
-            ))}
-          </div>
-        )}
+              <div className="min-w-0">
+                <h2 className="font-black text-slate-900 text-[15px] sm:text-base leading-tight truncate">
+                  {titles[mode]}
+                </h2>
+                <p className="text-[11px] font-semibold text-slate-400 truncate mt-0.5 tabular-nums">
+                  {isPelerinMode
+                    ? `${visible.length} sur ${data.length} pèlerin${data.length > 1 ? 's' : ''}${mode === 'groupe' && sel.length > 0 ? ` • ${sel.length} choisi${sel.length > 1 ? 's' : ''}` : ''}`
+                    : `${filteredList.length} disponible${filteredList.length > 1 ? 's' : ''}`}
+                </p>
+              </div>
+            </div>
 
-        {mode === 'groupe' && (
-          <div className="flex items-center justify-between text-xs font-bold pt-0.5">
-            <button type="button" onClick={toggleAllVisible} className="text-blue-600 active:text-blue-800 py-1 cursor-pointer">
-              {allVisibleSelected ? 'Désélectionner les résultats' : `Tout sélectionner (${visible.length})`}
-            </button>
-            {sel.length > 0 && (
-              <button type="button" onClick={() => setSel([])} className="text-rose-500 active:text-rose-700 py-1 cursor-pointer">
-                Vider ({sel.length})
+            {mode === 'groupe' && visible.length > 0 ? (
+              <button
+                type="button"
+                onClick={toggleAllVisible}
+                className={`h-8 px-3 rounded-full text-[11px] font-black shrink-0 transition active:scale-95 cursor-pointer ${
+                  allVisibleSelected
+                    ? 'bg-rose-50 text-rose-600 border border-rose-200'
+                    : 'bg-blue-50 text-blue-700 border border-blue-200'
+                }`}
+              >
+                {allVisibleSelected ? 'Désél.' : `Tout (${visible.length})`}
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={onClose}
+                aria-label="Fermer"
+                className="hidden md:flex w-9 h-9 rounded-full bg-slate-100 text-slate-500 items-center justify-center cursor-pointer"
+              >
+                <X size={17} />
               </button>
             )}
           </div>
-        )}
-      </div>
 
-      <div className="space-y-1.5">
-        {isPelerinMode &&
-          visible.map(p => {
-            const id = String(p.id)
-            const checked = mode === 'groupe' ? sel.includes(id) : selectedIds[0] === id
-            const st = statusOf(p)
-            const reste = (Number(p.prix_package) || 0) - (Number(p.total_paye) || 0)
-            return (
-              <button
-                key={id}
-                type="button"
-                onClick={() => (mode === 'groupe' ? toggle(id) : onConfirmIds([id]))}
-                className={`w-full text-left p-2.5 sm:p-3 rounded-xl border flex items-center gap-2.5 sm:gap-3 transition-colors cursor-pointer ${checked ? 'bg-blue-50 border-blue-300' : 'bg-white border-slate-200 active:bg-slate-50'
-                  }`}
-              >
-                <div
-                  className={`w-5 h-5 sm:w-6 sm:h-6 shrink-0 flex items-center justify-center border-2 ${mode === 'groupe' ? 'rounded-lg' : 'rounded-full'
-                    } ${checked ? 'bg-blue-600 border-blue-600 text-white' : 'border-slate-300 text-transparent'}`}
+          {/* Rangée horizontale WhatsApp des pèlerins déjà sélectionnés (mode groupe) */}
+          {mode === 'groupe' && sel.length > 0 && (
+            <div className="px-4 pb-2.5 flex items-center gap-3 overflow-x-auto no-scrollbar">
+              {sel.map(id => {
+                const p = pelerinById.get(id)
+                const photo = p?.photo_url ? getPassportPublicUrl(p.photo_url) : null
+                const firstName = (p?.prenom || p?.nom_complet || `#${id}`).trim().split(' ')[0]
+                return (
+                  <button
+                    key={id}
+                    type="button"
+                    onClick={() => toggle(id)}
+                    className="flex flex-col items-center gap-1 shrink-0 w-13 active:scale-90 transition cursor-pointer"
+                  >
+                    <div className="relative">
+                      <div className="w-11 h-11 rounded-full bg-blue-50 text-blue-700 font-black text-xs flex items-center justify-center overflow-hidden border-2 border-blue-600">
+                        {photo ? (
+                          <img src={photo} alt={firstName} loading="lazy" decoding="async" className="w-full h-full object-cover" />
+                        ) : (
+                          <span>{p ? getInit(p) : '#'}</span>
+                        )}
+                      </div>
+                      <span className="absolute -top-0.5 -right-0.5 w-4 h-4 rounded-full bg-slate-800 text-white border border-white flex items-center justify-center">
+                        <X size={10} strokeWidth={3} />
+                      </span>
+                    </div>
+                    <span className="text-[10px] font-bold text-slate-600 truncate w-full text-center leading-none">
+                      {firstName}
+                    </span>
+                  </button>
+                )
+              })}
+            </div>
+          )}
+
+          {/* Barre de recherche spacieuse */}
+          <div className="px-4 pb-2.5">
+            <div className="relative">
+              <Search size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+              <input
+                type="text"
+                placeholder={isPelerinMode ? 'Rechercher nom, passeport, tél, réf…' : 'Rechercher…'}
+                value={search}
+                onChange={e => setSearch(e.target.value)}
+                className="w-full h-11 pl-10 pr-9 bg-slate-100 border border-transparent focus:bg-white focus:border-blue-600 rounded-2xl text-sm font-semibold text-slate-900 placeholder:text-slate-400 outline-none transition"
+              />
+              {search && (
+                <button
+                  type="button"
+                  onClick={() => setSearch('')}
+                  aria-label="Effacer"
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 w-6 h-6 rounded-full bg-slate-200 text-slate-600 flex items-center justify-center cursor-pointer"
                 >
-                  <Check size={13} strokeWidth={3} />
-                </div>
-                <div className="min-w-0 flex-1">
-                  <p className="font-bold text-xs sm:text-sm text-slate-900 truncate">{pName(p)}</p>
-                  <p className="text-[10px] sm:text-[11px] text-slate-400 font-mono truncate">{p.num_passeport || 'Passeport non renseigné'}</p>
-                  <div className="flex items-center gap-1.5 mt-1 flex-wrap">
-                    {p.reference && (
-                      <span className="text-[9px] sm:text-[10px] font-bold px-1.5 py-0.5 rounded bg-slate-100 text-slate-600">
-                        Réf {p.reference}
-                      </span>
-                    )}
-                    {p.nom_package && (
-                      <span className="text-[9px] sm:text-[10px] font-bold px-1.5 py-0.5 rounded bg-blue-50 text-blue-700 truncate max-w-[9rem]">
-                        {p.nom_package}
-                      </span>
-                    )}
-                  </div>
-                </div>
-                <div className="text-right shrink-0">
-                  <span className={`text-[9px] sm:text-[10px] font-bold px-2 py-0.5 rounded-md ${STATUT_STYLE[st]}`}>{STATUT_LABEL[st]}</span>
-                  {st !== 'solde' && reste > 0 && (
-                    <p className="text-[9px] sm:text-[10px] text-slate-400 font-bold mt-1 tabular-nums">Reste {fmt(reste)} {currencyUnit}</p>
+                  <X size={13} />
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* Filtres rapides enrichis (100% fluides sans scrollbar visible) */}
+          {isPelerinMode && (
+            <div className="pb-2.5 space-y-2">
+              <div className="px-4 flex items-center gap-1.5 overflow-x-auto no-scrollbar">
+                <button
+                  type="button"
+                  onClick={() => setSortBy(s => (s === 'alpha' ? 'recent' : 'alpha'))}
+                  className="h-8 px-2.5 rounded-full bg-slate-100 text-slate-700 text-[11px] font-bold whitespace-nowrap shrink-0 flex items-center gap-1 active:scale-95 transition cursor-pointer"
+                >
+                  <ArrowUpDown size={11} className="text-blue-600" />
+                  <span>{sortBy === 'alpha' ? 'A → Z' : 'Récents'}</span>
+                </button>
+
+                {mode === 'groupe' && sel.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setOnlySelected(v => !v)}
+                    className={`h-8 px-3 rounded-full text-[11px] font-bold whitespace-nowrap shrink-0 transition active:scale-95 cursor-pointer ${
+                      onlySelected
+                        ? 'bg-blue-600 text-white'
+                        : 'bg-blue-50 text-blue-700 border border-blue-200'
+                    }`}
+                  >
+                    Choisis ({sel.length})
+                  </button>
+                )}
+
+                {([
+                  ['all', 'Tous'],
+                  ['solde', 'Soldés'],
+                  ['partiel', 'Partiels'],
+                  ['non_paye', 'Non payés'],
+                ] as const).map(([id, label]) => (
+                  <button
+                    key={id}
+                    type="button"
+                    onClick={() => setStatut(id)}
+                    className={`h-8 px-3 rounded-full text-[11px] font-bold whitespace-nowrap shrink-0 transition active:scale-95 cursor-pointer ${
+                      statut === id
+                        ? 'bg-slate-900 text-white'
+                        : 'bg-white text-slate-600 border border-slate-200'
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+
+                <button
+                  type="button"
+                  onClick={() => setPlateforme(p => (p === 'gouv' ? 'all' : 'gouv'))}
+                  className={`h-8 px-3 rounded-full text-[11px] font-bold whitespace-nowrap shrink-0 transition active:scale-95 cursor-pointer ${
+                    plateforme === 'gouv'
+                      ? 'bg-emerald-600 text-white'
+                      : 'bg-white text-slate-600 border border-slate-200'
+                  }`}
+                >
+                  Gouv
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setPlateforme(p => (p === 'nusuk' ? 'all' : 'nusuk'))}
+                  className={`h-8 px-3 rounded-full text-[11px] font-bold whitespace-nowrap shrink-0 transition active:scale-95 cursor-pointer ${
+                    plateforme === 'nusuk'
+                      ? 'bg-blue-600 text-white'
+                      : 'bg-white text-slate-600 border border-slate-200'
+                  }`}
+                >
+                  Nusuk
+                </button>
+              </div>
+
+              {/* Sélecteurs compacts Forfait & Partenaire (uniquement s'il y en a plusieurs) */}
+              {(availablePackages.length > 1 || availablePartners.length > 1 || hasExtraFilters) && (
+                <div className="px-4 flex items-center gap-2 overflow-x-auto no-scrollbar">
+                  {availablePackages.length > 1 && (
+                    <select
+                      value={pkgFilter}
+                      onChange={e => setPkgFilter(e.target.value)}
+                      className={`h-8 px-2.5 rounded-xl text-[11px] font-bold border outline-none shrink-0 cursor-pointer ${
+                        pkgFilter !== 'all'
+                          ? 'bg-blue-50 border-blue-300 text-blue-800'
+                          : 'bg-slate-50 border-slate-200 text-slate-600'
+                      }`}
+                    >
+                      <option value="all">Tous les forfaits</option>
+                      {availablePackages.map(pkg => (
+                        <option key={pkg} value={pkg}>{pkg}</option>
+                      ))}
+                    </select>
+                  )}
+
+                  {availablePartners.length > 1 && (
+                    <select
+                      value={partnerFilter}
+                      onChange={e => setPartnerFilter(e.target.value)}
+                      className={`h-8 px-2.5 rounded-xl text-[11px] font-bold border outline-none shrink-0 cursor-pointer ${
+                        partnerFilter !== 'all'
+                          ? 'bg-blue-50 border-blue-300 text-blue-800'
+                          : 'bg-slate-50 border-slate-200 text-slate-600'
+                      }`}
+                    >
+                      <option value="all">Tous les partenaires</option>
+                      {availablePartners.map(part => (
+                        <option key={part} value={part}>{part}</option>
+                      ))}
+                    </select>
+                  )}
+
+                  {hasExtraFilters && (
+                    <button
+                      type="button"
+                      onClick={clearPickerFilters}
+                      className="h-8 px-2.5 rounded-xl text-[11px] font-black text-rose-600 whitespace-nowrap shrink-0 cursor-pointer"
+                    >
+                      Réinitialiser
+                    </button>
                   )}
                 </div>
-              </button>
-            )
-          })}
-
-        {!isPelerinMode &&
-          list
-            .filter(x => x.valeur.toLowerCase().includes(q))
-            .map(x => {
-              const checked = cibleValeur === x.valeur
-              return (
-                <button
-                  key={x.valeur}
-                  type="button"
-                  onClick={() => onConfirmValue(x.valeur)}
-                  className={`w-full text-left p-3 rounded-xl border flex items-center justify-between gap-3 cursor-pointer ${checked ? 'bg-blue-50 border-blue-300' : 'bg-white border-slate-200 active:bg-slate-50'
-                    }`}
-                >
-                  <div className="min-w-0">
-                    <p className="font-bold text-xs sm:text-sm text-slate-900 truncate">
-                      {mode === 'reference' ? `Réf : ${x.valeur}` : x.valeur}
-                    </p>
-                    <p className="text-[10px] sm:text-[11px] text-slate-400">
-                      {x.count} pèlerin(s) {mode === 'reference' ? 'dans ce groupe' : 'affilié(s)'}
-                    </p>
-                  </div>
-                  <span className="text-xs font-black text-blue-600 bg-blue-50 px-2.5 py-1 rounded-lg shrink-0">
-                    {x.count} pers.
-                  </span>
-                </button>
-              )
-            })}
-
-        {((isPelerinMode && visible.length === 0) ||
-          (!isPelerinMode && list.filter(x => x.valeur.toLowerCase().includes(q)).length === 0)) && (
-            <div className="text-center py-10 text-xs text-slate-400 font-bold">Aucun résultat.</div>
+              )}
+            </div>
           )}
+        </div>
+
+        {/* ═══ 2. LISTE PLEIN ÉCRAN FLUIDE (style Contacts WhatsApp, 60fps) ═══ */}
+        <div
+          ref={listScrollRef}
+          className="flex-1 overflow-y-auto overscroll-contain bg-white"
+        >
+          {isPelerinMode ? (
+            visible.length === 0 ? (
+              <div className="py-16 px-6 text-center space-y-2">
+                <div className="w-12 h-12 rounded-full bg-slate-100 text-slate-400 flex items-center justify-center mx-auto">
+                  <Search size={20} />
+                </div>
+                <p className="text-sm font-black text-slate-800">Aucun pèlerin trouvé</p>
+                <p className="text-xs text-slate-400 font-medium">
+                  Modifiez votre recherche ou réinitialisez les filtres.
+                </p>
+                {hasExtraFilters && (
+                  <button
+                    type="button"
+                    onClick={clearPickerFilters}
+                    className="mt-2 h-9 px-4 rounded-xl bg-slate-900 text-white text-xs font-black cursor-pointer"
+                  >
+                    Tout afficher
+                  </button>
+                )}
+              </div>
+            ) : (
+              <div className="divide-y divide-slate-100">
+                {renderedPelerins.map(p => {
+                  const id = String(p.id)
+                  const checked = mode === 'groupe' ? selectedSet.has(id) : selectedIds[0] === id
+                  const st = statusOf(p)
+                  const reste = Math.max(0, (Number(p.prix_package) || 0) - (Number(p.total_paye) || 0))
+                  const photoUrl = p.photo_url ? getPassportPublicUrl(p.photo_url) : null
+                  const partner = assocOf(p)
+
+                  return (
+                    <button
+                      key={id}
+                      type="button"
+                      onClick={() => (mode === 'groupe' ? toggle(id) : onConfirmIds([id]))}
+                      style={{ contentVisibility: 'auto', containIntrinsicSize: '74px' }}
+                      className={`w-full px-4 py-3 flex items-center gap-3.5 text-left transition-colors active:bg-slate-100/80 cursor-pointer ${
+                        checked ? 'bg-blue-50/55' : 'bg-white'
+                      }`}
+                    >
+                      {/* Photo de profil ronde style WhatsApp + coche en bas à droite si sélectionné */}
+                      <div className="relative shrink-0">
+                        <div
+                          className={`w-12 h-12 rounded-full flex items-center justify-center font-black text-sm overflow-hidden border ${
+                            checked
+                              ? 'border-blue-600 bg-blue-100 text-blue-700'
+                              : 'border-slate-200/80 bg-slate-100 text-slate-700'
+                          }`}
+                        >
+                          {photoUrl ? (
+                            <img
+                              src={photoUrl}
+                              alt={pName(p)}
+                              loading="lazy"
+                              decoding="async"
+                              className="w-full h-full object-cover"
+                            />
+                          ) : (
+                            <span>{getInit(p)}</span>
+                          )}
+                        </div>
+
+                        {checked && (
+                          <span className="absolute -bottom-0.5 -right-0.5 w-5 h-5 rounded-full bg-blue-600 text-white border-2 border-white flex items-center justify-center shadow-xs">
+                            <Check size={11} strokeWidth={3.2} />
+                          </span>
+                        )}
+                      </div>
+
+                      {/* Identité claire & spacieuse */}
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-baseline justify-between gap-2">
+                          <p className="font-bold text-[15px] text-slate-900 leading-snug truncate">
+                            {pName(p)}
+                          </p>
+                          <span
+                            className={`text-[11px] font-black shrink-0 ${
+                              st === 'solde'
+                                ? 'text-emerald-600'
+                                : st === 'partiel'
+                                ? 'text-amber-600'
+                                : 'text-rose-600'
+                            }`}
+                          >
+                            {STATUT_LABEL[st]}
+                          </span>
+                        </div>
+
+                        <div className="flex items-center justify-between gap-2 mt-0.5">
+                          <p className="text-xs text-slate-500 font-medium truncate">
+                            <span className="font-mono text-slate-600">{p.num_passeport || 'Sans passeport'}</span>
+                            {p.telephone_pelerin ? ` • ${p.telephone_pelerin}` : ''}
+                          </p>
+                          {st !== 'solde' && reste > 0 && (
+                            <span className="text-[11px] font-bold text-slate-700 tabular-nums shrink-0">
+                              -{fmt(reste)} {currencyUnit}
+                            </span>
+                          )}
+                        </div>
+
+                        {(p.nom_package || partner || p.reference || p.sur_plateforme_gouv || p.sur_plateforme_nusuk) && (
+                          <div className="flex items-center gap-1.5 mt-1 flex-wrap">
+                            {p.nom_package && (
+                              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 truncate max-w-[9rem]">
+                                {p.nom_package}
+                              </span>
+                            )}
+                            {partner && (
+                              <span className="text-[10px] font-semibold text-slate-400 truncate max-w-[8rem]">
+                                {partner}
+                              </span>
+                            )}
+                            {p.reference && (
+                              <span className="text-[10px] font-bold text-slate-400">
+                                Réf {p.reference}
+                              </span>
+                            )}
+                            {Boolean(p.sur_plateforme_gouv) && (
+                              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0" title="Gouv" />
+                            )}
+                            {Boolean(p.sur_plateforme_nusuk) && (
+                              <span className="w-1.5 h-1.5 rounded-full bg-blue-500 shrink-0" title="Nusuk" />
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    </button>
+                  )
+                })}
+
+                {visibleCount < visible.length && (
+                  <div ref={loadMoreRef} className="py-4 text-center text-xs font-bold text-slate-400">
+                    Chargement ({visibleCount} / {visible.length})…
+                  </div>
+                )}
+              </div>
+            )
+          ) : filteredList.length === 0 ? (
+            <div className="py-16 text-center text-xs text-slate-400 font-bold">Aucun résultat.</div>
+          ) : (
+            <div className="divide-y divide-slate-100">
+              {filteredList.map(x => {
+                const checked = cibleValeur === x.valeur
+                const Icon = mode === 'reference' ? Tag : Building2
+                return (
+                  <button
+                    key={x.valeur}
+                    type="button"
+                    onClick={() => onConfirmValue(x.valeur)}
+                    className={`w-full px-4 py-3.5 flex items-center gap-3.5 text-left transition active:bg-slate-100 cursor-pointer ${
+                      checked ? 'bg-blue-50/55' : 'bg-white'
+                    }`}
+                  >
+                    <div
+                      className={`w-11 h-11 rounded-full flex items-center justify-center shrink-0 ${
+                        checked ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-600'
+                      }`}
+                    >
+                      <Icon size={18} />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="font-bold text-[15px] text-slate-900 truncate">
+                        {mode === 'reference' ? `Réf : ${x.valeur}` : x.valeur}
+                      </p>
+                      <p className="text-xs text-slate-400 font-medium mt-0.5">
+                        {x.count} pèlerin{x.count > 1 ? 's' : ''} {mode === 'reference' ? 'dans ce dossier' : 'affilié(s)'}
+                      </p>
+                    </div>
+                    <span className="text-xs font-black text-blue-700 bg-blue-50 px-2.5 py-1 rounded-full shrink-0 tabular-nums">
+                      {x.count}
+                    </span>
+                  </button>
+                )
+              })}
+            </div>
+          )}
+        </div>
+
+        {/* ═══ 3. PIED FIXE (mode sélection multiple) ═══ */}
+        {mode === 'groupe' && (
+          <div className="shrink-0 px-4 pt-3 pb-[max(1rem,env(safe-area-inset-bottom))] bg-white border-t border-slate-200/80 flex items-center gap-2.5">
+            {sel.length > 0 && (
+              <button
+                type="button"
+                onClick={() => setSel([])}
+                className="h-12 px-4 rounded-2xl bg-slate-100 text-slate-700 font-black text-xs active:scale-95 transition cursor-pointer shrink-0"
+              >
+                Vider
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => onConfirmIds(sel)}
+              className="flex-1 h-12 rounded-2xl bg-blue-600 active:bg-blue-700 text-white font-black text-sm shadow-sm active:scale-[0.98] transition cursor-pointer"
+            >
+              Valider la sélection ({sel.length})
+            </button>
+          </div>
+        )}
       </div>
-    </Sheet>
+    </div>
   )
 }
 
@@ -545,10 +973,79 @@ export default function ComptabiliteHajj() {
   const [showAddPicker, setShowAddPicker] = useState(false)
   const [addLoading, setAddLoading] = useState(false)
 
+  // UX Mobile native : assistant 3 étapes, pile 3D trésorerie, confirmation suppression & toast
+  const [mobileStep, setMobileStep] = useState<1 | 2 | 3>(1)
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null)
+  const [deleting, setDeleting] = useState(false)
+  const [toast, setToast] = useState<{ text: string; type: 'success' | 'error' } | null>(null)
+  const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const [heroDeckIdx, setHeroDeckIdx] = useState(0)
+  const [heroDragX, setHeroDragX] = useState(0)
+  const heroTouchStartRef = useRef<{ x: number; y: number } | null>(null)
+  const heroSwipeLockRef = useRef<'horizontal' | 'vertical' | null>(null)
+  const heroDragXRef = useRef(0)
+
+  const showToast = (text: string, type: 'success' | 'error' = 'success') => {
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current)
+    setToast({ text, type })
+    toastTimerRef.current = setTimeout(() => {
+      setToast(null)
+      toastTimerRef.current = null
+    }, 2800)
+  }
+
+  useEffect(() => {
+    return () => {
+      if (toastTimerRef.current) clearTimeout(toastTimerRef.current)
+    }
+  }, [])
+
+  const handleHeroTouchStart = (e: React.TouchEvent) => {
+    const t = e.touches[0]
+    if (!t) return
+    heroTouchStartRef.current = { x: t.clientX, y: t.clientY }
+    heroSwipeLockRef.current = null
+    heroDragXRef.current = 0
+    setHeroDragX(0)
+  }
+  const handleHeroTouchMove = (e: React.TouchEvent) => {
+    if (!heroTouchStartRef.current) return
+    const t = e.touches[0]
+    if (!t) return
+    const dx = t.clientX - heroTouchStartRef.current.x
+    const dy = t.clientY - heroTouchStartRef.current.y
+    if (!heroSwipeLockRef.current) {
+      if (Math.abs(dx) > 10 && Math.abs(dx) > Math.abs(dy)) {
+        heroSwipeLockRef.current = 'horizontal'
+      } else if (Math.abs(dy) > 10) {
+        heroSwipeLockRef.current = 'vertical'
+        return
+      } else {
+        return
+      }
+    }
+    if (heroSwipeLockRef.current === 'horizontal') {
+      const clamped = Math.max(-120, Math.min(120, dx))
+      heroDragXRef.current = clamped
+      setHeroDragX(clamped)
+    }
+  }
+  const handleHeroTouchEnd = () => {
+    const dragged = heroDragXRef.current
+    heroTouchStartRef.current = null
+    heroSwipeLockRef.current = null
+    heroDragXRef.current = 0
+    setHeroDragX(0)
+    if (Math.abs(dragged) > 40) {
+      setHeroDeckIdx(prev => (prev === 0 ? 1 : 0))
+    }
+  }
+
   const syncingRef = useRef<Set<string>>(new Set())
 
   // 🎯 Masquer automatiquement la navbar mobile dès qu'une fenêtre slide/modal est ouverte
-  const anySheetOpen = Boolean(showSheet || showPicker || showFilters || detailId || addId || showAddPicker)
+  const anySheetOpen = Boolean(showSheet || showPicker || showFilters || detailId || addId || showAddPicker || deleteConfirmId)
   useEffect(() => {
     setHideNavbar(anySheetOpen)
     return () => setHideNavbar(false)
@@ -798,6 +1295,23 @@ export default function ComptabiliteHajj() {
   const hasActiveFilter = filterType !== 'all' || effectiveNature !== 'all' || filterDepenseSearch.trim() !== ''
   const activeFilterCount = (filterType !== 'all' ? 1 : 0) + (effectiveNature !== 'all' ? 1 : 0) + (sortKey !== 'date_desc' ? 1 : 0)
 
+  const groupedByDate = useMemo(() => {
+    const groups: Array<{ label: string; rows: Row[]; total: number }> = []
+    const byLabel = new Map<string, { label: string; rows: Row[]; total: number }>()
+    for (const r of filteredRows) {
+      const label = getDateGroupLabel(r.d.created_at)
+      let g = byLabel.get(label)
+      if (!g) {
+        g = { label, rows: [], total: 0 }
+        byLabel.set(label, g)
+        groups.push(g)
+      }
+      g.rows.push(r)
+      g.total += r.montant
+    }
+    return groups
+  }, [filteredRows])
+
   const groupedByNature = useMemo(() => {
     const m = new Map<string, { libelle: string; rows: Row[]; total: number }>()
     filteredRows.forEach(r => {
@@ -857,6 +1371,7 @@ export default function ComptabiliteHajj() {
   const openNew = () => {
     resetForm()
     setDetailId(null)
+    setMobileStep(1)
     setShowSheet(true)
   }
 
@@ -892,6 +1407,7 @@ export default function ComptabiliteHajj() {
       setMontantSaisi(formatAmount(r.stored))
     }
     setEditingId(duplicate ? null : d.id)
+    setMobileStep(duplicate ? 1 : 3)
     setShowSheet(true)
   }
 
@@ -965,24 +1481,42 @@ export default function ComptabiliteHajj() {
           [depense.id, depense.type_cible, depense.cible_valeur, depense.libelle, depense.montant, depense.devise, depense.recorded_by_name, depense.recorded_by_role, depense.created_at],
         )
       }
+      const wasEditing = Boolean(editingId)
       closeSheet()
+      showToast(wasEditing ? 'Dépense modifiée' : 'Dépense enregistrée')
     } catch {
-      alert(editingId ? 'Erreur lors de la modification de la dépense.' : "Erreur lors de l'enregistrement de la dépense.")
+      showToast(
+        editingId ? 'Erreur lors de la modification de la dépense.' : "Erreur lors de l'enregistrement de la dépense.",
+        'error'
+      )
     }
     setFormLoading(false)
   }
 
-  const handleDeleteDepense = async (id: string) => {
-    if (!confirm('Supprimer cette écriture de dépense ?')) return
+  const executeDeleteDepense = async (id: string) => {
+    setDeleting(true)
     try {
       const { data, error } = await supabase.from('depenses_hajj').delete().eq('id', id).select('id')
       requireSupabaseRows(data, error, 'suppression de la dépense Hajj')
       await db.execute('DELETE FROM depenses_hajj WHERE id = ?', [id])
       setExpandedDepense(null)
       setDetailId(null)
+      setDeleteConfirmId(null)
+      showToast('Dépense supprimée')
     } catch {
-      alert('Erreur lors de la suppression de la dépense.')
+      showToast('Erreur lors de la suppression de la dépense.', 'error')
+    } finally {
+      setDeleting(false)
     }
+  }
+
+  const handleDeleteDepense = async (id: string) => {
+    if (isMobile) {
+      setDeleteConfirmId(id)
+      return
+    }
+    if (!confirm('Supprimer cette écriture de dépense ?')) return
+    await executeDeleteDepense(id)
   }
 
   /* ---------- Ajout à une dépense existante ---------- */
@@ -1057,8 +1591,9 @@ export default function ComptabiliteHajj() {
         await persistUpdate(addRow.d.id, { montant: addResult.newTotal })
       }
       closeAdd()
+      showToast('Ajout enregistré sur la dépense')
     } catch {
-      alert("Erreur lors de l'ajout à la dépense.")
+      showToast("Erreur lors de l'ajout à la dépense.", 'error')
     }
     setAddLoading(false)
   }
@@ -1406,26 +1941,39 @@ export default function ComptabiliteHajj() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-50/70 md:bg-transparent text-slate-800">
-      {/* =================================================================== */}
-      {/* 📱 VERSION MOBILE NATIVE FINTECH (`md:hidden`)                      */}
-      {/* =================================================================== */}
-      <div className="md:hidden pb-32">
-        {/* 1. EN-TÊTE FINTECH BLEU ÉPURÉ & SOLDE HERO */}
-        <div className="bg-gradient-to-b from-blue-600 via-blue-600 to-blue-700 text-white rounded-b-[2.25rem] px-5 pt-5 pb-6 shadow-lg shadow-blue-600/15 relative overflow-hidden">
-          <div className="absolute -right-10 -bottom-12 text-white/[0.06] pointer-events-none select-none">
-            <Wallet size={170} />
-          </div>
+    <div className="min-h-screen bg-slate-50 md:bg-transparent text-slate-800">
+      {/* ── TOAST NATIF FLOTTANT ── */}
+      {toast && (
+        <div
+          onClick={() => setToast(null)}
+          className={`fixed top-[max(1rem,env(safe-area-inset-top))] left-1/2 -translate-x-1/2 z-[10002] max-w-[calc(100vw-2rem)] px-4 py-2.5 rounded-full shadow-xl border flex items-center gap-2 text-xs font-bold cursor-pointer animate-in fade-in slide-in-from-top-2 duration-200 ${
+            toast.type === 'error'
+              ? 'bg-rose-600 text-white border-rose-500'
+              : 'bg-slate-900 text-white border-slate-700'
+          }`}
+        >
+          {toast.type === 'error' ? (
+            <AlertCircle size={15} className="shrink-0 text-white" />
+          ) : (
+            <CheckCircle2 size={15} className="shrink-0 text-emerald-400" />
+          )}
+          <span className="truncate">{toast.text}</span>
+        </div>
+      )}
 
-          {/* Barre supérieure sobre */}
-          <div className="flex items-center justify-between gap-3 relative z-10">
+      {/* =================================================================== */}
+      {/* 📱 VERSION MOBILE NATIVE 100% ÉPURÉE (`md:hidden`)                  */}
+      {/* =================================================================== */}
+      <div className="md:hidden pb-28 min-h-screen bg-slate-50">
+        {/* 1. EN-TÊTE BLANC FIXE ULTRA-PROPRE (1 seul bouton d'ajout, zéro encombrement) */}
+        <div className="bg-white border-b border-slate-100 px-5 pt-4 pb-3 sticky top-0 z-40 shadow-[0_1px_8px_rgba(15,23,42,0.03)]">
+          <div className="flex items-center justify-between gap-3">
             <div className="min-w-0">
-              <h1 className="text-xl font-black tracking-tight leading-tight">
+              <h1 className="text-2xl font-black text-blue-600 tracking-tight leading-none">
                 Comptabilité
               </h1>
-              <p className="text-xs text-blue-100/90 font-semibold mt-0.5 truncate">
-                {data.length} pèlerin{data.length > 1 ? 's' : ''}
-                {selectedYear !== 'all' ? ` • Campagne ${selectedYear}` : ' • Toutes campagnes'}
+              <p className="text-xs text-slate-400 font-semibold mt-1 truncate">
+                {selectedYear !== 'all' ? `Campagne ${selectedYear}` : 'Toutes campagnes'} • {data.length} pèlerin{data.length > 1 ? 's' : ''}
               </p>
             </div>
 
@@ -1436,9 +1984,9 @@ export default function ComptabiliteHajj() {
                   onClick={exportCsv}
                   disabled={filteredRows.length === 0}
                   aria-label="Exporter en CSV"
-                  className="w-10 h-10 rounded-full bg-white/15 border border-white/20 text-white flex items-center justify-center active:scale-90 transition disabled:opacity-40 cursor-pointer"
+                  className="w-9 h-9 rounded-full bg-slate-100 text-slate-700 flex items-center justify-center active:scale-90 transition disabled:opacity-40 cursor-pointer"
                 >
-                  <Download size={17} />
+                  <Download size={16} />
                 </button>
               )}
               <button
@@ -1447,32 +1995,52 @@ export default function ComptabiliteHajj() {
                   setTab('depenses')
                   openNew()
                 }}
-                aria-label="Nouvelle dépense"
-                className="w-11 h-11 rounded-full bg-white text-blue-600 shadow-md shadow-blue-900/15 flex items-center justify-center active:scale-90 transition cursor-pointer"
+                className="h-9 px-3.5 rounded-full bg-slate-900 text-white text-xs font-black flex items-center gap-1.5 shadow-xs active:scale-95 transition cursor-pointer"
               >
-                <Plus size={22} strokeWidth={2.6} />
+                <Plus size={15} strokeWidth={2.6} />
+                <span>Dépense</span>
               </button>
             </div>
           </div>
+        </div>
 
-          {/* Sélecteur de devise natif (3 segments stricts FCFA | EUR | USD) */}
-          <div className="mt-5 grid grid-cols-3 gap-1 p-1 bg-white/15 border border-white/15 rounded-2xl backdrop-blur-xs relative z-10">
+        {/* 2. CORPS DE PAGE AÉRÉ (z-0 isolé pour glisser proprement sous l'en-tête) */}
+        <div className="relative z-0 px-5 pt-3.5 space-y-4">
+          {/* Sélecteur de devise style Apple (disparaît au scroll) */}
+          <div className="grid grid-cols-3 gap-1.5">
             {HAJJ_CURRENCIES.map(cur => {
               const active = selectedDevise === cur.code
               const count = deviseCounts[cur.code] ?? 0
+              const applePalette =
+                cur.code === 'FCFA'
+                  ? {
+                      active: 'bg-[#248A3D] text-white border-[#248A3D] shadow-[0_3px_10px_-3px_rgba(36,138,61,0.5)]',
+                      idle: 'bg-[#34C759]/12 text-[#1D7A36] border-[#34C759]/25',
+                      countIdle: 'text-[#1D7A36]/70',
+                    }
+                  : cur.code === 'EUR'
+                  ? {
+                      active: 'bg-[#5856D6] text-white border-[#5856D6] shadow-[0_3px_10px_-3px_rgba(88,86,214,0.5)]',
+                      idle: 'bg-[#5856D6]/10 text-[#4846C2] border-[#5856D6]/20',
+                      countIdle: 'text-[#4846C2]/70',
+                    }
+                  : {
+                      active: 'bg-[#0E7C94] text-white border-[#0E7C94] shadow-[0_3px_10px_-3px_rgba(14,124,148,0.5)]',
+                      idle: 'bg-[#30B0C7]/12 text-[#0C6E84] border-[#30B0C7]/25',
+                      countIdle: 'text-[#0C6E84]/70',
+                    }
+
               return (
                 <button
                   key={cur.code}
                   type="button"
                   onClick={() => handleSelectDevise(cur.code)}
-                  className={`h-10 rounded-xl text-xs font-black flex items-center justify-center gap-1.5 transition-all active:scale-[0.98] cursor-pointer ${active ? 'bg-white text-blue-700 shadow-sm' : 'text-blue-100'
-                    }`}
+                  className={`h-9 rounded-xl text-xs font-black border flex items-center justify-center gap-1.5 transition active:scale-[0.97] cursor-pointer ${
+                    active ? applePalette.active : applePalette.idle
+                  }`}
                 >
                   <span>{cur.shortLabel}</span>
-                  <span
-                    className={`text-[10px] px-1.5 py-0.5 rounded-full tabular-nums ${active ? 'bg-blue-50 text-blue-700' : 'bg-white/15 text-white'
-                      }`}
-                  >
+                  <span className={`text-[10px] tabular-nums ${active ? 'text-white/80' : applePalette.countIdle}`}>
                     {count}
                   </span>
                 </button>
@@ -1480,140 +2048,236 @@ export default function ComptabiliteHajj() {
             })}
           </div>
 
-          {/* Solde Hero : un seul chiffre fort, zéro encombrement */}
-          <div className="mt-6 relative z-10">
-            <p className="text-[11px] font-bold uppercase tracking-wider text-blue-100/90">
-              Bénéfice réel • {HAJJ_CURRENCY_MAP[selectedDevise].label}
-            </p>
-            <p className="text-[2rem] leading-none font-black tabular-nums tracking-tight mt-1.5">
-              {beneficeReel > 0 ? '+' : ''}
-              {fmt(beneficeReel)}{' '}
-              <span className="text-base font-bold text-blue-200">{curSymbol}</span>
-            </p>
+          {/* Pile 3D flottante compacte de Trésorerie (2 cartes architecturales empilées, sans dégradé) */}
+          {!loading && (() => {
+            const deckCards = [
+              {
+                id: 'solde',
+                label: 'Trésorerie',
+                bgClass: 'bg-[#1E3A5F]', // Bleu Prusse architectural
+                content: (
+                  <>
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <p className="text-[10px] font-black uppercase tracking-wider text-white/65">
+                          Bénéfice réel
+                        </p>
+                        <p className="text-[1.45rem] leading-tight font-black tabular-nums tracking-tight text-white mt-0.5 truncate">
+                          {beneficeReel > 0 ? '+' : ''}
+                          {fmt(beneficeReel)}{' '}
+                          <span className="text-xs font-bold text-white/70">{curShort}</span>
+                        </p>
+                      </div>
+                      <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded-full bg-white/15 text-white shrink-0">
+                        {HAJJ_CURRENCY_MAP[selectedDevise].shortLabel}
+                      </span>
+                    </div>
 
-            <div className="grid grid-cols-2 gap-4 pt-4 mt-5 border-t border-white/15">
-              <div>
-                <p className="text-[11px] font-semibold text-blue-100/80">
-                  Encaissé ({tauxRecouvrement}%)
-                </p>
-                <p className="text-base font-black tabular-nums mt-0.5">
-                  {fmt(totalEncaisse)} <span className="text-xs font-bold text-blue-200">{curShort}</span>
-                </p>
-              </div>
-              <div className="border-l border-white/15 pl-4">
-                <p className="text-[11px] font-semibold text-blue-100/80">
-                  Dépensé ({depenses.length})
-                </p>
-                <p className="text-base font-black tabular-nums mt-0.5">
-                  -{fmt(totalDepenses)} <span className="text-xs font-bold text-blue-200">{curShort}</span>
-                </p>
-              </div>
-            </div>
-          </div>
-        </div>
+                    <div className="grid grid-cols-2 gap-3 pt-2.5 border-t border-white/15">
+                      <div className="min-w-0">
+                        <p className="text-[9.5px] text-white/65 font-semibold">
+                          Encaissé ({tauxRecouvrement}%)
+                        </p>
+                        <p className="text-xs font-black text-emerald-300 tabular-nums mt-0.5 truncate">
+                          +{fmt(totalEncaisse)} {curShort}
+                        </p>
+                      </div>
+                      <div className="min-w-0 border-l border-white/15 pl-3">
+                        <p className="text-[9.5px] text-white/65 font-semibold">
+                          Dépensé ({depenses.length})
+                        </p>
+                        <p className="text-xs font-black text-white tabular-nums mt-0.5 truncate">
+                          -{fmt(totalDepenses)} {curShort}
+                        </p>
+                      </div>
+                    </div>
+                  </>
+                ),
+              },
+              {
+                id: 'recouvrement',
+                label: 'Recouvrement',
+                bgClass: 'bg-[#2C3A47]', // Ardoise Basalte architectural
+                content: (
+                  <>
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <p className="text-[10px] font-black uppercase tracking-wider text-white/65">
+                          Reste à recouvrer
+                        </p>
+                        <p className="text-[1.45rem] leading-tight font-black tabular-nums tracking-tight text-white mt-0.5 truncate">
+                          {fmt(totalRestant)}{' '}
+                          <span className="text-xs font-bold text-white/70">{curShort}</span>
+                        </p>
+                      </div>
+                      <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-white/15 text-white shrink-0 tabular-nums">
+                        {enAttente.length} en attente
+                      </span>
+                    </div>
 
-        {/* 2. ONGLET SEGMENTÉ COLLANT (iOS style) */}
-        <div className="sticky top-0 z-30 bg-slate-50/95 backdrop-blur-md px-5 py-3.5">
-          <div className="grid grid-cols-2 gap-1 p-1 bg-slate-200/75 rounded-2xl">
+                    <div className="grid grid-cols-2 gap-3 pt-2.5 border-t border-white/15">
+                      <div className="min-w-0">
+                        <p className="text-[9.5px] text-white/65 font-semibold">Total attendu</p>
+                        <p className="text-xs font-black text-white tabular-nums mt-0.5 truncate">
+                          {fmt(totalAttendu)} {curShort}
+                        </p>
+                      </div>
+                      <div className="min-w-0 border-l border-white/15 pl-3">
+                        <p className="text-[9.5px] text-white/65 font-semibold">Moy. / pèlerin</p>
+                        <p className="text-xs font-black text-white/90 tabular-nums mt-0.5 truncate">
+                          {fmt(data.length ? totalDepenses / data.length : 0)} {curShort}
+                        </p>
+                      </div>
+                    </div>
+                  </>
+                ),
+              },
+            ]
+
+            return (
+              <div className="isolate relative z-0 w-[94%] max-w-[350px] mx-auto">
+                <div
+                  className="relative h-[126px] select-none"
+                  onTouchStart={handleHeroTouchStart}
+                  onTouchMove={handleHeroTouchMove}
+                  onTouchEnd={handleHeroTouchEnd}
+                  onTouchCancel={handleHeroTouchEnd}
+                >
+                  {deckCards.map((card, idx) => {
+                    const isFront = idx === heroDeckIdx
+                    const layerStyle: React.CSSProperties = isFront
+                      ? {
+                          transform: `translate3d(${heroDragX}px, 0px, 0) rotate(${(heroDragX * 0.03).toFixed(2)}deg) scale(1)`,
+                          zIndex: 2,
+                          opacity: 1,
+                          transition: heroDragX !== 0 ? 'none' : 'transform 260ms cubic-bezier(0.22, 1, 0.36, 1), opacity 200ms ease',
+                        }
+                      : {
+                          transform: `translate3d(0px, ${heroDragX !== 0 ? Math.max(2, 10 - Math.abs(heroDragX) * 0.06) : 10}px, 0) scale(${heroDragX !== 0 ? Math.min(0.99, 0.94 + Math.abs(heroDragX) * 0.0004) : 0.94})`,
+                          zIndex: 1,
+                          opacity: 0.92,
+                          transition: heroDragX !== 0 ? 'none' : 'transform 260ms cubic-bezier(0.22, 1, 0.36, 1), opacity 200ms ease',
+                        }
+
+                    return (
+                      <div
+                        key={card.id}
+                        style={layerStyle}
+                        onClick={!isFront ? () => setHeroDeckIdx(idx) : undefined}
+                        className={`absolute inset-x-0 top-0 h-[116px] ${card.bgClass} text-white rounded-2xl px-4 py-3 flex flex-col justify-between border border-white/15 ${
+                          isFront
+                            ? 'shadow-[inset_0_1px_0_rgba(255,255,255,0.22),0_16px_28px_-12px_rgba(15,23,42,0.45),0_4px_10px_-4px_rgba(15,23,42,0.20)]'
+                            : 'shadow-[0_10px_18px_-12px_rgba(15,23,42,0.38)] cursor-pointer'
+                        }`}
+                      >
+                        <div className={isFront ? 'h-full flex flex-col justify-between' : 'opacity-20 pointer-events-none h-full flex flex-col justify-between'}>
+                          {card.content}
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+
+                <div className="flex items-center justify-center gap-2 pt-1.5">
+                  {deckCards.map((card, idx) => (
+                    <button
+                      key={card.id}
+                      type="button"
+                      onClick={() => setHeroDeckIdx(idx)}
+                      className={`h-5 px-2.5 rounded-full text-[10px] font-bold transition cursor-pointer ${
+                        heroDeckIdx === idx ? `${card.bgClass} text-white` : 'text-slate-400'
+                      }`}
+                    >
+                      {card.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )
+          })()}
+
+          {/* Onglets principaux soulignés ultra-sobres (Dépenses | Synthèse) */}
+          <div className="-mx-5 px-5 border-b border-slate-200/80 flex items-center gap-6">
             <button
               type="button"
               onClick={() => setTab('depenses')}
-              className={`h-10 rounded-xl text-xs font-black flex items-center justify-center gap-2 transition-all active:scale-[0.98] cursor-pointer ${tab === 'depenses' ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-600'
-                }`}
+              className={`relative pb-2.5 text-sm flex items-center gap-1.5 transition cursor-pointer ${
+                tab === 'depenses' ? 'font-black text-slate-900' : 'font-semibold text-slate-400'
+              }`}
             >
-              <Receipt size={15} className={tab === 'depenses' ? 'text-blue-600' : 'text-slate-400'} />
               <span>Dépenses</span>
               <span
-                className={`text-[10px] px-1.5 py-0.5 rounded-full tabular-nums ${tab === 'depenses' ? 'bg-blue-50 text-blue-700' : 'bg-slate-300/80 text-slate-600'
-                  }`}
+                className={`text-[10px] font-black px-1.5 py-0.5 rounded-full tabular-nums ${
+                  tab === 'depenses' ? 'bg-slate-900 text-white' : 'bg-slate-200/80 text-slate-500'
+                }`}
               >
                 {depenses.length}
               </span>
+              {tab === 'depenses' && (
+                <span className="absolute left-0 right-0 bottom-0 h-[2.5px] rounded-full bg-blue-600" />
+              )}
             </button>
+
             <button
               type="button"
               onClick={() => setTab('apercu')}
-              className={`h-10 rounded-xl text-xs font-black flex items-center justify-center gap-2 transition-all active:scale-[0.98] cursor-pointer ${tab === 'apercu' ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-600'
-                }`}
+              className={`relative pb-2.5 text-sm transition cursor-pointer ${
+                tab === 'apercu' ? 'font-black text-slate-900' : 'font-semibold text-slate-400'
+              }`}
             >
-              <LayoutDashboard size={15} className={tab === 'apercu' ? 'text-blue-600' : 'text-slate-400'} />
-              <span>Vue d'ensemble</span>
+              <span>Synthèse</span>
+              {tab === 'apercu' && (
+                <span className="absolute left-0 right-0 bottom-0 h-[2.5px] rounded-full bg-blue-600" />
+              )}
             </button>
           </div>
-        </div>
 
-        {/* 3. CONTENU MOBILE AÉRÉ */}
-        <div className="px-5 space-y-5">
+          {/* Contenu selon onglet */}
           {loading ? (
-            <div className="flex items-center justify-center py-24">
-              <div className="w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full animate-spin" />
+            <div className="space-y-2.5" aria-label="Chargement">
+              {Array.from({ length: 4 }).map((_, i) => (
+                <div
+                  key={i}
+                  className="bg-white rounded-2xl border border-blue-950/15 p-3.5 flex items-center gap-3 animate-pulse"
+                >
+                  <div className="w-10 h-10 rounded-xl bg-slate-100 shrink-0" />
+                  <div className="flex-1 space-y-2">
+                    <div className="h-3.5 w-32 bg-slate-100 rounded" />
+                    <div className="h-3 w-44 bg-slate-100 rounded" />
+                  </div>
+                  <div className="h-4 w-16 bg-slate-100 rounded" />
+                </div>
+              ))}
             </div>
           ) : tab === 'apercu' ? (
-            <>
-              {/* Carte Recouvrement épurée */}
-              <div className="bg-white rounded-3xl border border-slate-100 shadow-xs p-5 space-y-4">
-                <div className="flex items-end justify-between gap-3">
-                  <div>
-                    <p className="text-[11px] font-black uppercase tracking-wider text-slate-400">
-                      Recouvrement
-                    </p>
-                    <p className="text-2xl font-black text-slate-900 tabular-nums mt-0.5">
-                      {tauxRecouvrement}%
-                    </p>
-                  </div>
-                  <span className="text-xs font-bold text-blue-600 bg-blue-50 px-3 py-1 rounded-full">
-                    {enAttente.length} en attente
-                  </span>
-                </div>
-
-                <div className="h-2.5 bg-slate-100 rounded-full overflow-hidden">
-                  <div
-                    className="h-full bg-blue-600 rounded-full transition-all duration-300"
-                    style={{ width: `${Math.min(100, tauxRecouvrement)}%` }}
-                  />
-                </div>
-
-                <div className="grid grid-cols-2 gap-4 pt-3.5 border-t border-slate-100">
-                  <div>
-                    <p className="text-[11px] font-semibold text-slate-400">Reste à recouvrer</p>
-                    <p className="text-base font-black text-amber-600 tabular-nums mt-0.5">
-                      {fmt(totalRestant)} <span className="text-xs font-bold text-slate-400">{curShort}</span>
-                    </p>
-                  </div>
-                  <div className="border-l border-slate-100 pl-4">
-                    <p className="text-[11px] font-semibold text-slate-400">Total attendu</p>
-                    <p className="text-base font-black text-slate-900 tabular-nums mt-0.5">
-                      {fmt(totalAttendu)} <span className="text-xs font-bold text-slate-400">{curShort}</span>
-                    </p>
-                  </div>
-                </div>
-              </div>
-
+            <div className="space-y-4">
               {/* Carte Dépenses par nature */}
-              <div className="bg-white rounded-3xl border border-slate-100 shadow-xs p-5 space-y-4">
+              <div className="bg-white rounded-2xl border border-blue-950/15 shadow-[0_3px_10px_-4px_rgba(15,23,42,0.08)] p-4 space-y-3.5">
                 <div className="flex items-center justify-between gap-2">
-                  <h2 className="text-sm font-black text-slate-900">Dépenses par nature</h2>
+                  <h2 className="text-xs font-black uppercase tracking-wider text-slate-500">
+                    Répartition des dépenses
+                  </h2>
                   <button
                     type="button"
                     onClick={() => setTab('depenses')}
-                    className="text-xs font-black text-blue-600 active:opacity-70 py-1 cursor-pointer"
+                    className="text-xs font-black text-blue-600 cursor-pointer"
                   >
-                    Tout voir →
+                    Journal →
                   </button>
                 </div>
                 {natures.length === 0 ? (
-                  <p className="text-xs text-slate-400 font-semibold text-center py-6">
+                  <p className="text-xs text-slate-400 font-semibold text-center py-5">
                     Aucune dépense enregistrée en {HAJJ_CURRENCY_MAP[selectedDevise].label}.
                   </p>
                 ) : (
-                  renderNatureBars(5)
+                  renderNatureBars(6)
                 )}
               </div>
 
-              {/* Section Forfaits / Packages */}
+              {/* Forfaits / Packages */}
               {Object.keys(packages).length > 0 && (
-                <div className="space-y-3">
-                  <h2 className="text-xs font-black uppercase tracking-wider text-slate-400 px-1">
+                <div className="space-y-2.5">
+                  <h2 className="text-[11px] font-black uppercase tracking-wider text-slate-400 px-0.5">
                     Forfaits & Packages
                   </h2>
                   <div className="space-y-2.5">
@@ -1622,27 +2286,25 @@ export default function ComptabiliteHajj() {
                       return (
                         <div
                           key={nom}
-                          className="bg-white rounded-3xl border border-slate-100 shadow-xs p-4 space-y-3"
+                          className="bg-white rounded-2xl border border-blue-950/15 shadow-[0_3px_10px_-4px_rgba(15,23,42,0.08)] p-3.5 space-y-2.5"
                         >
                           <div className="flex items-center justify-between gap-2">
                             <p className="font-black text-slate-900 text-sm truncate">{nom}</p>
-                            <span className="text-[11px] font-bold text-slate-500 bg-slate-100 px-2.5 py-0.5 rounded-full shrink-0">
+                            <span className="text-[11px] font-bold text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full shrink-0">
                               {pkg.count} pers.
                             </span>
                           </div>
-
-                          <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
+                          <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden">
                             <div
-                              className="h-full bg-blue-600 rounded-full transition-all"
+                              className="h-full bg-blue-600 rounded-full"
                               style={{ width: `${Math.min(100, taux)}%` }}
                             />
                           </div>
-
                           <div className="flex items-center justify-between text-xs">
                             <span className="font-black text-emerald-700 tabular-nums">
                               {fmt(pkg.encaisse)} {curShort}
                             </span>
-                            <span className="font-semibold text-slate-400 tabular-nums">
+                            <span className="font-semibold text-slate-500 tabular-nums">
                               Reste {fmt(pkg.attendu - pkg.encaisse)} {curShort} • {taux}%
                             </span>
                           </div>
@@ -1653,10 +2315,10 @@ export default function ComptabiliteHajj() {
                 </div>
               )}
 
-              {/* Section Agences & Partenaires */}
+              {/* Agences & Partenaires */}
               {Object.keys(agences).length > 0 && (
-                <div className="space-y-3">
-                  <h2 className="text-xs font-black uppercase tracking-wider text-slate-400 px-1">
+                <div className="space-y-2.5">
+                  <h2 className="text-[11px] font-black uppercase tracking-wider text-slate-400 px-0.5">
                     Agences & Partenaires
                   </h2>
                   <div className="space-y-2.5">
@@ -1668,12 +2330,12 @@ export default function ComptabiliteHajj() {
                         return (
                           <div
                             key={nom}
-                            className="bg-white rounded-3xl border border-slate-100 shadow-xs overflow-hidden"
+                            className="bg-white rounded-2xl border border-blue-950/15 shadow-[0_3px_10px_-4px_rgba(15,23,42,0.08)] overflow-hidden"
                           >
                             <button
                               type="button"
                               onClick={() => setExpandedAgence(isOpen ? null : nom)}
-                              className="w-full p-4 flex items-center justify-between gap-3 text-left active:bg-slate-50 transition cursor-pointer"
+                              className="w-full p-3.5 flex items-center justify-between gap-3 text-left active:bg-slate-50 transition cursor-pointer"
                             >
                               <div className="min-w-0">
                                 <p className="font-black text-slate-900 text-sm truncate">{nom}</p>
@@ -1700,7 +2362,7 @@ export default function ComptabiliteHajj() {
                                   return (
                                     <div
                                       key={p.id || i}
-                                      className="flex items-center justify-between gap-3 px-4 py-3"
+                                      className="flex items-center justify-between gap-3 px-3.5 py-2.5"
                                     >
                                       <div className="min-w-0">
                                         <p className="text-xs font-bold text-slate-900 truncate">
@@ -1711,10 +2373,9 @@ export default function ComptabiliteHajj() {
                                         </p>
                                       </div>
                                       <span
-                                        className={`text-[11px] font-black px-2.5 py-1 rounded-full shrink-0 tabular-nums ${solde
-                                            ? 'bg-emerald-50 text-emerald-700'
-                                            : 'bg-amber-50 text-amber-700'
-                                          }`}
+                                        className={`text-[11px] font-black shrink-0 tabular-nums ${
+                                          solde ? 'text-emerald-600' : 'text-amber-600'
+                                        }`}
                                       >
                                         {solde ? 'Soldé' : `-${fmt(restant)} ${curShort}`}
                                       </span>
@@ -1729,76 +2390,32 @@ export default function ComptabiliteHajj() {
                   </div>
                 </div>
               )}
-            </>
+            </div>
           ) : (
-            <>
-              {/* Ligne d'info ultra-légère : coût moyen + bascule répartition */}
-              <div className="flex items-center justify-between gap-2 px-1">
-                <p className="text-xs font-semibold text-slate-500">
-                  Moy.{' '}
-                  <span className="font-black text-slate-900 tabular-nums">
-                    {fmt(data.length ? totalDepenses / data.length : 0)} {curShort}
-                  </span>{' '}
-                  / pèlerin
-                </p>
-                {natures.length > 0 && (
-                  <button
-                    type="button"
-                    onClick={() => setShowNatureBars(v => !v)}
-                    className="inline-flex items-center gap-1 text-xs font-black text-blue-600 active:opacity-70 cursor-pointer"
-                  >
-                    <span>Répartition</span>
-                    <ChevronDown
-                      size={14}
-                      className={`transition-transform ${showNatureBars ? 'rotate-180' : ''}`}
-                    />
-                  </button>
-                )}
-              </div>
-
-              {/* Répartition par nature (à la demande pour garder l'écran aéré) */}
-              {showNatureBars && natures.length > 0 && (
-                <div className="bg-white rounded-3xl border border-slate-100 shadow-xs p-5 space-y-3 animate-in fade-in slide-in-from-top-2 duration-150">
-                  <div className="flex items-center justify-between">
-                    <p className="text-xs font-black uppercase tracking-wider text-slate-400">
-                      Répartition par nature
-                    </p>
-                    {effectiveNature !== 'all' && (
-                      <button
-                        type="button"
-                        onClick={() => setFilterNature('all')}
-                        className="text-xs font-bold text-blue-600 cursor-pointer"
-                      >
-                        Tout afficher
-                      </button>
-                    )}
-                  </div>
-                  {renderNatureBars()}
-                </div>
-              )}
-
-              {/* Recherche + bouton Filtres spacieux */}
-              <div className="flex items-center gap-2.5">
+            /* =================== ONGLET DÉPENSES ULTRA-AÉRÉ =================== */
+            <div className="space-y-3.5">
+              {/* 1 seule barre propre : Recherche + Filtres/Tri */}
+              <div className="flex items-center gap-2">
                 <div className="relative flex-1 min-w-0">
                   <Search
-                    size={17}
-                    className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none"
+                    size={16}
+                    className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none"
                   />
                   <input
                     type="text"
                     placeholder="Rechercher une dépense, pèlerin…"
                     value={filterDepenseSearch}
                     onChange={e => setFilterDepenseSearch(e.target.value)}
-                    className="w-full h-12 pl-11 pr-10 bg-white border border-slate-200/80 rounded-2xl text-sm font-semibold text-slate-800 shadow-xs outline-none focus:border-blue-600 transition"
+                    className="w-full h-11 pl-10 pr-9 bg-white border border-slate-200/90 rounded-2xl text-sm font-semibold text-slate-800 placeholder:text-slate-400 outline-none focus:border-blue-600 transition"
                   />
                   {filterDepenseSearch && (
                     <button
                       type="button"
                       onClick={() => setFilterDepenseSearch('')}
                       aria-label="Effacer"
-                      className="absolute right-2.5 top-1/2 -translate-y-1/2 w-7 h-7 rounded-full bg-slate-100 text-slate-500 flex items-center justify-center"
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 w-6 h-6 rounded-full bg-slate-100 text-slate-500 flex items-center justify-center"
                     >
-                      <X size={14} />
+                      <X size={13} />
                     </button>
                   )}
                 </div>
@@ -1807,216 +2424,226 @@ export default function ComptabiliteHajj() {
                   type="button"
                   onClick={() => setShowFilters(true)}
                   aria-label="Filtrer et trier"
-                  className="relative w-12 h-12 shrink-0 rounded-2xl bg-white border border-slate-200/80 shadow-xs text-slate-700 flex items-center justify-center active:scale-95 transition cursor-pointer"
+                  className={`relative w-11 h-11 shrink-0 rounded-2xl border flex items-center justify-center active:scale-95 transition cursor-pointer ${
+                    activeFilterCount > 0
+                      ? 'bg-slate-900 text-white border-slate-900'
+                      : 'bg-white text-slate-700 border-slate-200/90'
+                  }`}
                 >
-                  <SlidersHorizontal size={18} />
+                  <SlidersHorizontal size={17} />
                   {activeFilterCount > 0 && (
-                    <span className="absolute -top-1 -right-1 min-w-[19px] h-[19px] px-1 rounded-full bg-blue-600 text-white text-[10px] font-black flex items-center justify-center shadow-xs">
+                    <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 rounded-full bg-blue-600 text-white text-[10px] font-black flex items-center justify-center">
                       {activeFilterCount}
                     </span>
                   )}
                 </button>
               </div>
 
-              {/* Sélecteur de vue fluide (Journal / Par nature / Par pèlerin) */}
-              <div className="grid grid-cols-3 gap-1 p-1 bg-slate-200/70 rounded-2xl">
-                {([
-                  ['liste', 'Journal', Receipt],
-                  ['nature', 'Nature', Layers],
-                  ['pelerin', 'Pèlerin', UserCheck],
-                ] as const).map(([id, label, Icon]) => (
-                  <button
-                    key={id}
-                    type="button"
-                    onClick={() => setViewMode(id)}
-                    className={`h-9 rounded-xl text-xs font-black flex items-center justify-center gap-1.5 transition-all active:scale-[0.98] cursor-pointer ${viewMode === id ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-500'
-                      }`}
-                  >
-                    <Icon size={13} />
-                    <span>{label}</span>
-                  </button>
-                ))}
-              </div>
-
-              {/* Pills de natures sur 1 seule ligne défilable horizontalement */}
-              {natures.length > 0 && (
-                <div className="-mx-5 px-5 flex items-center gap-2 overflow-x-auto no-scrollbar pb-1">
-                  <button
-                    type="button"
-                    onClick={() => setFilterNature('all')}
-                    className={`h-9 px-3.5 rounded-full text-xs font-bold whitespace-nowrap shrink-0 transition active:scale-95 cursor-pointer ${effectiveNature === 'all'
-                        ? 'bg-slate-900 text-white shadow-xs'
-                        : 'bg-white text-slate-600 border border-slate-200/80'
-                      }`}
-                  >
-                    Toutes
-                  </button>
-                  {natures.map(n => {
-                    const active = effectiveNature === n.libelle
-                    return (
-                      <button
-                        key={n.libelle}
-                        type="button"
-                        onClick={() => setFilterNature(active ? 'all' : n.libelle)}
-                        className={`h-9 px-3.5 rounded-full text-xs font-bold whitespace-nowrap shrink-0 transition active:scale-95 cursor-pointer ${active
-                            ? 'bg-blue-600 text-white shadow-xs'
-                            : 'bg-white text-slate-600 border border-slate-200/80'
-                          }`}
-                      >
-                        {n.libelle}{' '}
-                        <span className={active ? 'text-blue-200' : 'text-slate-400'}>
-                          ({n.count})
-                        </span>
-                      </button>
-                    )
-                  })}
-                </div>
-              )}
-
-              {/* Ligne résultat sobre */}
-              <div className="flex items-center justify-between px-1">
-                <div className="flex items-center gap-2 text-xs font-bold text-slate-500">
-                  <span>
-                    {filteredRows.length} écriture{filteredRows.length > 1 ? 's' : ''}
-                  </span>
-                  {hasActiveFilter && (
+              {/* Mini ligne discrète : Mode de vue + Total filtré */}
+              <div className="flex items-center justify-between gap-2 px-0.5">
+                <div className="flex items-center gap-1.5">
+                  {([
+                    ['liste', 'Journal'],
+                    ['nature', 'Par nature'],
+                    ['pelerin', 'Par pèlerin'],
+                  ] as const).map(([id, label]) => (
                     <button
+                      key={id}
                       type="button"
-                      onClick={resetFilters}
-                      className="text-blue-600 font-black active:opacity-70 cursor-pointer"
+                      onClick={() => setViewMode(id)}
+                      className={`h-7 px-2.5 rounded-full text-[11px] font-bold transition cursor-pointer ${
+                        viewMode === id
+                          ? 'bg-slate-900 text-white'
+                          : 'text-slate-500 active:bg-slate-200/70'
+                      }`}
                     >
-                      • Effacer
+                      {label}
                     </button>
-                  )}
+                  ))}
                 </div>
-                <span className="text-sm font-black text-rose-600 tabular-nums">
+                <span className="text-xs font-black text-rose-600 tabular-nums shrink-0">
                   -{fmt(filteredTotal)} {curShort}
                 </span>
               </div>
 
-              {/* Liste des transactions style Fintech */}
+              {/* Chips supprimables UNIQUEMENT si des filtres avancés sont actifs */}
+              {(filterType !== 'all' || effectiveNature !== 'all' || sortKey !== 'date_desc') && (
+                <div className="-mx-5 px-5 flex items-center gap-1.5 overflow-x-auto no-scrollbar">
+                  {filterType !== 'all' && (
+                    <button
+                      type="button"
+                      onClick={() => setFilterType('all')}
+                      className="h-7 px-2.5 rounded-full bg-blue-50 text-blue-700 border border-blue-100 text-[11px] font-bold whitespace-nowrap shrink-0 flex items-center gap-1 cursor-pointer"
+                    >
+                      <span>{TYPE_META[filterType].short}</span>
+                      <X size={11} />
+                    </button>
+                  )}
+                  {effectiveNature !== 'all' && (
+                    <button
+                      type="button"
+                      onClick={() => setFilterNature('all')}
+                      className="h-7 px-2.5 rounded-full bg-blue-50 text-blue-700 border border-blue-100 text-[11px] font-bold whitespace-nowrap shrink-0 flex items-center gap-1 cursor-pointer"
+                    >
+                      <span>{effectiveNature}</span>
+                      <X size={11} />
+                    </button>
+                  )}
+                  {sortKey !== 'date_desc' && (
+                    <button
+                      type="button"
+                      onClick={() => setSortKey('date_desc')}
+                      className="h-7 px-2.5 rounded-full bg-slate-100 text-slate-700 border border-slate-200 text-[11px] font-bold whitespace-nowrap shrink-0 flex items-center gap-1 cursor-pointer"
+                    >
+                      <span>Tri personnalisé</span>
+                      <X size={11} />
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={resetFilters}
+                    className="h-7 px-2.5 rounded-full text-rose-600 text-[11px] font-black whitespace-nowrap shrink-0 cursor-pointer"
+                  >
+                    Tout effacer
+                  </button>
+                </div>
+              )}
+
+              {/* Liste des dépenses */}
               {filteredRows.length === 0 ? (
                 <div className="bg-white rounded-3xl border border-dashed border-slate-200 py-14 px-6 text-center space-y-3">
                   <div className="w-12 h-12 rounded-2xl bg-slate-100 text-slate-400 flex items-center justify-center mx-auto">
                     <Receipt size={22} />
                   </div>
-                  <p className="text-sm font-black text-slate-700">
+                  <p className="text-sm font-black text-slate-800">
                     {depenses.length === 0
                       ? `Aucune dépense en ${HAJJ_CURRENCY_MAP[selectedDevise].label}`
                       : 'Aucun résultat trouvé'}
                   </p>
                   <p className="text-xs text-slate-400 font-medium">
                     {depenses.length === 0
-                      ? 'Ajoutez votre première sortie de trésorerie pour démarrer le suivi.'
-                      : 'Essayez de modifier vos filtres ou votre recherche.'}
+                      ? 'Enregistrez votre première dépense en 3 étapes simples.'
+                      : 'Essayez de modifier votre recherche ou vos filtres.'}
                   </p>
                   {depenses.length === 0 && (
                     <button
                       type="button"
                       onClick={openNew}
-                      className="mt-2 inline-flex items-center gap-2 h-11 px-5 rounded-2xl bg-blue-600 text-white text-xs font-black shadow-md shadow-blue-600/20 active:scale-95 transition cursor-pointer"
+                      className="mt-1 inline-flex items-center gap-2 h-11 px-5 rounded-2xl bg-slate-900 text-white text-xs font-black active:scale-95 transition cursor-pointer"
                     >
                       <Plus size={16} />
-                      <span>Nouvelle dépense ({curSymbol})</span>
+                      <span>Ajouter une dépense</span>
                     </button>
                   )}
                 </div>
               ) : viewMode === 'liste' ? (
-                <div className="bg-white rounded-3xl border border-slate-100 shadow-xs divide-y divide-slate-100 overflow-hidden">
-                  {filteredRows.map(r => {
-                    const meta = TYPE_META[r.d.type_cible] ?? TYPE_META.global
-                    const Icon = meta.icon
-                    return (
-                      <button
-                        key={r.d.id}
-                        type="button"
-                        onClick={() => setDetailId(r.d.id)}
-                        className="w-full px-4 py-4 flex items-center gap-3.5 text-left active:bg-slate-50 transition cursor-pointer"
-                      >
-                        <div className="w-11 h-11 rounded-2xl bg-blue-50/80 text-blue-600 flex items-center justify-center shrink-0">
-                          <Icon size={18} />
-                        </div>
+                /* Journal groupé par DATE (style Revolut / Apple Wallet) */
+                <div className="space-y-4">
+                  {groupedByDate.map(group => (
+                    <div key={group.label} className="space-y-2">
+                      <div className="flex items-center justify-between px-1">
+                        <span className="text-[11px] font-black uppercase tracking-wider text-slate-400">
+                          {group.label}
+                        </span>
+                        <span className="text-[11px] font-bold text-slate-400 tabular-nums">
+                          -{fmt(group.total)} {curShort}
+                        </span>
+                      </div>
 
-                        <div className="min-w-0 flex-1">
-                          <div className="flex items-center gap-1.5">
-                            <p className="font-black text-slate-900 text-sm truncate">
-                              {r.d.libelle}
-                            </p>
-                            {r.dyn && <RefreshCw size={12} className="text-blue-600 shrink-0" />}
-                          </div>
-                          <p className="text-xs text-slate-500 font-medium truncate mt-0.5">
-                            {r.label}
-                          </p>
-                          <p className="text-[11px] text-slate-400 font-medium mt-1 truncate">
-                            {r.targets.length === 0 && !r.isList ? 'Cible introuvable' : `${r.count} pers.`}
-                            {r.d.created_at &&
-                              ` • ${new Date(r.d.created_at).toLocaleDateString('fr-FR', {
-                                day: '2-digit',
-                                month: 'short',
-                              })}`}
-                            {r.d.recorded_by_name && ` • ${r.d.recorded_by_name}`}
-                          </p>
-                        </div>
+                      <div className="space-y-2">
+                        {group.rows.map(r => {
+                          const meta = TYPE_META[r.d.type_cible] ?? TYPE_META.global
+                          const Icon = LIBELLE_ICON[r.d.libelle] ?? meta.icon
+                          return (
+                            <button
+                              key={r.d.id}
+                              type="button"
+                              onClick={() => setDetailId(r.d.id)}
+                              className="w-full bg-white rounded-2xl border border-blue-950/15 shadow-[0_3px_10px_-4px_rgba(15,23,42,0.09),0_1px_2px_rgba(15,23,42,0.05)] px-3.5 py-3 flex items-center gap-3 text-left active:scale-[0.99] transition cursor-pointer"
+                            >
+                              <div className="w-10 h-10 rounded-xl bg-slate-100 text-slate-700 flex items-center justify-center shrink-0">
+                                <Icon size={17} />
+                              </div>
 
-                        <div className="flex items-center gap-1.5 shrink-0">
-                          <div className="text-right">
-                            <p className="text-sm font-black text-rose-600 tabular-nums">
-                              -{fmt(r.montant)}
-                            </p>
-                            <p className="text-[10px] font-bold text-slate-400">{curShort}</p>
-                          </div>
-                          <ChevronRight size={16} className="text-slate-300" />
-                        </div>
-                      </button>
-                    )
-                  })}
+                              <div className="min-w-0 flex-1">
+                                <div className="flex items-center gap-1.5">
+                                  <p className="font-black text-slate-900 text-[14px] leading-snug truncate">
+                                    {r.d.libelle}
+                                  </p>
+                                  {r.dyn && (
+                                    <span className="text-[9.5px] font-black px-1.5 py-0.5 rounded bg-blue-50 text-blue-700 shrink-0">
+                                      Auto
+                                    </span>
+                                  )}
+                                </div>
+                                <p className="text-xs text-slate-500 font-medium truncate mt-0.5">
+                                  {r.label}
+                                </p>
+                                <p className="text-[10.5px] text-slate-400 font-medium mt-0.5 truncate">
+                                  {r.targets.length === 0 && !r.isList ? 'Cible introuvable' : `${r.count} pers.`}
+                                  {r.count > 1 && ` • ${fmt(r.unit)} ${curShort}/pers.`}
+                                  {r.d.recorded_by_name && ` • ${r.d.recorded_by_name}`}
+                                </p>
+                              </div>
+
+                              <div className="flex items-center gap-1 shrink-0">
+                                <div className="text-right">
+                                  <p className="text-[14px] font-black text-rose-600 tabular-nums">
+                                    -{fmt(r.montant)}
+                                  </p>
+                                  <p className="text-[10px] font-bold text-slate-400">{curShort}</p>
+                                </div>
+                                <ChevronRight size={15} className="text-slate-300" />
+                              </div>
+                            </button>
+                          )
+                        })}
+                      </div>
+                    </div>
+                  ))}
                 </div>
               ) : viewMode === 'nature' ? (
-                <div className="space-y-3">
+                <div className="space-y-2.5">
                   {groupedByNature.map(g => {
                     const collapsed = collapsedNatures.includes(g.libelle)
                     const pct = filteredTotal > 0 ? Math.round((g.total / filteredTotal) * 100) : 0
+                    const CatIcon = LIBELLE_ICON[g.libelle] ?? Receipt
                     return (
                       <div
                         key={g.libelle}
-                        className="bg-white rounded-3xl border border-slate-100 shadow-xs overflow-hidden"
+                        className="bg-white rounded-2xl border border-blue-950/15 shadow-[0_3px_10px_-4px_rgba(15,23,42,0.09)] overflow-hidden"
                       >
                         <button
                           type="button"
                           onClick={() =>
                             setCollapsedNatures(c =>
-                              c.includes(g.libelle)
-                                ? c.filter(x => x !== g.libelle)
-                                : [...c, g.libelle],
+                              c.includes(g.libelle) ? c.filter(x => x !== g.libelle) : [...c, g.libelle],
                             )
                           }
-                          className="w-full p-4 text-left active:bg-slate-50 transition cursor-pointer"
+                          className="w-full p-3.5 text-left active:bg-slate-50 transition cursor-pointer"
                         >
-                          <div className="flex items-center justify-between gap-3">
-                            <div className="min-w-0">
-                              <p className="font-black text-slate-900 text-sm truncate">
-                                {g.libelle}
-                              </p>
-                              <p className="text-xs text-slate-400 font-semibold mt-0.5">
+                          <div className="flex items-center gap-3">
+                            <div className="w-9 h-9 rounded-xl bg-slate-100 text-slate-700 flex items-center justify-center shrink-0">
+                              <CatIcon size={16} />
+                            </div>
+                            <div className="min-w-0 flex-1">
+                              <p className="font-black text-slate-900 text-sm truncate">{g.libelle}</p>
+                              <p className="text-[11px] text-slate-400 font-semibold">
                                 {g.rows.length} écriture{g.rows.length > 1 ? 's' : ''} • {pct}%
                               </p>
                             </div>
-                            <div className="flex items-center gap-2 shrink-0">
+                            <div className="flex items-center gap-1.5 shrink-0">
                               <p className="text-sm font-black text-rose-600 tabular-nums">
                                 -{fmt(g.total)} {curShort}
                               </p>
                               <ChevronDown
-                                size={16}
-                                className={`text-slate-400 transition-transform ${collapsed ? '' : 'rotate-180'
-                                  }`}
+                                size={15}
+                                className={`text-slate-400 transition-transform ${collapsed ? '' : 'rotate-180'}`}
                               />
                             </div>
                           </div>
-                          <div className="mt-3 h-2 bg-slate-100 rounded-full overflow-hidden">
-                            <div
-                              className="h-full bg-amber-500 rounded-full"
-                              style={{ width: `${pct}%` }}
-                            />
+                          <div className="mt-2.5 h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                            <div className="h-full bg-amber-500 rounded-full" style={{ width: `${pct}%` }} />
                           </div>
                         </button>
 
@@ -2027,12 +2654,10 @@ export default function ComptabiliteHajj() {
                                 key={r.d.id}
                                 type="button"
                                 onClick={() => setDetailId(r.d.id)}
-                                className="w-full px-4 py-3.5 flex items-center justify-between gap-3 text-left active:bg-slate-100/70 transition cursor-pointer"
+                                className="w-full px-3.5 py-3 flex items-center justify-between gap-3 text-left active:bg-slate-100/70 transition cursor-pointer"
                               >
                                 <div className="min-w-0">
-                                  <p className="text-xs font-bold text-slate-800 truncate">
-                                    {r.label}
-                                  </p>
+                                  <p className="text-xs font-bold text-slate-800 truncate">{r.label}</p>
                                   <p className="text-[11px] text-slate-400 mt-0.5 truncate">
                                     {r.count} pers.
                                     {r.d.created_at &&
@@ -2057,8 +2682,8 @@ export default function ComptabiliteHajj() {
                   })}
                 </div>
               ) : (
-                <div className="space-y-3">
-                  <p className="text-xs text-slate-400 font-semibold px-1">
+                <div className="space-y-2.5">
+                  <p className="text-[11px] text-slate-400 font-semibold px-1">
                     {perPelerin.length} pèlerin{perPelerin.length > 1 ? 's' : ''} concerné
                     {perPelerin.length > 1 ? 's' : ''}
                   </p>
@@ -2068,28 +2693,24 @@ export default function ComptabiliteHajj() {
                     const paye = Number(p.total_paye) || 0
                     const net = paye - cout
                     const initiales =
-                      `${p.prenom?.charAt(0) || ''}${(p.nom_complet || p.nom || '').charAt(0)}`.toUpperCase() ||
-                      'P'
+                      `${p.prenom?.charAt(0) || ''}${(p.nom_complet || p.nom || '').charAt(0)}`.toUpperCase() || 'P'
                     return (
                       <div
                         key={k}
-                        className="bg-white rounded-3xl border border-slate-100 shadow-xs overflow-hidden"
+                        className="bg-white rounded-2xl border border-blue-950/15 shadow-[0_3px_10px_-4px_rgba(15,23,42,0.09)] overflow-hidden"
                       >
                         <button
                           type="button"
                           onClick={() => setExpandedPelerin(open ? null : k)}
-                          className="w-full p-4 flex items-center gap-3 text-left active:bg-slate-50 transition cursor-pointer"
+                          className="w-full p-3.5 flex items-center gap-3 text-left active:bg-slate-50 transition cursor-pointer"
                         >
-                          <div className="w-10 h-10 rounded-full bg-blue-50 text-blue-700 font-black text-xs flex items-center justify-center shrink-0">
+                          <div className="w-9 h-9 rounded-xl bg-slate-100 text-slate-700 font-black text-xs flex items-center justify-center shrink-0">
                             {initiales}
                           </div>
                           <div className="min-w-0 flex-1">
-                            <p className="font-black text-slate-900 text-sm truncate">
-                              {pName(p)}
-                            </p>
-                            <p className="text-xs text-slate-400 font-medium mt-0.5 truncate">
-                              Payé {fmt(paye)} {curShort} • {lignes.length} charge
-                              {lignes.length > 1 ? 's' : ''}
+                            <p className="font-black text-slate-900 text-sm truncate">{pName(p)}</p>
+                            <p className="text-[11px] text-slate-400 font-medium mt-0.5 truncate">
+                              Payé {fmt(paye)} {curShort} • {lignes.length} charge{lignes.length > 1 ? 's' : ''}
                             </p>
                           </div>
                           <div className="text-right shrink-0">
@@ -2097,10 +2718,9 @@ export default function ComptabiliteHajj() {
                               -{fmt(cout)} {curShort}
                             </p>
                             <span
-                              className={`inline-block mt-1 text-[10px] font-black px-2 py-0.5 rounded-full tabular-nums ${net >= 0
-                                  ? 'bg-emerald-50 text-emerald-700'
-                                  : 'bg-rose-50 text-rose-700'
-                                }`}
+                              className={`text-[10.5px] font-black tabular-nums ${
+                                net >= 0 ? 'text-emerald-600' : 'text-rose-600'
+                              }`}
                             >
                               {net > 0 ? '+' : ''}
                               {fmt(net)} {curShort}
@@ -2109,15 +2729,13 @@ export default function ComptabiliteHajj() {
                         </button>
 
                         {open && (
-                          <div className="border-t border-slate-100 bg-slate-50/60 px-4 py-3 space-y-2">
+                          <div className="border-t border-slate-100 bg-slate-50/60 px-3.5 py-2.5 space-y-1.5">
                             {lignes.map((l, i) => (
                               <div
                                 key={`${l.id}-${i}`}
-                                className="flex items-center justify-between text-xs bg-white rounded-2xl border border-slate-100 px-3.5 py-2.5"
+                                className="flex items-center justify-between text-xs bg-white rounded-xl border border-slate-200/70 px-3 py-2"
                               >
-                                <span className="font-bold text-slate-700 truncate pr-2">
-                                  {l.libelle}
-                                </span>
+                                <span className="font-bold text-slate-700 truncate pr-2">{l.libelle}</span>
                                 <span className="font-black text-rose-600 tabular-nums shrink-0">
                                   -{fmt(l.part)} {curShort}
                                 </span>
@@ -2130,24 +2748,9 @@ export default function ComptabiliteHajj() {
                   })}
                 </div>
               )}
-            </>
+            </div>
           )}
         </div>
-
-        {/* Bouton flottant rapide en zone de pouce */}
-        {!anySheetOpen && !loading && (
-          <button
-            type="button"
-            onClick={() => {
-              setTab('depenses')
-              openNew()
-            }}
-            className="fixed right-4 bottom-24 z-30 h-12 px-4 rounded-full bg-blue-600 text-white font-black text-xs shadow-lg shadow-blue-600/30 flex items-center gap-1.5 active:scale-95 transition cursor-pointer"
-          >
-            <Plus size={18} strokeWidth={2.5} />
-            <span>Dépense ({curShort})</span>
-          </button>
-        )}
       </div>
 
       {/* =================================================================== */}
@@ -2756,9 +3359,517 @@ export default function ComptabiliteHajj() {
         )}
       </Sheet>
 
-      {/* ===================== FEUILLE : AJOUT / MODIFICATION ===================== */}
+      {/* ===================== ASSISTANT PLEIN ÉCRAN MOBILE (3 ÉTAPES NATIVES) ===================== */}
+      {showSheet && isMobile && (
+        <div className="fixed inset-0 z-[9998] bg-[#F8FAFC] flex flex-col animate-in slide-in-from-bottom duration-200">
+          {/* Barre supérieure native avec flèche retour & 3 étapes cliquables */}
+          <div className="bg-white border-b border-slate-200/80 px-4 pt-[max(0.85rem,env(safe-area-inset-top))] pb-3 shrink-0 space-y-3">
+            <div className="flex items-center justify-between gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  if (mobileStep > 1) setMobileStep((mobileStep - 1) as 1 | 2 | 3)
+                  else closeSheet()
+                }}
+                aria-label="Retour"
+                className="w-9 h-9 rounded-full bg-slate-100 text-slate-700 flex items-center justify-center active:scale-90 transition cursor-pointer"
+              >
+                <ArrowLeft size={18} />
+              </button>
+
+              <div className="text-center min-w-0">
+                <p className="text-sm font-black text-slate-900 truncate">
+                  {editingId ? 'Modifier la dépense' : 'Nouvelle dépense'}
+                </p>
+                <p className="text-[11px] font-bold text-slate-400">
+                  {HAJJ_CURRENCY_MAP[selectedDevise].label} • Étape {mobileStep} sur 3
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={closeSheet}
+                aria-label="Fermer"
+                className="w-9 h-9 rounded-full bg-slate-100 text-slate-500 flex items-center justify-center active:scale-90 transition cursor-pointer"
+              >
+                <X size={17} />
+              </button>
+            </div>
+
+            {/* Barre de progression interactive 3 étapes */}
+            <div className="grid grid-cols-3 gap-1.5">
+              {([
+                [1, '1. Pour qui'],
+                [2, '2. Nature'],
+                [3, '3. Montant'],
+              ] as const).map(([stepNum, stepLabel]) => {
+                const active = mobileStep === stepNum
+                const done = mobileStep > stepNum
+                const canJump =
+                  stepNum === 1 ||
+                  (stepNum === 2 && isTargetValid) ||
+                  (stepNum === 3 && isTargetValid && (libelle !== 'Autre' || customLibelle.trim() !== ''))
+                return (
+                  <button
+                    key={stepNum}
+                    type="button"
+                    disabled={!canJump}
+                    onClick={() => canJump && setMobileStep(stepNum)}
+                    className="text-left space-y-1 disabled:opacity-45 cursor-pointer"
+                  >
+                    <div
+                      className={`h-1 rounded-full transition-colors ${
+                        active ? 'bg-blue-600' : done ? 'bg-slate-900' : 'bg-slate-200'
+                      }`}
+                    />
+                    <span
+                      className={`block text-[10.5px] font-bold truncate ${
+                        active ? 'text-blue-600' : done ? 'text-slate-800' : 'text-slate-400'
+                      }`}
+                    >
+                      {stepLabel}
+                    </span>
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+
+          {/* Contenu aéré de l'étape active */}
+          <div className="flex-1 overflow-y-auto overscroll-contain px-5 py-5 space-y-5">
+            {mobileStep === 1 && (
+              <>
+                <div className="space-y-1">
+                  <h2 className="text-xl font-black text-slate-900 tracking-tight">
+                    Qui est concerné ?
+                  </h2>
+                  <p className="text-xs text-slate-500 font-medium">
+                    Choisissez à qui imputer cette dépense en {curSymbol}.
+                  </p>
+                </div>
+
+                {/* 5 cartes tactiles claires */}
+                <div className="space-y-2">
+                  {TYPE_ORDER.map(id => {
+                    const m = TYPE_META[id]
+                    const active = typeCible === id
+                    return (
+                      <button
+                        key={id}
+                        type="button"
+                        onClick={() => {
+                          changeType(id)
+                          if (id !== 'global') {
+                            // Ouvre le sélecteur en 1 tap pour les types qui nécessitent un choix
+                            setTimeout(() => setShowPicker(true), 60)
+                          }
+                        }}
+                        className={`w-full p-3.5 rounded-2xl border flex items-center gap-3.5 text-left transition active:scale-[0.99] cursor-pointer ${
+                          active
+                            ? 'bg-slate-900 text-white border-slate-900 shadow-sm'
+                            : 'bg-white text-slate-800 border-blue-950/15'
+                        }`}
+                      >
+                        <div
+                          className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${
+                            active ? 'bg-white/15 text-white' : 'bg-slate-100 text-slate-600'
+                          }`}
+                        >
+                          <m.icon size={18} />
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <p className="text-sm font-black leading-tight">{m.label}</p>
+                          <p className={`text-xs mt-0.5 ${active ? 'text-slate-300' : 'text-slate-400'}`}>
+                            {m.desc}
+                          </p>
+                        </div>
+                        <div
+                          className={`w-5 h-5 rounded-full border-2 flex items-center justify-center shrink-0 ${
+                            active ? 'bg-blue-500 border-blue-500 text-white' : 'border-slate-300'
+                          }`}
+                        >
+                          {active && <Check size={12} strokeWidth={3} />}
+                        </div>
+                      </button>
+                    )
+                  })}
+                </div>
+
+                {/* Cible sélectionnée */}
+                {typeCible !== 'global' && (
+                  <div className="space-y-2">
+                    <button
+                      type="button"
+                      onClick={() => setShowPicker(true)}
+                      className={`w-full p-4 rounded-2xl border text-left flex items-center justify-between gap-3 transition active:scale-[0.99] cursor-pointer ${
+                        targetSummary
+                          ? 'bg-blue-50/70 border-blue-300'
+                          : 'bg-white border-dashed border-slate-300'
+                      }`}
+                    >
+                      <div className="min-w-0">
+                        <p className="text-[10px] font-black uppercase tracking-wider text-slate-400">
+                          Cible choisie
+                        </p>
+                        <p className={`text-sm mt-0.5 truncate ${targetSummary ? 'font-black text-slate-900' : 'font-bold text-slate-400'}`}>
+                          {targetSummary ||
+                            (typeCible === 'groupe'
+                              ? 'Sélectionner des pèlerins…'
+                              : typeCible === 'pelerin'
+                              ? 'Choisir un pèlerin…'
+                              : typeCible === 'reference'
+                              ? 'Choisir un dossier…'
+                              : 'Choisir un partenaire…')}
+                        </p>
+                      </div>
+                      <span className="h-8 px-3 rounded-xl bg-blue-600 text-white text-xs font-black flex items-center shrink-0">
+                        {targetSummary ? 'Changer' : 'Choisir'}
+                      </span>
+                    </button>
+
+                    {typeCible === 'groupe' && selectedIds.length > 0 && (
+                      <div className="flex flex-wrap gap-1.5 max-h-28 overflow-y-auto pt-1">
+                        {selectedIds.map(id => {
+                          const p = allPelerins.find(x => String(x.id) === id)
+                          return (
+                            <span
+                              key={id}
+                              className="inline-flex items-center gap-1 text-[11px] font-bold bg-white text-slate-700 border border-slate-200 rounded-full pl-2.5 pr-1.5 py-1"
+                            >
+                              {p ? pName(p) : `#${id}`}
+                              <button
+                                type="button"
+                                onClick={() => setSelectedIds(s => s.filter(x => x !== id))}
+                                className="p-0.5 text-slate-400 cursor-pointer"
+                                aria-label="Retirer"
+                              >
+                                <X size={12} />
+                              </button>
+                            </span>
+                          )
+                        })}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Option Figée / Dynamique pour les cibles de type règle */}
+                {isRuleType && (
+                  <div className="space-y-2">
+                    <p className="text-[11px] font-black uppercase tracking-wider text-slate-400">
+                      Si de nouveaux pèlerins s’inscrivent ({cibleImpactCount} actuellement)
+                    </p>
+                    <div className="grid grid-cols-2 gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setDynamique(false)}
+                        className={`p-3.5 rounded-2xl border text-left transition cursor-pointer ${
+                          !dynamique
+                            ? 'bg-slate-900 text-white border-slate-900'
+                            : 'bg-white text-slate-700 border-blue-950/15'
+                        }`}
+                      >
+                        <p className="text-xs font-black">Liste figée</p>
+                        <p className={`text-[10.5px] mt-1 leading-snug ${!dynamique ? 'text-slate-300' : 'text-slate-400'}`}>
+                          Seulement les pèlerins actuels.
+                        </p>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setDynamique(true)}
+                        className={`p-3.5 rounded-2xl border text-left transition cursor-pointer ${
+                          dynamique
+                            ? 'bg-blue-600 text-white border-blue-600'
+                            : 'bg-white text-slate-700 border-blue-950/15'
+                        }`}
+                      >
+                        <p className="text-xs font-black flex items-center gap-1">
+                          <RefreshCw size={12} /> Dynamique
+                        </p>
+                        <p className={`text-[10.5px] mt-1 leading-snug ${dynamique ? 'text-blue-100' : 'text-slate-400'}`}>
+                          S’ajuste tout seul aux nouveaux.
+                        </p>
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
+
+            {mobileStep === 2 && (
+              <>
+                <div className="space-y-1">
+                  <h2 className="text-xl font-black text-slate-900 tracking-tight">
+                    Quelle est la nature ?
+                  </h2>
+                  <p className="text-xs text-slate-500 font-medium">
+                    Touchez une catégorie ou saisissez un motif libre.
+                  </p>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2.5">
+                  {LIBELLES.map(item => {
+                    const active = libelle === item
+                    const Icon = LIBELLE_ICON[item] ?? Receipt
+                    return (
+                      <button
+                        key={item}
+                        type="button"
+                        onClick={() => {
+                          setLibelle(item)
+                          setCustomLibelle('')
+                        }}
+                        className={`p-3.5 rounded-2xl border text-left space-y-2 transition active:scale-[0.98] cursor-pointer ${
+                          active
+                            ? 'bg-slate-900 text-white border-slate-900 shadow-sm'
+                            : 'bg-white text-slate-800 border-blue-950/15'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between">
+                          <div
+                            className={`w-9 h-9 rounded-xl flex items-center justify-center ${
+                              active ? 'bg-white/15 text-white' : 'bg-slate-100 text-slate-600'
+                            }`}
+                          >
+                            <Icon size={17} />
+                          </div>
+                          {active && <Check size={16} className="text-blue-400" strokeWidth={3} />}
+                        </div>
+                        <p className="text-xs font-black leading-snug">{item}</p>
+                      </button>
+                    )
+                  })}
+
+                  <button
+                    type="button"
+                    onClick={() => setLibelle('Autre')}
+                    className={`p-3.5 rounded-2xl border text-left space-y-2 transition active:scale-[0.98] cursor-pointer ${
+                      libelle === 'Autre'
+                        ? 'bg-slate-900 text-white border-slate-900 shadow-sm'
+                        : 'bg-white text-slate-800 border-blue-950/15'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <div
+                        className={`w-9 h-9 rounded-xl flex items-center justify-center ${
+                          libelle === 'Autre' ? 'bg-white/15 text-white' : 'bg-slate-100 text-slate-600'
+                        }`}
+                      >
+                        <Sparkles size={17} />
+                      </div>
+                      {libelle === 'Autre' && <Check size={16} className="text-blue-400" strokeWidth={3} />}
+                    </div>
+                    <p className="text-xs font-black leading-snug">Autre motif…</p>
+                  </button>
+                </div>
+
+                {libelle === 'Autre' && (
+                  <div className="pt-1">
+                    <label className="block text-[11px] font-black uppercase tracking-wider text-slate-400 mb-1.5">
+                      Motif personnalisé
+                    </label>
+                    <input
+                      type="text"
+                      autoFocus
+                      value={customLibelle}
+                      onChange={e => setCustomLibelle(e.target.value)}
+                      placeholder="Ex : Assurance voyage, Valises…"
+                      className="w-full h-12 px-4 rounded-2xl bg-white border border-slate-300 text-sm font-bold text-slate-900 outline-none focus:border-blue-600"
+                    />
+                  </div>
+                )}
+              </>
+            )}
+
+            {mobileStep === 3 && (
+              <>
+                {/* Rappel cliquable de la sélection */}
+                <button
+                  type="button"
+                  onClick={() => setMobileStep(1)}
+                  className="w-full px-3.5 py-2.5 rounded-2xl bg-white border border-blue-950/15 flex items-center justify-between gap-2 text-left cursor-pointer"
+                >
+                  <div className="min-w-0">
+                    <p className="text-xs font-black text-slate-900 truncate">
+                      {finalLibelle || 'Dépense'}
+                    </p>
+                    <p className="text-[11px] font-semibold text-slate-500 truncate">
+                      {typeCible === 'global'
+                        ? `Toute la campagne (${cibleImpactCount} pers.)`
+                        : `${targetSummary} • ${cibleImpactCount} pers.`}
+                    </p>
+                  </div>
+                  <span className="text-[11px] font-black text-blue-600 shrink-0">Modifier</span>
+                </button>
+
+                {/* Saisie géante centrée façon Revolut / Apple Pay */}
+                <div className="bg-white rounded-3xl border border-blue-950/15 shadow-xs p-5 text-center space-y-4">
+                  <p className="text-[11px] font-black uppercase tracking-wider text-slate-400">
+                    {effMode === 'unitaire' && cibleImpactCount > 1
+                      ? 'Montant par pèlerin'
+                      : 'Montant total décaissé'}
+                  </p>
+
+                  <div className="flex items-baseline justify-center gap-2">
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      autoFocus
+                      value={montantSaisi}
+                      onChange={e => setMontantSaisi(formatAmount(e.target.value))}
+                      placeholder="0"
+                      className="w-full max-w-[230px] text-center bg-transparent font-black text-4xl text-slate-900 tabular-nums outline-none placeholder:text-slate-200"
+                    />
+                    <span className="text-base font-black text-slate-400 shrink-0">{curShort}</span>
+                  </div>
+
+                  {cibleImpactCount > 1 && !(isRuleType && dynamique) && (
+                    <div className="inline-grid grid-cols-2 gap-1 p-1 bg-slate-100 rounded-xl">
+                      <button
+                        type="button"
+                        onClick={() => setModeCalcul('unitaire')}
+                        className={`px-3.5 py-1.5 rounded-lg text-xs font-black transition cursor-pointer ${
+                          modeCalcul === 'unitaire' ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-500'
+                        }`}
+                      >
+                        Par pèlerin
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setModeCalcul('total')}
+                        className={`px-3.5 py-1.5 rounded-lg text-xs font-black transition cursor-pointer ${
+                          modeCalcul === 'total' ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-500'
+                        }`}
+                      >
+                        Total global
+                      </button>
+                    </div>
+                  )}
+                </div>
+
+                {/* Récapitulatif clair en temps réel */}
+                {montantNumerique > 0 && cibleImpactCount > 0 && (
+                  <div className="bg-white rounded-2xl border border-blue-950/15 p-4 space-y-2.5 text-xs">
+                    <div className="flex items-center justify-between text-slate-500 font-semibold">
+                      <span>Pèlerins concernés</span>
+                      <span className="font-black text-slate-900 tabular-nums">{cibleImpactCount}</span>
+                    </div>
+                    <div className="flex items-center justify-between text-slate-500 font-semibold">
+                      <span>Coût par pèlerin</span>
+                      <span className="font-black text-slate-900 tabular-nums">
+                        {fmt(montantUnitaireCalcule)} {curShort}
+                      </span>
+                    </div>
+                    <div className="pt-2.5 border-t border-slate-100 flex items-center justify-between">
+                      <span className="font-black text-slate-900">
+                        {isRuleType && dynamique ? 'Total actuel (auto)' : 'Total enregistré'}
+                      </span>
+                      <span className="text-base font-black text-rose-600 tabular-nums">
+                        -{fmt(montantTotalStocke)} {curSymbol}
+                      </span>
+                    </div>
+                    {isRuleType && dynamique && (
+                      <p className="text-[11px] text-blue-700 font-semibold bg-blue-50 rounded-xl px-3 py-2">
+                        Chaque nouveau pèlerin ajoutera automatiquement {fmt(montantNumerique)} {curShort}.
+                      </p>
+                    )}
+                    {editingRow && (
+                      <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-[11px] font-bold">
+                        <span className="text-slate-400">Ancien : {fmt(editingRow.montant)} {curShort}</span>
+                        <span
+                          className={`font-black tabular-nums ${
+                            deltaEdition === 0 ? 'text-slate-500' : deltaEdition > 0 ? 'text-rose-600' : 'text-emerald-600'
+                          }`}
+                        >
+                          {deltaEdition === 0 ? 'Inchangé' : `${deltaEdition > 0 ? '+' : ''}${fmt(deltaEdition)} ${curShort}`}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+
+          {/* Barre d'action fixe en bas */}
+          <div className="px-5 pt-3 pb-[max(1.25rem,env(safe-area-inset-bottom))] bg-white border-t border-slate-200/80 shrink-0">
+            {mobileStep === 1 ? (
+              <button
+                type="button"
+                disabled={!isTargetValid}
+                onClick={() => setMobileStep(2)}
+                className="w-full h-12 rounded-2xl bg-slate-900 text-white font-black text-sm active:scale-[0.98] transition disabled:opacity-35 cursor-pointer"
+              >
+                Continuer →
+              </button>
+            ) : mobileStep === 2 ? (
+              <button
+                type="button"
+                disabled={libelle === 'Autre' && !customLibelle.trim()}
+                onClick={() => setMobileStep(3)}
+                className="w-full h-12 rounded-2xl bg-slate-900 text-white font-black text-sm active:scale-[0.98] transition disabled:opacity-35 cursor-pointer"
+              >
+                Continuer →
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={handleSaveDepense}
+                disabled={
+                  formLoading ||
+                  !isTargetValid ||
+                  montantTotalStocke <= 0 ||
+                  (libelle === 'Autre' && !customLibelle.trim())
+                }
+                className="w-full h-12 rounded-2xl bg-blue-600 active:bg-blue-700 text-white font-black text-sm shadow-sm active:scale-[0.98] transition disabled:opacity-35 cursor-pointer"
+              >
+                {formLoading
+                  ? 'Enregistrement…'
+                  : editingId
+                  ? `Enregistrer (${fmt(montantTotalStocke)} ${curShort})`
+                  : `Valider la dépense (${fmt(montantTotalStocke)} ${curShort})`}
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ===================== CONFIRMATION SUPPRESSION NATIVE (MOBILE) ===================== */}
       <Sheet
-        open={showSheet}
+        open={!!deleteConfirmId}
+        onClose={() => !deleting && setDeleteConfirmId(null)}
+        title="Supprimer cette dépense ?"
+        subtitle="Cette écriture sera définitivement retirée de la comptabilité."
+        z="z-[10001]"
+        footer={
+          <div className="grid grid-cols-2 gap-2.5">
+            <button
+              type="button"
+              disabled={deleting}
+              onClick={() => setDeleteConfirmId(null)}
+              className="h-12 rounded-2xl bg-slate-100 text-slate-700 font-black text-xs cursor-pointer"
+            >
+              Annuler
+            </button>
+            <button
+              type="button"
+              disabled={deleting}
+              onClick={() => deleteConfirmId && executeDeleteDepense(deleteConfirmId)}
+              className="h-12 rounded-2xl bg-rose-600 text-white font-black text-xs cursor-pointer disabled:opacity-50"
+            >
+              {deleting ? 'Suppression…' : 'Supprimer'}
+            </button>
+          </div>
+        }
+      >
+        <p className="text-xs text-slate-600 font-semibold leading-relaxed">
+          Les totaux de dépenses et le bénéfice réel seront recalculés immédiatement après suppression.
+        </p>
+      </Sheet>
+
+      {/* ===================== FEUILLE PC : AJOUT / MODIFICATION (100% INCHANGÉE) ===================== */}
+      <Sheet
+        open={showSheet && !isMobile}
         onClose={closeSheet}
         title={editingId ? `Modifier la dépense (${curSymbol})` : `Nouvelle dépense (${curSymbol})`}
         subtitle={editingId ? `Devise active : ${HAJJ_CURRENCY_MAP[selectedDevise].label}` : `Affectée uniquement aux pèlerins en ${HAJJ_CURRENCY_MAP[selectedDevise].label}.`}
