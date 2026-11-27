@@ -395,7 +395,7 @@ export default function VirementsBancairesPage() {
           r.statut === 'en_attente' || r.statut === 'annule' ? r.statut : 'execute',
       }))
       setAllVirements(mapped)
-      void idbSet(cacheKey, mapped).catch(() => {})
+      void idbSet(cacheKey, mapped).catch(() => { })
     } finally {
       setLoading(false)
     }
@@ -403,33 +403,33 @@ export default function VirementsBancairesPage() {
 
   useEffect(() => {
     let mounted = true
-    ;(async () => {
-      try {
-        const { data: userRes } = await getUser()
-        const uid = userRes?.user?.id ?? null
-        if (!mounted || !uid) {
-          setLoading(false)
-          return
+      ; (async () => {
+        try {
+          const { data: userRes } = await getUser()
+          const uid = userRes?.user?.id ?? null
+          if (!mounted || !uid) {
+            setLoading(false)
+            return
+          }
+          setUserId(uid)
+
+          const { data: prof } = await supabase
+            .from('profiles')
+            .select('agence_id, agences(nom_agence)')
+            .eq('id', uid)
+            .maybeSingle()
+
+          if (!mounted) return
+          const agId = prof?.agence_id ?? null
+          // @ts-expect-error join relation
+          const nomAg = prof?.agences?.nom_agence || ''
+          setAgenceId(agId)
+          setAgenceName(nomAg)
+          await fetchVirements(uid, agId)
+        } catch {
+          if (mounted) setLoading(false)
         }
-        setUserId(uid)
-
-        const { data: prof } = await supabase
-          .from('profiles')
-          .select('agence_id, agences(nom_agence)')
-          .eq('id', uid)
-          .maybeSingle()
-
-        if (!mounted) return
-        const agId = prof?.agence_id ?? null
-        // @ts-expect-error join relation
-        const nomAg = prof?.agences?.nom_agence || ''
-        setAgenceId(agId)
-        setAgenceName(nomAg)
-        await fetchVirements(uid, agId)
-      } catch {
-        if (mounted) setLoading(false)
-      }
-    })()
+      })()
     return () => {
       mounted = false
     }
@@ -891,11 +891,10 @@ export default function VirementsBancairesPage() {
       {toast && (
         <div
           onClick={() => setToast(null)}
-          className={`fixed top-[max(1rem,env(safe-area-inset-top))] left-1/2 -translate-x-1/2 z-[10002] max-w-[calc(100vw-2rem)] px-4 py-2.5 rounded-full shadow-xl border flex items-center gap-2 text-xs font-bold cursor-pointer animate-in fade-in slide-in-from-top-2 duration-200 ${
-            toast.type === 'error'
+          className={`fixed top-[max(1rem,env(safe-area-inset-top))] left-1/2 -translate-x-1/2 z-[10002] max-w-[calc(100vw-2rem)] px-4 py-2.5 rounded-full shadow-xl border flex items-center gap-2 text-xs font-bold cursor-pointer animate-in fade-in slide-in-from-top-2 duration-200 ${toast.type === 'error'
               ? 'bg-rose-600 text-white border-rose-500'
               : 'bg-slate-900 text-white border-slate-700'
-          }`}
+            }`}
         >
           {toast.type === 'error' ? (
             <AlertCircle size={15} className="shrink-0" />
@@ -985,17 +984,17 @@ export default function VirementsBancairesPage() {
               const applePalette =
                 cur.code === 'FCFA'
                   ? {
-                      active: 'bg-[#248A3D] text-white border-[#248A3D] shadow-[0_3px_10px_-3px_rgba(36,138,61,0.5)]',
-                      idle: 'bg-[#34C759]/12 text-[#1D7A36] border-[#34C759]/25',
-                      countIdle: 'text-[#1D7A36]/70',
-                    }
+                    active: 'bg-[#248A3D] text-white border-[#248A3D] shadow-[0_3px_10px_-3px_rgba(36,138,61,0.5)]',
+                    idle: 'bg-[#34C759]/12 text-[#1D7A36] border-[#34C759]/25',
+                    countIdle: 'text-[#1D7A36]/70',
+                  }
                   : cur.code === 'EUR'
-                  ? {
+                    ? {
                       active: 'bg-[#5856D6] text-white border-[#5856D6] shadow-[0_3px_10px_-3px_rgba(88,86,214,0.5)]',
                       idle: 'bg-[#5856D6]/10 text-[#4846C2] border-[#5856D6]/20',
                       countIdle: 'text-[#4846C2]/70',
                     }
-                  : {
+                    : {
                       active: 'bg-[#0E7C94] text-white border-[#0E7C94] shadow-[0_3px_10px_-3px_rgba(14,124,148,0.5)]',
                       idle: 'bg-[#30B0C7]/12 text-[#0C6E84] border-[#30B0C7]/25',
                       countIdle: 'text-[#0C6E84]/70',
@@ -1006,9 +1005,8 @@ export default function VirementsBancairesPage() {
                   key={cur.code}
                   type="button"
                   onClick={() => handleSelectDevise(cur.code)}
-                  className={`h-9 rounded-xl text-xs font-black border flex items-center justify-center gap-1.5 transition active:scale-[0.97] cursor-pointer ${
-                    active ? applePalette.active : applePalette.idle
-                  }`}
+                  className={`h-9 rounded-xl text-xs font-black border flex items-center justify-center gap-1.5 transition active:scale-[0.97] cursor-pointer ${active ? applePalette.active : applePalette.idle
+                    }`}
                 >
                   <span>{cur.shortLabel}</span>
                   <span className={`text-[10px] tabular-nums ${active ? 'text-white/80' : applePalette.countIdle}`}>
@@ -1121,28 +1119,27 @@ export default function VirementsBancairesPage() {
                     const isFront = idx === heroIdx
                     const layerStyle: React.CSSProperties = isFront
                       ? {
-                          transform: `translate3d(${heroDragX}px, 0px, 0) rotate(${(heroDragX * 0.03).toFixed(2)}deg) scale(1)`,
-                          zIndex: 2,
-                          opacity: 1,
-                          transition: heroDragX !== 0 ? 'none' : 'transform 260ms cubic-bezier(0.22, 1, 0.36, 1), opacity 200ms ease',
-                        }
+                        transform: `translate3d(${heroDragX}px, 0px, 0) rotate(${(heroDragX * 0.03).toFixed(2)}deg) scale(1)`,
+                        zIndex: 2,
+                        opacity: 1,
+                        transition: heroDragX !== 0 ? 'none' : 'transform 260ms cubic-bezier(0.22, 1, 0.36, 1), opacity 200ms ease',
+                      }
                       : {
-                          transform: `translate3d(0px, ${heroDragX !== 0 ? Math.max(2, 10 - Math.abs(heroDragX) * 0.06) : 10}px, 0) scale(${heroDragX !== 0 ? Math.min(0.99, 0.94 + Math.abs(heroDragX) * 0.0004) : 0.94})`,
-                          zIndex: 1,
-                          opacity: 0.92,
-                          transition: heroDragX !== 0 ? 'none' : 'transform 260ms cubic-bezier(0.22, 1, 0.36, 1), opacity 200ms ease',
-                        }
+                        transform: `translate3d(0px, ${heroDragX !== 0 ? Math.max(2, 10 - Math.abs(heroDragX) * 0.06) : 10}px, 0) scale(${heroDragX !== 0 ? Math.min(0.99, 0.94 + Math.abs(heroDragX) * 0.0004) : 0.94})`,
+                        zIndex: 1,
+                        opacity: 0.92,
+                        transition: heroDragX !== 0 ? 'none' : 'transform 260ms cubic-bezier(0.22, 1, 0.36, 1), opacity 200ms ease',
+                      }
 
                     return (
                       <div
                         key={card.id}
                         style={layerStyle}
                         onClick={!isFront ? () => setHeroIdx(idx) : undefined}
-                        className={`absolute inset-x-0 top-0 h-[116px] ${card.bgClass} text-white rounded-2xl px-4 py-3 flex flex-col justify-between border border-white/15 ${
-                          isFront
+                        className={`absolute inset-x-0 top-0 h-[116px] ${card.bgClass} text-white rounded-2xl px-4 py-3 flex flex-col justify-between border border-white/15 ${isFront
                             ? 'shadow-[inset_0_1px_0_rgba(255,255,255,0.22),0_16px_28px_-12px_rgba(15,23,42,0.45),0_4px_10px_-4px_rgba(15,23,42,0.20)]'
                             : 'shadow-[0_10px_18px_-12px_rgba(15,23,42,0.38)] cursor-pointer'
-                        }`}
+                          }`}
                       >
                         <div className={isFront ? 'h-full flex flex-col justify-between' : 'opacity-20 pointer-events-none h-full flex flex-col justify-between'}>
                           {card.content}
@@ -1158,9 +1155,8 @@ export default function VirementsBancairesPage() {
                       key={card.id}
                       type="button"
                       onClick={() => setHeroIdx(idx)}
-                      className={`h-5 px-2.5 rounded-full text-[10px] font-bold transition cursor-pointer ${
-                        heroIdx === idx ? `${card.bgClass} text-white` : 'text-slate-400'
-                      }`}
+                      className={`h-5 px-2.5 rounded-full text-[10px] font-bold transition cursor-pointer ${heroIdx === idx ? `${card.bgClass} text-white` : 'text-slate-400'
+                        }`}
                     >
                       {card.label}
                     </button>
@@ -1175,15 +1171,13 @@ export default function VirementsBancairesPage() {
             <button
               type="button"
               onClick={() => setTab('operations')}
-              className={`relative pb-2.5 text-sm flex items-center gap-1.5 transition cursor-pointer ${
-                tab === 'operations' ? 'font-black text-slate-900' : 'font-semibold text-slate-400'
-              }`}
+              className={`relative pb-2.5 text-sm flex items-center gap-1.5 transition cursor-pointer ${tab === 'operations' ? 'font-black text-slate-900' : 'font-semibold text-slate-400'
+                }`}
             >
               <span>Opérations</span>
               <span
-                className={`text-[10px] font-black px-1.5 py-0.5 rounded-full tabular-nums ${
-                  tab === 'operations' ? 'bg-slate-900 text-white' : 'bg-slate-200/80 text-slate-500'
-                }`}
+                className={`text-[10px] font-black px-1.5 py-0.5 rounded-full tabular-nums ${tab === 'operations' ? 'bg-slate-900 text-white' : 'bg-slate-200/80 text-slate-500'
+                  }`}
               >
                 {currencyVirements.length}
               </span>
@@ -1195,9 +1189,8 @@ export default function VirementsBancairesPage() {
             <button
               type="button"
               onClick={() => setTab('synthese')}
-              className={`relative pb-2.5 text-sm transition cursor-pointer ${
-                tab === 'synthese' ? 'font-black text-slate-900' : 'font-semibold text-slate-400'
-              }`}
+              className={`relative pb-2.5 text-sm transition cursor-pointer ${tab === 'synthese' ? 'font-black text-slate-900' : 'font-semibold text-slate-400'
+                }`}
             >
               <span>Synthèse</span>
               {tab === 'synthese' && (
@@ -1317,9 +1310,8 @@ export default function VirementsBancairesPage() {
                               <span className="text-slate-400 font-semibold">×{m.count}</span>
                             </span>
                             <span
-                              className={`font-black tabular-nums shrink-0 ${
-                                m.sens === 'recu' ? 'text-emerald-600' : 'text-rose-600'
-                              }`}
+                              className={`font-black tabular-nums shrink-0 ${m.sens === 'recu' ? 'text-emerald-600' : 'text-rose-600'
+                                }`}
                             >
                               {m.sens === 'recu' ? '+' : '-'}
                               {fmt(m.total)} {curShort}
@@ -1383,11 +1375,10 @@ export default function VirementsBancairesPage() {
                   type="button"
                   onClick={() => setShowFilters(true)}
                   aria-label="Filtrer et trier"
-                  className={`relative w-11 h-11 shrink-0 rounded-2xl border flex items-center justify-center active:scale-95 transition cursor-pointer ${
-                    activeFilterCount > 0
+                  className={`relative w-11 h-11 shrink-0 rounded-2xl border flex items-center justify-center active:scale-95 transition cursor-pointer ${activeFilterCount > 0
                       ? 'bg-slate-900 text-white border-slate-900'
                       : 'bg-white text-slate-700 border-slate-200/90'
-                  }`}
+                    }`}
                 >
                   <SlidersHorizontal size={17} />
                   {activeFilterCount > 0 && (
@@ -1410,11 +1401,10 @@ export default function VirementsBancairesPage() {
                       key={id}
                       type="button"
                       onClick={() => setFilterSens(id)}
-                      className={`h-7 px-3 rounded-full text-[11px] font-bold transition cursor-pointer ${
-                        filterSens === id
+                      className={`h-7 px-3 rounded-full text-[11px] font-bold transition cursor-pointer ${filterSens === id
                           ? 'bg-slate-900 text-white'
                           : 'text-slate-500 active:bg-slate-200/70'
-                      }`}
+                        }`}
                     >
                       {label}
                     </button>
@@ -1506,9 +1496,8 @@ export default function VirementsBancairesPage() {
                           {group.label}
                         </span>
                         <span
-                          className={`text-[11px] font-bold tabular-nums ${
-                            group.net >= 0 ? 'text-emerald-600' : 'text-slate-400'
-                          }`}
+                          className={`text-[11px] font-bold tabular-nums ${group.net >= 0 ? 'text-emerald-600' : 'text-slate-400'
+                            }`}
                         >
                           {group.net > 0 ? '+' : ''}
                           {fmt(group.net)} {curShort}
@@ -1524,16 +1513,14 @@ export default function VirementsBancairesPage() {
                               key={v.id}
                               type="button"
                               onClick={() => setDetailId(v.id)}
-                              className={`w-full bg-white rounded-2xl border border-blue-950/15 shadow-[0_3px_10px_-4px_rgba(15,23,42,0.09),0_1px_2px_rgba(15,23,42,0.05)] px-3.5 py-3 flex items-center gap-3 text-left active:scale-[0.99] transition cursor-pointer ${
-                                cancelled ? 'opacity-60' : ''
-                              }`}
+                              className={`w-full bg-white rounded-2xl border border-blue-950/15 shadow-[0_3px_10px_-4px_rgba(15,23,42,0.09),0_1px_2px_rgba(15,23,42,0.05)] px-3.5 py-3 flex items-center gap-3 text-left active:scale-[0.99] transition cursor-pointer ${cancelled ? 'opacity-60' : ''
+                                }`}
                             >
                               <div
-                                className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${
-                                  isRecu
+                                className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${isRecu
                                     ? 'bg-emerald-50 text-emerald-600'
                                     : 'bg-rose-50 text-rose-600'
-                                }`}
+                                  }`}
                               >
                                 {isRecu ? <ArrowDownLeft size={18} /> : <ArrowUpRight size={18} />}
                               </div>
@@ -1568,13 +1555,12 @@ export default function VirementsBancairesPage() {
                               <div className="flex items-center gap-1 shrink-0">
                                 <div className="text-right">
                                   <p
-                                    className={`text-[14px] font-black tabular-nums ${
-                                      cancelled
+                                    className={`text-[14px] font-black tabular-nums ${cancelled
                                         ? 'line-through text-slate-400'
                                         : isRecu
-                                        ? 'text-emerald-600'
-                                        : 'text-rose-600'
-                                    }`}
+                                          ? 'text-emerald-600'
+                                          : 'text-rose-600'
+                                      }`}
                                   >
                                     {isRecu ? '+' : '-'}
                                     {fmt(v.montant)}
@@ -1717,9 +1703,8 @@ export default function VirementsBancairesPage() {
           <button
             type="button"
             onClick={() => setTab('operations')}
-            className={`py-2.5 px-3 rounded-xl text-xs font-black flex items-center justify-center gap-1.5 transition cursor-pointer ${
-              tab === 'operations' ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-600 hover:text-slate-900'
-            }`}
+            className={`py-2.5 px-3 rounded-xl text-xs font-black flex items-center justify-center gap-1.5 transition cursor-pointer ${tab === 'operations' ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-600 hover:text-slate-900'
+              }`}
           >
             <Receipt size={15} className={tab === 'operations' ? 'text-blue-600' : 'text-slate-500'} />
             <span>Journal des virements</span>
@@ -1730,9 +1715,8 @@ export default function VirementsBancairesPage() {
           <button
             type="button"
             onClick={() => setTab('synthese')}
-            className={`py-2.5 px-3 rounded-xl text-xs font-black flex items-center justify-center gap-1.5 transition cursor-pointer ${
-              tab === 'synthese' ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-600 hover:text-slate-900'
-            }`}
+            className={`py-2.5 px-3 rounded-xl text-xs font-black flex items-center justify-center gap-1.5 transition cursor-pointer ${tab === 'synthese' ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-600 hover:text-slate-900'
+              }`}
           >
             <LayoutDashboard size={15} className={tab === 'synthese' ? 'text-blue-600' : 'text-slate-500'} />
             <span>Par compte & motifs</span>
@@ -1892,11 +1876,10 @@ export default function VirementsBancairesPage() {
                     key={id}
                     type="button"
                     onClick={() => setFilterSens(id)}
-                    className={`px-3 py-1.5 rounded-full text-[11px] font-bold border transition cursor-pointer ${
-                      filterSens === id
+                    className={`px-3 py-1.5 rounded-full text-[11px] font-bold border transition cursor-pointer ${filterSens === id
                         ? 'bg-slate-900 text-white border-slate-900'
                         : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
-                    }`}
+                      }`}
                   >
                     {label}
                   </button>
@@ -1914,11 +1897,10 @@ export default function VirementsBancairesPage() {
                     key={id}
                     type="button"
                     onClick={() => setFilterStatut(id)}
-                    className={`px-3 py-1.5 rounded-full text-[11px] font-bold border transition cursor-pointer ${
-                      filterStatut === id
+                    className={`px-3 py-1.5 rounded-full text-[11px] font-bold border transition cursor-pointer ${filterStatut === id
                         ? 'bg-blue-600 text-white border-blue-600'
                         : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
-                    }`}
+                      }`}
                   >
                     {label}
                   </button>
@@ -1935,11 +1917,10 @@ export default function VirementsBancairesPage() {
                     key={id}
                     type="button"
                     onClick={() => setFilterRecu(id)}
-                    className={`px-3 py-1.5 rounded-full text-[11px] font-bold border transition cursor-pointer ${
-                      filterRecu === id
+                    className={`px-3 py-1.5 rounded-full text-[11px] font-bold border transition cursor-pointer ${filterRecu === id
                         ? 'bg-slate-800 text-white border-slate-800'
                         : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
-                    }`}
+                      }`}
                   >
                     {label}
                   </button>
@@ -1993,9 +1974,8 @@ export default function VirementsBancairesPage() {
                         className="w-full p-4 text-left flex items-center gap-3.5 hover:bg-slate-50/70 transition cursor-pointer"
                       >
                         <div
-                          className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${
-                            isRecu ? 'bg-emerald-50 text-emerald-600' : 'bg-rose-50 text-rose-600'
-                          }`}
+                          className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${isRecu ? 'bg-emerald-50 text-emerald-600' : 'bg-rose-50 text-rose-600'
+                            }`}
                         >
                           {isRecu ? <ArrowDownLeft size={18} /> : <ArrowUpRight size={18} />}
                         </div>
@@ -2038,13 +2018,12 @@ export default function VirementsBancairesPage() {
                         <div className="text-right shrink-0 flex items-center gap-3">
                           <div>
                             <p
-                              className={`text-base font-black tabular-nums ${
-                                v.statut === 'annule'
+                              className={`text-base font-black tabular-nums ${v.statut === 'annule'
                                   ? 'line-through text-slate-400'
                                   : isRecu
-                                  ? 'text-emerald-600'
-                                  : 'text-rose-600'
-                              }`}
+                                    ? 'text-emerald-600'
+                                    : 'text-rose-600'
+                                }`}
                             >
                               {isRecu ? '+' : '-'}{fmt(v.montant)} {curShort}
                             </p>
@@ -2241,11 +2220,10 @@ export default function VirementsBancairesPage() {
                       setSens('emis')
                       if (MOTIFS_RECUS.includes(motifChoice)) setMotifChoice(MOTIFS_EMIS[0])
                     }}
-                    className={`p-3.5 rounded-2xl border text-left space-y-1.5 transition cursor-pointer ${
-                      sens === 'emis'
+                    className={`p-3.5 rounded-2xl border text-left space-y-1.5 transition cursor-pointer ${sens === 'emis'
                         ? 'bg-slate-900 text-white border-slate-900 shadow-sm'
                         : 'bg-white text-slate-700 border-blue-950/15'
-                    }`}
+                      }`}
                   >
                     <ArrowUpRight size={18} className={sens === 'emis' ? 'text-rose-400' : 'text-rose-500'} />
                     <p className="text-xs font-black">Virement émis</p>
@@ -2260,11 +2238,10 @@ export default function VirementsBancairesPage() {
                       setSens('recu')
                       if (MOTIFS_EMIS.includes(motifChoice)) setMotifChoice(MOTIFS_RECUS[0])
                     }}
-                    className={`p-3.5 rounded-2xl border text-left space-y-1.5 transition cursor-pointer ${
-                      sens === 'recu'
+                    className={`p-3.5 rounded-2xl border text-left space-y-1.5 transition cursor-pointer ${sens === 'recu'
                         ? 'bg-emerald-600 text-white border-emerald-600 shadow-sm'
                         : 'bg-white text-slate-700 border-blue-950/15'
-                    }`}
+                      }`}
                   >
                     <ArrowDownLeft size={18} className={sens === 'recu' ? 'text-white' : 'text-emerald-600'} />
                     <p className="text-xs font-black">Virement reçu</p>
@@ -2317,11 +2294,10 @@ export default function VirementsBancairesPage() {
                         key={b}
                         type="button"
                         onClick={() => setBanque(b)}
-                        className={`h-7 px-2.5 rounded-full text-[11px] font-bold whitespace-nowrap shrink-0 border transition cursor-pointer ${
-                          banque === b
+                        className={`h-7 px-2.5 rounded-full text-[11px] font-bold whitespace-nowrap shrink-0 border transition cursor-pointer ${banque === b
                             ? 'bg-blue-600 text-white border-blue-600'
                             : 'bg-white text-slate-600 border-slate-200'
-                        }`}
+                          }`}
                       >
                         {b}
                       </button>
@@ -2388,9 +2364,8 @@ export default function VirementsBancairesPage() {
                       value={montantSaisi}
                       onChange={e => setMontantSaisi(formatAmount(e.target.value))}
                       placeholder="0"
-                      className={`w-full max-w-[230px] text-center bg-transparent font-black text-4xl tabular-nums outline-none placeholder:text-slate-200 ${
-                        sens === 'recu' ? 'text-emerald-600' : 'text-slate-900'
-                      }`}
+                      className={`w-full max-w-[230px] text-center bg-transparent font-black text-4xl tabular-nums outline-none placeholder:text-slate-200 ${sens === 'recu' ? 'text-emerald-600' : 'text-slate-900'
+                        }`}
                     />
                     <span className="text-base font-black text-slate-400 shrink-0">{curShort}</span>
                   </div>
@@ -2410,11 +2385,10 @@ export default function VirementsBancairesPage() {
                           setMotifChoice(m)
                           setCustomMotif('')
                         }}
-                        className={`h-9 px-3 rounded-xl text-xs font-bold border transition cursor-pointer ${
-                          motifChoice === m
+                        className={`h-9 px-3 rounded-xl text-xs font-bold border transition cursor-pointer ${motifChoice === m
                             ? 'bg-slate-900 text-white border-slate-900'
                             : 'bg-white text-slate-700 border-blue-950/15'
-                        }`}
+                          }`}
                       >
                         {m}
                       </button>
@@ -2422,11 +2396,10 @@ export default function VirementsBancairesPage() {
                     <button
                       type="button"
                       onClick={() => setMotifChoice('Autre')}
-                      className={`h-9 px-3 rounded-xl text-xs font-bold border flex items-center gap-1 transition cursor-pointer ${
-                        motifChoice === 'Autre'
+                      className={`h-9 px-3 rounded-xl text-xs font-bold border flex items-center gap-1 transition cursor-pointer ${motifChoice === 'Autre'
                           ? 'bg-slate-900 text-white border-slate-900'
                           : 'bg-white text-slate-700 border-blue-950/15'
-                      }`}
+                        }`}
                     >
                       <Sparkles size={12} /> Autre…
                     </button>
@@ -2620,8 +2593,8 @@ export default function VirementsBancairesPage() {
                   {saving
                     ? 'Enregistrement…'
                     : editingId
-                    ? 'Enregistrer les modifications'
-                    : `Valider le virement (${fmt(montantNum)} ${curShort})`}
+                      ? 'Enregistrer les modifications'
+                      : `Valider le virement (${fmt(montantNum)} ${curShort})`}
                 </span>
               </button>
             )}
@@ -2649,8 +2622,8 @@ export default function VirementsBancairesPage() {
               {saving
                 ? 'Enregistrement…'
                 : editingId
-                ? `Enregistrer (${fmt(montantNum)} ${curShort})`
-                : `Valider le virement (${fmt(montantNum)} ${curShort})`}
+                  ? `Enregistrer (${fmt(montantNum)} ${curShort})`
+                  : `Valider le virement (${fmt(montantNum)} ${curShort})`}
             </span>
           </button>
         }
@@ -2664,9 +2637,8 @@ export default function VirementsBancairesPage() {
                 setSens('emis')
                 if (MOTIFS_RECUS.includes(motifChoice)) setMotifChoice(MOTIFS_EMIS[0])
               }}
-              className={`p-3 rounded-xl border text-left flex items-center gap-2.5 cursor-pointer ${
-                sens === 'emis' ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-700 border-slate-200'
-              }`}
+              className={`p-3 rounded-xl border text-left flex items-center gap-2.5 cursor-pointer ${sens === 'emis' ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-700 border-slate-200'
+                }`}
             >
               <ArrowUpRight size={17} className="text-rose-400" />
               <div>
@@ -2680,9 +2652,8 @@ export default function VirementsBancairesPage() {
                 setSens('recu')
                 if (MOTIFS_EMIS.includes(motifChoice)) setMotifChoice(MOTIFS_RECUS[0])
               }}
-              className={`p-3 rounded-xl border text-left flex items-center gap-2.5 cursor-pointer ${
-                sens === 'recu' ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-white text-slate-700 border-slate-200'
-              }`}
+              className={`p-3 rounded-xl border text-left flex items-center gap-2.5 cursor-pointer ${sens === 'recu' ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-white text-slate-700 border-slate-200'
+                }`}
             >
               <ArrowDownLeft size={17} />
               <div>
@@ -2889,9 +2860,8 @@ export default function VirementsBancairesPage() {
           return (
             <div className="space-y-4">
               <div
-                className={`rounded-2xl border p-4 text-center ${
-                  isRecu ? 'bg-emerald-50 border-emerald-100' : 'bg-rose-50 border-rose-100'
-                }`}
+                className={`rounded-2xl border p-4 text-center ${isRecu ? 'bg-emerald-50 border-emerald-100' : 'bg-rose-50 border-rose-100'
+                  }`}
               >
                 <p className={`text-[10px] font-black uppercase tracking-wider ${isRecu ? 'text-emerald-600' : 'text-rose-500'}`}>
                   {isRecu ? 'Virement reçu (Entrant)' : 'Virement émis (Sortant)'}
@@ -3033,9 +3003,8 @@ export default function VirementsBancairesPage() {
                   key={id}
                   type="button"
                   onClick={() => setFilterStatut(id)}
-                  className={`px-3 py-1.5 rounded-full text-xs font-bold border cursor-pointer ${
-                    filterStatut === id ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-600 border-slate-200'
-                  }`}
+                  className={`px-3 py-1.5 rounded-full text-xs font-bold border cursor-pointer ${filterStatut === id ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-600 border-slate-200'
+                    }`}
                 >
                   {lbl}
                 </button>
@@ -3055,9 +3024,8 @@ export default function VirementsBancairesPage() {
                   key={id}
                   type="button"
                   onClick={() => setFilterRecu(id)}
-                  className={`px-3 py-1.5 rounded-full text-xs font-bold border cursor-pointer ${
-                    filterRecu === id ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-slate-600 border-slate-200'
-                  }`}
+                  className={`px-3 py-1.5 rounded-full text-xs font-bold border cursor-pointer ${filterRecu === id ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-slate-600 border-slate-200'
+                    }`}
                 >
                   {lbl}
                 </button>
@@ -3072,9 +3040,8 @@ export default function VirementsBancairesPage() {
                 <button
                   type="button"
                   onClick={() => setFilterBanque('all')}
-                  className={`px-3 py-1.5 rounded-full text-xs font-bold border cursor-pointer ${
-                    filterBanque === 'all' ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-600 border-slate-200'
-                  }`}
+                  className={`px-3 py-1.5 rounded-full text-xs font-bold border cursor-pointer ${filterBanque === 'all' ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-600 border-slate-200'
+                    }`}
                 >
                   Toutes
                 </button>
@@ -3083,9 +3050,8 @@ export default function VirementsBancairesPage() {
                     key={b}
                     type="button"
                     onClick={() => setFilterBanque(b)}
-                    className={`px-3 py-1.5 rounded-full text-xs font-bold border cursor-pointer ${
-                      filterBanque === b ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-600 border-slate-200'
-                    }`}
+                    className={`px-3 py-1.5 rounded-full text-xs font-bold border cursor-pointer ${filterBanque === b ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-600 border-slate-200'
+                      }`}
                   >
                     {b}
                   </button>
@@ -3126,9 +3092,8 @@ export default function VirementsBancairesPage() {
                 key={id}
                 type="button"
                 onClick={() => setPdfScope(id)}
-                className={`w-full p-3.5 rounded-2xl border flex items-center justify-between text-left transition cursor-pointer ${
-                  pdfScope === id ? 'bg-blue-50/70 border-blue-500' : 'bg-slate-50 border-slate-200'
-                }`}
+                className={`w-full p-3.5 rounded-2xl border flex items-center justify-between text-left transition cursor-pointer ${pdfScope === id ? 'bg-blue-50/70 border-blue-500' : 'bg-slate-50 border-slate-200'
+                  }`}
               >
                 <div>
                   <p className="text-xs font-black text-slate-900">{title}</p>

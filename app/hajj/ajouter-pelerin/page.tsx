@@ -1,62 +1,95 @@
+/* eslint-disable @next/next/no-img-element */
 'use client'
 
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useMemo } from 'react'
 import { useQuery } from '@powersync/react'
 import { supabase, getUser } from '@/lib/supabase'
-import { 
-  ScanLine, Loader2, Save, Upload, RotateCcw, Smartphone, 
-  CalendarDays, UserRound, FileText, Camera, Image as ImageIcon, 
-  Crop, Check, X, Move, Keyboard, Radio, FileCheck, Printer,
-  ArrowLeft, ChevronRight
+import {
+  ScanLine,
+  Loader2,
+  Save,
+  Upload,
+  RotateCcw,
+  Smartphone,
+  CalendarDays,
+  UserRound,
+  FileText,
+  Camera,
+  Image as ImageIcon,
+  Crop,
+  Check,
+  X,
+  Keyboard,
+  Radio,
+  FileCheck,
+  Printer,
+  ArrowLeft,
+  ChevronRight,
+  ShieldCheck,
+  AlertTriangle,
+  Sparkles,
+  ExternalLink,
+  UserPlus,
+  Undo2,
+  CheckCircle2,
 } from 'lucide-react'
 import Link from 'next/link'
 import { uploadPassportFile } from '@/lib/hajjPassport'
-import { HAJJ_CURRENCIES, formatHajjMoney, getHajjCurrencySymbol, type HajjCurrency } from '@/lib/hajjCurrency'
+import {
+  HAJJ_CURRENCIES,
+  formatHajjMoney,
+  getHajjCurrencySymbol,
+  normalizeHajjCurrency,
+  type HajjCurrency,
+} from '@/lib/hajjCurrency'
 import { useWorkProfile } from '@/lib/ProfileContext'
 import { useUI } from '@/lib/UIContext'
 import { useYear } from '@/lib/YearContext'
-import { Capacitor, CapacitorHttp } from '@capacitor/core'
-import * as faceapi from '@vladmandic/face-api'
+import {
+  parseMrzSmart,
+  type MrzFieldKey,
+  type MrzParseResult,
+} from '@/lib/mrzEngine'
+import {
+  applyPureWhiteBackgroundNusuk,
+  autoDetectAndCropNusuk,
+  compressAndFormatPassportNusuk,
+  ensureFaceModelsLoaded,
+  formatNusukSquare,
+  loadHtmlImage,
+  readFileAsCleanDataUrl,
+  renderNusukPhoto,
+  rotateImageDataUrl,
+  type NusukPhotoQuality,
+} from '@/lib/passportFaceNusuk'
+import {
+  detectMrzRegionAuto,
+  readMrzHybrid,
+  scanPassportComplete,
+  type MrzBoxRegion,
+} from '@/lib/passportScanner'
+import { PassportCameraModal } from '@/components/hajj/PassportCameraModal'
+import {
+  FreeRectCropModal,
+  NusukPhotoCropModal,
+} from '@/components/hajj/PassportCropModals'
+
+const DRAFT_STORAGE_KEY = 'hajj_add_pelerin_draft_v2'
 
 function isRunningInTauri(): boolean {
   if (typeof window === 'undefined') return false
   return Boolean(
     '__TAURI_INTERNALS__' in window ||
-    '__TAURI__' in window ||
-    window.location.protocol.startsWith('tauri') ||
-    window.location.origin.includes('tauri.localhost')
+      '__TAURI__' in window ||
+      window.location.protocol.startsWith('tauri') ||
+      window.location.origin.includes('tauri.localhost')
   )
 }
 
-function getApiUrl(): string {
-  if (Capacitor.isNativePlatform()) {
-    return 'https://gestion-pelerins.vercel.app'
-  }
-
-  if (typeof window !== 'undefined') {
-    const origin = window.location.origin
-    const protocol = window.location.protocol
-
-    const isTauriEnv =
-      protocol.startsWith('tauri') ||
-      origin.includes('tauri.localhost') ||
-      '__TAURI_INTERNALS__' in window ||
-      '__TAURI__' in window
-
-    if (
-      isTauriEnv ||
-      protocol.startsWith('capacitor') ||
-      (origin.includes('localhost') && !origin.includes('localhost:3000'))
-    ) {
-      return 'https://gestion-pelerins.vercel.app'
-    }
-  }
-
-  return process.env.NEXT_PUBLIC_API_URL || ''
-}
-
-// 🎯 Traducteur automatique des erreurs techniques/anglaises en langage simple et naturel
-function humanizeError(err: unknown, fallback = "Une erreur inattendue s'est produite. Veuillez réessayer."): string {
+function humanizeError(
+  err: unknown,
+  fallback = "Une erreur inattendue s'est produite. Veuillez réessayer."
+): string {
   if (!err) return fallback
   const raw =
     err instanceof Error
@@ -75,110 +108,61 @@ function humanizeError(err: unknown, fallback = "Une erreur inattendue s'est pro
     lower.includes('err_internet_disconnected') ||
     lower.includes('offline')
   ) {
-    return "Impossible de se connecter à Internet. Vérifiez votre connexion et réessayez."
+    return 'Impossible de se connecter à Internet. Vérifiez votre connexion et réessayez.'
   }
-
   if (lower.includes('timeout') || lower.includes('timed out') || lower.includes('aborted')) {
     return "L'opération a pris trop de temps. Vérifiez votre connexion Internet et réessayez."
   }
-
-  if (lower.includes('duplicate key') || lower.includes('unique constraint') || lower.includes('already exists')) {
-    return "Ce pèlerin ou ce numéro de passeport est déjà enregistré."
+  if (
+    lower.includes('duplicate key') ||
+    lower.includes('unique constraint') ||
+    lower.includes('already exists')
+  ) {
+    return 'Ce pèlerin ou ce numéro de passeport est déjà enregistré.'
   }
-
-  if (lower.includes('jwt') || lower.includes('unauthorized') || lower.includes('not authenticated') || lower.includes('session')) {
-    return "Votre session a expiré. Veuillez vous reconnecter à votre compte."
+  if (
+    lower.includes('jwt') ||
+    lower.includes('unauthorized') ||
+    lower.includes('not authenticated') ||
+    lower.includes('session')
+  ) {
+    return 'Votre session a expiré. Veuillez vous reconnecter à votre compte.'
   }
-
-  if (lower.includes('permission denied') || lower.includes('row-level security') || lower.includes('rls')) {
+  if (
+    lower.includes('permission denied') ||
+    lower.includes('row-level security') ||
+    lower.includes('rls')
+  ) {
     return "Vous n'avez pas l'autorisation d'effectuer cette action."
   }
-
-  if (lower.includes('payload too large') || lower.includes('entity too large') || lower.includes('file size')) {
-    return "Le fichier choisi est trop volumineux. Veuillez essayer avec une image plus légère."
+  if (
+    lower.includes('payload too large') ||
+    lower.includes('entity too large') ||
+    lower.includes('file size')
+  ) {
+    return 'Le fichier choisi est trop volumineux. Veuillez essayer avec une image plus légère.'
   }
-
   if (lower.includes('canvas') || lower.includes('blob') || lower.includes('image')) {
-    return "Impossible de préparer cette image. Essayez avec une autre photo plus nette."
+    return 'Impossible de préparer cette image. Essayez avec une autre photo plus nette.'
   }
-
-  if (lower.includes('500') || lower.includes('502') || lower.includes('503') || lower.includes('504') || lower.includes('internal server error')) {
-    return "Le service est momentanément indisponible. Veuillez réessayer dans quelques instants."
+  if (
+    lower.includes('500') ||
+    lower.includes('502') ||
+    lower.includes('503') ||
+    lower.includes('504') ||
+    lower.includes('internal server error')
+  ) {
+    return 'Le service est momentanément indisponible. Veuillez réessayer dans quelques instants.'
   }
-
-  if (/[éèêàùçîôû]/i.test(raw) && !lower.includes('supabase') && !lower.includes('error') && !lower.includes('exception')) {
+  if (
+    /[éèêàùçîôû]/i.test(raw) &&
+    !lower.includes('supabase') &&
+    !lower.includes('error') &&
+    !lower.includes('exception')
+  ) {
     return raw
   }
-
   return fallback
-}
-
-// 🎯 Gestion du modèle de détection du visage (chargement unique)
-let isFaceModelLoaded = false
-let faceModelPromise: Promise<void> | null = null
-async function loadFaceModel() {
-  if (isFaceModelLoaded) return
-  if (!faceModelPromise) {
-    faceModelPromise = faceapi.nets.ssdMobilenetv1
-      .loadFromUri('/models')
-      .then(() => {
-        isFaceModelLoaded = true
-      })
-      .catch((err) => {
-        faceModelPromise = null
-        throw err
-      })
-  }
-  await faceModelPromise
-}
-
-function preparePassportImage(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader()
-    reader.onload = () => {
-      const img = new Image()
-      img.onload = () => {
-        const canvas = document.createElement('canvas')
-        const ctx = canvas.getContext('2d', { willReadFrequently: true })
-        if (!ctx) {
-          resolve(reader.result as string)
-          return
-        }
-
-        const targetWidth = Math.min(1800, Math.max(1400, img.width))
-        const scale = targetWidth / img.width
-        const targetHeight = Math.round(img.height * scale)
-
-        canvas.width = targetWidth
-        canvas.height = targetHeight
-
-        ctx.drawImage(img, 0, 0, targetWidth, targetHeight)
-
-        const imgData = ctx.getImageData(0, 0, targetWidth, targetHeight)
-        const d = imgData.data
-        const contrast = 35
-        const factor = (259 * (contrast + 255)) / (255 * (259 - contrast))
-
-        const lut = new Uint8ClampedArray(256)
-        for (let v = 0; v < 256; v++) {
-          lut[v] = factor * (v - 128) + 128
-        }
-
-        for (let i = 0; i < d.length; i += 4) {
-          d[i] = lut[d[i]]
-          d[i + 1] = lut[d[i + 1]]
-          d[i + 2] = lut[d[i + 2]]
-        }
-        ctx.putImageData(imgData, 0, 0)
-
-        resolve(canvas.toDataURL('image/jpeg', 0.85))
-      }
-      img.onerror = () => resolve(reader.result as string)
-      img.src = reader.result as string
-    }
-    reader.onerror = () => reject(new Error("Impossible de lire le fichier sélectionné."))
-    reader.readAsDataURL(file)
-  })
 }
 
 function base64ToFile(dataurl: string, filename: string): File {
@@ -193,570 +177,38 @@ function base64ToFile(dataurl: string, filename: string): File {
   return new File([u8arr], filename, { type: mime })
 }
 
-// 🎯 Compression du passeport en gardant la dimension originale intacte (< 400 Ko garanti pour Nusuk)
-function compressAndFormatPassportNusuk(
-  imageSrc: string, 
-  cropRegion?: { x: number; y: number; width: number; height: number }
-): Promise<{ file: File; dataUrl: string }> {
-  return new Promise((resolve, reject) => {
-    const img = new Image()
-    img.crossOrigin = 'anonymous'
-    img.onload = () => {
-      const sx = cropRegion ? cropRegion.x : 0
-      const sy = cropRegion ? cropRegion.y : 0
-      const sw = cropRegion ? cropRegion.width : img.width
-      const sh = cropRegion ? cropRegion.height : img.height
-
-      let targetW = Math.round(sw)
-      let targetH = Math.round(sh)
-
-      const canvas = document.createElement('canvas')
-      const ctx = canvas.getContext('2d')
-      if (!ctx) return reject(new Error("Impossible de préparer l'image du passeport."))
-
-      const renderToCanvas = (w: number, h: number) => {
-        canvas.width = w
-        canvas.height = h
-        ctx.fillStyle = '#FFFFFF'
-        ctx.fillRect(0, 0, w, h)
-        ctx.drawImage(img, sx, sy, sw, sh, 0, 0, w, h)
-      }
-
-      renderToCanvas(targetW, targetH)
-
-      const generateBlob = (q: number) => {
-        canvas.toBlob((blob) => {
-          if (!blob) return reject(new Error("Impossible de compresser l'image du passeport."))
-          if (blob.size > 390 * 1024) {
-            if (q > 0.45) {
-              generateBlob(Number((q - 0.1).toFixed(2)))
-              return
-            }
-            if (targetW > 1200) {
-              targetW = Math.round(targetW * 0.85)
-              targetH = Math.round(targetH * 0.85)
-              renderToCanvas(targetW, targetH)
-              generateBlob(0.75)
-              return
-            }
-          }
-          const file = new File([blob], `passport_nusuk_${Date.now()}.jpg`, { type: 'image/jpeg' })
-          const reader = new FileReader()
-          reader.onloadend = () => {
-            resolve({ file, dataUrl: reader.result as string })
-          }
-          reader.readAsDataURL(blob)
-        }, 'image/jpeg', q)
-      }
-
-      generateBlob(0.85)
-    }
-    img.onerror = () => reject(new Error("Impossible de charger l'image du passeport."))
-    img.src = imageSrc
-  })
+interface ExistingPelerinRow {
+  id: string
+  nom_complet: string | null
+  prenom: string | null
+  num_passeport: string | null
+  campagne: number | null
+  nom_package: string | null
+  prix_package: number | null
+  devise: string | null
+  reference: string | null
+  agence_ou_personne_associee: string | null
 }
 
-// 🎯 Découpage précis de la bande MRZ sélectionnée avant l'OCR (inchangée)
-function extractMrzRegionBase64(
-  imageSrc: string,
-  region: { x: number; y: number; width: number; height: number }
-): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const img = new Image()
-    img.crossOrigin = 'anonymous'
-    img.onload = () => {
-      const canvas = document.createElement('canvas')
-      canvas.width = Math.max(10, Math.round(region.width))
-      canvas.height = Math.max(10, Math.round(region.height))
-      const ctx = canvas.getContext('2d')
-      if (!ctx) return reject(new Error("Impossible de préparer la zone de lecture."))
-
-      ctx.fillStyle = '#FFFFFF'
-      ctx.fillRect(0, 0, canvas.width, canvas.height)
-      ctx.drawImage(
-        img,
-        region.x, region.y, region.width, region.height,
-        0, 0, canvas.width, canvas.height
-      )
-      resolve(canvas.toDataURL('image/jpeg', 0.95))
-    }
-    img.onerror = () => reject(new Error("Impossible de lire l'image du passeport."))
-    img.src = imageSrc
-  })
-}
-
-// Photo déjà isolée (scanner pleine page) : plus grand rectangle 480:680 centré, rendu haute qualité Nusuk
-async function formatNusukSquare(imageSrc: string): Promise<{ file: File; dataUrl: string }> {
-  return new Promise((resolve, reject) => {
-    const img = new Image()
-    img.crossOrigin = 'anonymous'
-    img.onload = async () => {
-      try {
-        const cropW = Math.min(img.width, img.height / NUSUK_PHOTO_ASPECT)
-        const cropH = cropW * NUSUK_PHOTO_ASPECT
-        const x = (img.width - cropW) / 2
-        const y = (img.height - cropH) / 2
-        resolve(await renderNusukPhoto(img, x, y, cropW))
-      } catch (err) {
-        reject(err)
-      }
-    }
-    img.onerror = () => reject(new Error("Impossible de charger la photo."))
-    img.src = imageSrc
-  })
-}
-
-// 🎯 Rendu haute qualité de la photo Nusuk (480x680) : réduction progressive + netteté, JPEG < 100 Ko
-const NUSUK_PHOTO_W = 480
-const NUSUK_PHOTO_H = 680
-const NUSUK_PHOTO_ASPECT = NUSUK_PHOTO_H / NUSUK_PHOTO_W
-const NUSUK_PHOTO_MAX_BYTES = 95 * 1024
-
-function canvasToJpegBlob(canvas: HTMLCanvasElement, quality: number): Promise<Blob> {
-  return new Promise((resolve, reject) => {
-    canvas.toBlob(
-      (blob) => (blob ? resolve(blob) : reject(new Error("Impossible de créer la photo."))),
-      'image/jpeg',
-      quality
-    )
-  })
-}
-
-function resizeHighQuality(source: HTMLCanvasElement, dw: number, dh: number): HTMLCanvasElement {
-  let cur = source
-  while (cur.width / 2 >= dw && cur.height / 2 >= dh) {
-    const next = document.createElement('canvas')
-    next.width = Math.max(1, Math.floor(cur.width / 2))
-    next.height = Math.max(1, Math.floor(cur.height / 2))
-    const nctx = next.getContext('2d')
-    if (!nctx) break
-    nctx.imageSmoothingEnabled = true
-    nctx.imageSmoothingQuality = 'high'
-    nctx.drawImage(cur, 0, 0, next.width, next.height)
-    cur = next
-  }
-  const out = document.createElement('canvas')
-  out.width = Math.max(1, dw)
-  out.height = Math.max(1, dh)
-  const octx = out.getContext('2d')
-  if (octx) {
-    octx.imageSmoothingEnabled = true
-    octx.imageSmoothingQuality = 'high'
-    octx.drawImage(cur, 0, 0, out.width, out.height)
-  }
-  return out
-}
-
-function sharpenCanvas(ctx: CanvasRenderingContext2D, w: number, h: number, amount: number) {
-  const imgData = ctx.getImageData(0, 0, w, h)
-  const s = imgData.data
-  const out = new Uint8ClampedArray(s.length)
-  out.set(s)
-  const stride = w * 4
-  const center = 1 + 4 * amount
-  for (let y = 1; y < h - 1; y++) {
-    for (let x = 1; x < w - 1; x++) {
-      const i = y * stride + x * 4
-      for (let c = 0; c < 3; c++) {
-        const k = i + c
-        out[k] = s[k] * center - amount * (s[k - 4] + s[k + 4] + s[k - stride] + s[k + stride])
-      }
-    }
-  }
-  imgData.data.set(out)
-  ctx.putImageData(imgData, 0, 0)
-}
-
-async function renderNusukPhoto(
-  img: HTMLImageElement,
-  cropX: number,
-  cropY: number,
-  size: number,
-  leftCut: number = -Infinity,
-  rightCut: number = Infinity,
-  topCut: number = -Infinity
-): Promise<{ file: File; dataUrl: string }> {
-  const canvas = document.createElement('canvas')
-  canvas.width = NUSUK_PHOTO_W
-  canvas.height = NUSUK_PHOTO_H
-  const ctx = canvas.getContext('2d')
-  if (!ctx) throw new Error("Impossible de préparer la photo.")
-
-  ctx.fillStyle = '#FFFFFF'
-  ctx.fillRect(0, 0, NUSUK_PHOTO_W, NUSUK_PHOTO_H)
-
-  const cropH = size * NUSUK_PHOTO_ASPECT
-  const ratio = NUSUK_PHOTO_W / size
-  const srcLeft = Math.max(cropX, 0, leftCut)
-  const srcRight = Math.min(cropX + size, img.width, rightCut)
-  const srcTop = Math.max(cropY, 0, topCut)
-  const srcBottom = Math.min(cropY + cropH, img.height)
-
-  if (srcRight > srcLeft && srcBottom > srcTop) {
-    const srcW = Math.max(1, Math.round(srcRight - srcLeft))
-    const srcH = Math.max(1, Math.round(srcBottom - srcTop))
-
-    const region = document.createElement('canvas')
-    region.width = srcW
-    region.height = srcH
-    const rctx = region.getContext('2d')
-    if (!rctx) throw new Error("Impossible de recadrer la photo.")
-    rctx.drawImage(img, Math.round(srcLeft), Math.round(srcTop), srcW, srcH, 0, 0, srcW, srcH)
-
-    const dw = Math.max(1, Math.round(srcW * ratio))
-    const dh = Math.max(1, Math.round(srcH * ratio))
-    const dx = Math.round((srcLeft - cropX) * ratio)
-    const dy = Math.round((srcTop - cropY) * ratio)
-
-    const resized = resizeHighQuality(region, dw, dh)
-    ctx.drawImage(resized, dx, dy)
-  }
-
-  sharpenCanvas(ctx, NUSUK_PHOTO_W, NUSUK_PHOTO_H, 0.45)
-
-  let quality = 0.95
-  let blob = await canvasToJpegBlob(canvas, quality)
-  while (blob.size > NUSUK_PHOTO_MAX_BYTES && quality > 0.5) {
-    quality = Number((quality - 0.05).toFixed(2))
-    blob = await canvasToJpegBlob(canvas, quality)
-  }
-
-  const file = new File([blob], `photo_nusuk_${Date.now()}.jpg`, { type: 'image/jpeg' })
-  const dataUrl = canvas.toDataURL('image/jpeg', quality)
-  return { file, dataUrl }
-}
-
-// 🎯 DÉTECTION ET DÉCOUPE DU VISAGE : cadre portrait 480×680, centré, ZÉRO texte en haut ni à droite
-async function autoDetectAndCropNusuk(imageSrc: string): Promise<{ 
-  file: File; 
-  dataUrl: string; 
-  cropBox: { x: number; y: number; size: number }; 
-  dims: { width: number; height: number };
-  detected: boolean;
-}> {
-  return new Promise((resolve, reject) => {
-    const img = new Image()
-    img.crossOrigin = 'anonymous'
-
-    img.onload = async () => {
-      const dims = { width: img.width, height: img.height }
-      let cropX = 0
-      let cropY = 0
-      let size = 200
-      let faceFound = false
-
-      let leftCut = -Infinity
-      let rightCut = Infinity
-      let topCut = -Infinity
-
-      try {
-        await loadFaceModel()
-
-        const maxSide = 1280
-        const ds = Math.min(1, maxSide / Math.max(dims.width, dims.height))
-        let detectInput: HTMLImageElement | HTMLCanvasElement = img
-        if (ds < 1) {
-          const dc = document.createElement('canvas')
-          dc.width = Math.max(1, Math.round(dims.width * ds))
-          dc.height = Math.max(1, Math.round(dims.height * ds))
-          const dctx = dc.getContext('2d')
-          if (dctx) {
-            dctx.drawImage(img, 0, 0, dc.width, dc.height)
-            detectInput = dc
-          }
-        }
-        const inv = detectInput === img ? 1 : 1 / ds
-
-        const detections = await faceapi.detectAllFaces(
-          detectInput,
-          new faceapi.SsdMobilenetv1Options({ minConfidence: 0.35, maxResults: 6 })
-        )
-
-        // 🎯 Le vrai visage = le plus grand : on ignore l'image fantôme / la petite photo à droite du passeport
-        const detection = detections.length
-          ? detections.reduce((best, d) => (d.box.width * d.box.height > best.box.width * best.box.height ? d : best))
-          : null
-
-        if (detection) {
-          const faceX = detection.box.x * inv
-          const faceY = detection.box.y * inv
-          const faceW = detection.box.width * inv
-          const faceH = detection.box.height * inv
-
-          const faceCx = faceX + faceW / 2
-
-          // 🛡️ Fenêtre horizontale symétrique autour du visage (bloque le texte à droite)
-          leftCut = faceX - faceW * 0.50
-          rightCut = faceX + faceW * 1.50
-          const windowW = rightCut - leftCut
-
-          // 📐 Cadre portrait 480:680 bien centré autour du visage
-          // 📐 Géométrie réelle du passeport : la grande photo (35×45 mm) fait ≈ 24,5 % de la largeur de la page.
-          // On cadre exactement la hauteur de cette photo → ni ligne MRZ en bas, ni texte en haut, ni vide.
-          const layoutPhotoW = dims.width * 0.245
-          const faceVsLayout = faceW / layoutPhotoW
-          const layoutOk = faceVsLayout >= 0.36 && faceVsLayout <= 0.85
-          // Image qui n'est pas une page de passeport pleine largeur (photo prise de loin) : on déduit la photo du visage
-          const photoW = layoutOk ? layoutPhotoW : faceW / 0.57
-          const photoH = photoW * (45 / 35)   // hauteur complète de la photo (tête entière + épaules)
-          // Le visage doit rester entre 55 % et 80 % de la hauteur du cadre
-          const frameH = Math.max(faceH / 0.80, Math.min(photoH, faceH / 0.55))
-          size = Math.round(Math.min(frameH / NUSUK_PHOTO_ASPECT, windowW, dims.width, dims.height / NUSUK_PHOTO_ASPECT))
-
-          // 🎯 Visage centré horizontalement
-          cropX = Math.round(faceCx - size / 2)
-          cropX = Math.max(0, Math.min(dims.width - size, cropX))
-
-          // 🛡️ PROTECTION ANTI-TEXTE EN HAUT :
-          // La boîte détectée inclut déjà le front. Une marge courte (0.10 × faceH) laisse
-          // juste l'espace pour les cheveux/coiffe sans jamais remonter sur l'en-tête du passeport.
-          const topMargin = faceH * 0.16   // marge haute : crâne / cheveux / coiffe entièrement dans le cadre
-          let targetY = faceY - topMargin
-          if (targetY < 0) targetY = 0
-          cropY = Math.round(targetY)
-
-          // 🛡️ Limite stricte au-dessus de la tête : tout ce qui est plus haut est rendu en blanc pur
-          // (le cadre étant plus haut vers le bas, les épaules/buste ressortent davantage)
-          topCut = faceY - faceH * 0.24   // le texte "PASSPORT" est plus haut (≥ 0.29 × faceH) : jamais coupé
-
-          faceFound = true
-        }
-      } catch (err) {
-        console.warn('Détection du visage non disponible, cadrage par défaut utilisé :', err)
-      }
-
-      if (!faceFound) {
-        if (img.width > img.height) {
-          size = Math.round(Math.min((img.height * 0.58) / NUSUK_PHOTO_ASPECT, img.width * 0.24))
-          cropX = Math.round(img.width * 0.05)
-          cropY = Math.round(img.height * 0.18) // Positionné plus bas pour éviter l'en-tête du passeport
-        } else {
-          size = Math.round(Math.min(img.width * 0.85, (img.height * 0.85) / NUSUK_PHOTO_ASPECT))
-          cropX = Math.round((img.width - size) / 2)
-          cropY = Math.round(Math.max(0, (img.height - size * NUSUK_PHOTO_ASPECT) / 2))
-        }
-      }
-
-      const safeX = Math.round(Math.max(0, Math.min(dims.width - size, cropX)))
-      const safeY = Math.round(Math.max(0, Math.min(dims.height - size * NUSUK_PHOTO_ASPECT, cropY)))
-
-      try {
-        const rendered = await renderNusukPhoto(img, cropX, cropY, size, leftCut, rightCut, topCut)
-        resolve({
-          file: rendered.file,
-          dataUrl: rendered.dataUrl,
-          cropBox: { x: safeX, y: safeY, size },
-          dims,
-          detected: faceFound
-        })
-      } catch (renderErr) {
-        reject(renderErr)
-      }
-    }
-
-    img.onerror = () => reject(new Error("Impossible de charger l'image sélectionnée."))
-    img.src = imageSrc
-  })
-}
-
-function parseMrzRawLines(rawInput: string | string[]) {
-  const fullText = Array.isArray(rawInput) ? rawInput.join('\n') : String(rawInput || '')
-  if (!fullText || fullText.trim().length < 8) return null
-
-  if (fullText.includes('LNM') || fullText.includes('PNM') || fullText.includes('FNM')) {
-    const getTag = (tag: string) => {
-      const match = fullText.match(new RegExp(`(?:^|,)${tag}([^,\r\n]+)`, 'i'))
-      return match ? match[1].trim() : ''
-    }
-
-    const nom = getTag('LNM').replace(/</g, ' ').trim()
-    const prenom = getTag('FNM').replace(/</g, ' ').trim()
-    const numPasseport = getTag('PNM').replace(/</g, '').trim()
-
-    const rawSex = getTag('SEX').toUpperCase()
-    let sexe = ''
-    if (rawSex.startsWith('F')) sexe = 'FEMME'
-    else if (rawSex.startsWith('M')) sexe = 'HOMME'
-
-    const cleanDate = (dStr: string, isExpiry = false) => {
-      if (!dStr) return ''
-      const currentYearShort = new Date().getFullYear() % 100
-      const resolveYear = (yy: number) => {
-        if (yy >= 100) return yy
-        if (isExpiry) return 2000 + yy
-        return yy > currentYearShort ? 1900 + yy : 2000 + yy
-      }
-
-      const dmyMatch = dStr.match(/^(\d{1,2})-(\d{1,2})-(\d{2,4})$/)
-      if (dmyMatch) {
-        const dd = dmyMatch[1].padStart(2, '0')
-        const mm = dmyMatch[2].padStart(2, '0')
-        const yy = resolveYear(parseInt(dmyMatch[3], 10))
-        return `${yy}-${mm}-${dd}`
-      }
-      if (/^\d{4}-\d{2}-\d{2}$/.test(dStr)) return dStr
-      const digits = dStr.replace(/\D/g, '')
-      if (digits.length === 8) return `${digits.slice(0, 4)}-${digits.slice(4, 6)}-${digits.slice(6, 8)}`
-      if (digits.length === 6) {
-        const fullY = resolveYear(parseInt(digits.slice(0, 2), 10))
-        return `${fullY}-${digits.slice(2, 4)}-${digits.slice(4, 6)}`
-      }
-      return ''
-    }
-
-    const dateNaissance = cleanDate(getTag('DOB'), false)
-    const dateExpiration = cleanDate(getTag('EDT'), true)
-
-    if (nom || numPasseport || prenom) {
-      return { nom, prenom, numPasseport, sexe, dateNaissance, dateExpiration }
-    }
-  }
-
-  const lines = fullText
-    .split(/\r?\n/)
-    .map(l => l.trim().toUpperCase().replace(/[^A-Z0-9<]/g, ''))
-    .filter(l => l.length >= 25)
-
-  let l1 = ''
-  let l2 = ''
-
-  if (lines.length >= 2) {
-    l1 = lines[lines.length - 2]
-    l2 = lines[lines.length - 1]
-  } else {
-    const cleanContinuous = fullText.toUpperCase().replace(/[^A-Z0-9<]/g, '')
-    const pIdx = cleanContinuous.search(/P[A-Z0-9<]/)
-    if (pIdx !== -1) {
-      const mrzPart = cleanContinuous.slice(pIdx)
-      if (mrzPart.length >= 70) {
-        l1 = mrzPart.slice(0, 44)
-        l2 = mrzPart.slice(44)
-      }
-    }
-  }
-
-  if (!l1 && fullText.includes('<<')) {
-    const rawClean = fullText.replace(/[^A-Z0-9<]/gi, '')
-    l1 = rawClean.slice(0, 44)
-    l2 = rawClean.slice(44)
-  }
-
-  if (!l1 && !l2) return null
-
-  let nom = ''
-  let prenom = ''
-  if (l1) {
-    const nameSection = l1.length >= 5 ? l1.slice(5) : l1
-    const parts = nameSection.split('<<').filter(Boolean)
-    nom = (parts[0] || '').replace(/</g, ' ').trim()
-    prenom = (parts[1] || '').replace(/</g, ' ').trim()
-  }
-
-  let numPasseport = ''
-  let dateNaissance = ''
-  let sexe = ''
-  let dateExpiration = ''
-
-  if (l2 && l2.length >= 9) {
-    numPasseport = l2.slice(0, 9).replace(/</g, '').trim()
-    const afterNum = l2.slice(9)
-    const dobMatch = afterNum.match(/([0-9]{6})([0-9<])([MF<])([0-9]{6})/i)
-
-    if (dobMatch) {
-      const rawDob = dobMatch[1]
-      const rawSexChar = dobMatch[3].toUpperCase()
-      const rawExp = dobMatch[4]
-
-      const yy = parseInt(rawDob.slice(0, 2), 10)
-      const mm = rawDob.slice(2, 4)
-      const dd = rawDob.slice(4, 6)
-      const currentYearShort = new Date().getFullYear() % 100
-      const fullYear = yy > currentYearShort ? 1900 + yy : 2000 + yy
-      dateNaissance = `${fullYear}-${mm}-${dd}`
-
-      sexe = rawSexChar === 'F' ? 'FEMME' : rawSexChar === 'M' ? 'HOMME' : ''
-
-      const expYy = parseInt(rawExp.slice(0, 2), 10)
-      const expMm = rawExp.slice(2, 4)
-      const expDd = rawExp.slice(4, 6)
-      dateExpiration = `${2000 + expYy}-${expMm}-${expDd}`
-    } else {
-      if (l2.length >= 19) {
-        const rawDob = l2.slice(13, 19)
-        if (/^\d{6}$/.test(rawDob)) {
-          const yy = parseInt(rawDob.slice(0, 2), 10)
-          const mm = rawDob.slice(2, 4)
-          const dd = rawDob.slice(4, 6)
-          const fullYear = yy > (new Date().getFullYear() % 100) ? 1900 + yy : 2000 + yy
-          dateNaissance = `${fullYear}-${mm}-${dd}`
-        }
-      }
-      if (l2.length >= 21) {
-        const charSex = l2.charAt(20).toUpperCase()
-        sexe = charSex === 'F' ? 'FEMME' : charSex === 'M' ? 'HOMME' : ''
-      }
-      if (l2.length >= 27) {
-        const rawExp = l2.slice(21, 27)
-        if (/^\d{6}$/.test(rawExp)) {
-          const yy = parseInt(rawExp.slice(0, 2), 10)
-          dateExpiration = `${2000 + yy}-${rawExp.slice(2, 4)}-${rawExp.slice(4, 6)}`
-        }
-      }
-    }
-  }
-
-  if (nom || numPasseport || prenom) {
-    return { nom, prenom, numPasseport, sexe, dateNaissance, dateExpiration }
-  }
-
-  return null
-}
-
-// Helper d'appel de lecture automatique compatible Web + Mobile
-async function postMrzOcr(imageBase64: string): Promise<any> {
-  const targetEndpoint = `${getApiUrl()}/api/scan-mrz`
-  if (Capacitor.isNativePlatform()) {
-    const nativeResponse = await CapacitorHttp.post({
-      url: targetEndpoint,
-      headers: { 'Content-Type': 'application/json' },
-      data: { imageBase64 },
-      connectTimeout: 30000,
-      readTimeout: 30000,
-    })
-    if (nativeResponse.status !== 200) {
-      throw new Error("Impossible de lire automatiquement ce passeport. Assurez-vous que l'image soit bien nette.")
-    }
-    return typeof nativeResponse.data === 'string' ? JSON.parse(nativeResponse.data) : nativeResponse.data
-  } else {
-    let res: Response
-    try {
-      res = await fetch(targetEndpoint, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ imageBase64 }),
-      })
-    } catch {
-      throw new Error("Impossible de se connecter à Internet pour lire le passeport.")
-    }
-    const rawText = await res.text()
-    let data: any
-    try {
-      data = JSON.parse(rawText)
-    } catch {
-      throw new Error("La lecture automatique est momentanément indisponible. Vous pouvez remplir les champs manuellement.")
-    }
-    if (!res.ok) {
-      throw new Error("Les écritures du passeport ne sont pas assez lisibles. Essayez avec une photo plus nette ou remplissez les champs manuellement.")
-    }
-    return data
-  }
+interface SavedDossierSummary {
+  id: string
+  nomComplet: string
+  numPasseport: string
+  reste: number
+  devise: HajjCurrency
 }
 
 export default function AjouterPelerin() {
   const { profile: workProfile } = useWorkProfile()
   const { setHideNavbar } = useUI()
   const { selectedYear } = useYear()
+
+  // Modales & Caméra
+  const [cameraModalOpen, setCameraModalOpen] = useState(false)
   const [mobileScannerSheetOpen, setMobileScannerSheetOpen] = useState(false)
+  const [savedSummary, setSavedSummary] = useState<SavedDossierSummary | null>(null)
+
+  // Champs du formulaire
   const [nom, setNom] = useState('')
   const [prenom, setPrenom] = useState('')
   const [reference, setReference] = useState('')
@@ -765,7 +217,9 @@ export default function AjouterPelerin() {
   const [sexe, setSexe] = useState('')
   const [dateNaissance, setDateNaissance] = useState('')
   const [dateExpiration, setDateExpiration] = useState('')
-  const [dateInscription, setDateInscription] = useState(new Date().toISOString().split('T')[0])
+  const [dateInscription, setDateInscription] = useState(
+    () => new Date().toISOString().split('T')[0]
+  )
   const [campagne, setCampagne] = useState<number | null>(() =>
     selectedYear === 'all' ? new Date().getFullYear() : Number(selectedYear)
   )
@@ -778,51 +232,81 @@ export default function AjouterPelerin() {
   const [nomPackage, setNomPackage] = useState('')
   const [notes, setNotes] = useState('')
 
+  // Audit de vérification MRZ & contrôle qualité
+  const [mrzAudit, setMrzAudit] = useState<MrzParseResult | null>(null)
+  const [confirmedFields, setConfirmedFields] = useState<Record<string, boolean>>({})
+  const [confirmDuplicateOverride, setConfirmDuplicateOverride] = useState(false)
+
+  // Sources d'images SÉPARÉES (évite tout écrasement entre photo séparée et page passeport)
+  const [passportSourceSrc, setPassportSourceSrc] = useState<string | null>(null)
+  const [photoSourceSrc, setPhotoSourceSrc] = useState<string | null>(null)
+
+  // Fichiers finaux prêts à envoyer
   const [photoFile, setPhotoFile] = useState<File | null>(null)
   const [photoPreview, setPhotoPreview] = useState<string | null>(null)
+  const [photoQuality, setPhotoQuality] = useState<NusukPhotoQuality | null>(null)
+  const [originalPhotoBackup, setOriginalPhotoBackup] = useState<{
+    file: File
+    dataUrl: string
+  } | null>(null)
+  const [isRemovingBg, setIsRemovingBg] = useState(false)
+  const [whiteBgApplied, setWhiteBgApplied] = useState(false)
 
+  const [fileToUpload, setFileToUpload] = useState<File | null>(null)
+
+  // Scanners matériels (USB / TWAIN / Pleine page / Douchette)
   const [showPhysicalScannerInput, setShowPhysicalScannerInput] = useState(false)
   const [mrzBuffer, setMrzBuffer] = useState('')
   const physicalInputRef = useRef<HTMLInputElement>(null)
   const mrzTimeoutRef = useRef<NodeJS.Timeout | null>(null)
-  const resetTimeoutRef = useRef<NodeJS.Timeout | null>(null)
 
   const [isTwainScanning, setIsTwainScanning] = useState(false)
-  const [isFullPageConnected, setIsFullPageConnected] = useState(false)
   const [isFullPageListening, setIsFullPageListening] = useState(false)
   const fullPageWsRef = useRef<WebSocket | null>(null)
 
+  // États des 3 modales de recadrage précis
   const [cropModalOpen, setCropModalOpen] = useState(false)
-  const [cropImageSrc, setCropImageSrc] = useState<string | null>(null)
-  const [cropBox, setCropBox] = useState<{ x: number; y: number; size: number }>({ x: 0, y: 0, size: 200 })
-  const [cropImgDims, setCropImgDims] = useState<{ width: number; height: number }>({ width: 1, height: 1 })
-  const cropContainerRef = useRef<HTMLDivElement>(null)
-  const isDraggingRef = useRef(false)
-  const isResizingRef = useRef(false)
-  const dragStartRef = useRef<{ mouseX: number; mouseY: number; boxX: number; boxY: number; boxSize: number }>({ mouseX: 0, mouseY: 0, boxX: 0, boxY: 0, boxSize: 0 })
+  const [cropBox, setCropBox] = useState<{ x: number; y: number; size: number }>({
+    x: 0,
+    y: 0,
+    size: 200,
+  })
+  const [cropImgDims, setCropImgDims] = useState<{ width: number; height: number }>({
+    width: 1,
+    height: 1,
+  })
 
   const [passportCropModalOpen, setPassportCropModalOpen] = useState(false)
-  const [passportCropBox, setPassportCropBox] = useState<{ x: number; y: number; width: number; height: number }>({ x: 0, y: 0, width: 400, height: 300 })
-  const [passportImgDims, setPassportImgDims] = useState<{ width: number; height: number }>({ width: 1, height: 1 })
-  const passportContainerRef = useRef<HTMLDivElement>(null)
-  const isPassportDraggingRef = useRef(false)
-  const isPassportResizingRef = useRef(false)
-  const passportDragStartRef = useRef<{ mouseX: number; mouseY: number; boxX: number; boxY: number; boxW: number; boxH: number }>({ mouseX: 0, mouseY: 0, boxX: 0, boxY: 0, boxW: 0, boxH: 0 })
+  const [passportCropBox, setPassportCropBox] = useState<{
+    x: number
+    y: number
+    width: number
+    height: number
+  }>({ x: 0, y: 0, width: 400, height: 300 })
+  const [passportImgDims, setPassportImgDims] = useState<{ width: number; height: number }>({
+    width: 1,
+    height: 1,
+  })
 
-  const [mrzPreviewModalOpen, setMrzPreviewModalOpen] = useState(false)
-  const [mrzPreviewImageSrc, setMrzPreviewImageSrc] = useState<string | null>(null)
-  const [mrzCropBox, setMrzCropBox] = useState<{ x: number; y: number; width: number; height: number }>({ x: 0, y: 0, width: 100, height: 50 })
-  const [mrzImgDims, setMrzImgDims] = useState<{ width: number; height: number }>({ width: 1, height: 1 })
-  const mrzContainerRef = useRef<HTMLDivElement>(null)
-  const isMrzDraggingRef = useRef(false)
-  const isMrzResizingRef = useRef(false)
-  const mrzDragStartRef = useRef<{ mouseX: number; mouseY: number; boxX: number; boxY: number; boxW: number; boxH: number }>({ mouseX: 0, mouseY: 0, boxX: 0, boxY: 0, boxW: 0, boxH: 0 })
-  const pendingScanFileRef = useRef<File | null>(null)
+  const [mrzModalOpen, setMrzModalOpen] = useState(false)
+  const [mrzCropBox, setMrzCropBox] = useState<MrzBoxRegion>({
+    x: 0,
+    y: 0,
+    width: 300,
+    height: 80,
+  })
+  const [mrzImgDims, setMrzImgDims] = useState<{ width: number; height: number }>({
+    width: 1,
+    height: 1,
+  })
 
-  const [fileToUpload, setFileToUpload] = useState<File | null>(null)
   const [loading, setLoading] = useState(false)
   const [isScanning, setIsScanning] = useState(false)
-  const [message, setMessage] = useState({ text: '', type: '' })
+  const [scanStageText, setScanStageText] = useState('')
+  const [message, setMessage] = useState<{ text: string; type: 'success' | 'info' | 'error' | '' }>({
+    text: '',
+    type: '',
+  })
 
   const [agenceId, setAgenceId] = useState<string | null>(null)
   const [userId, setUserId] = useState<string | null>(null)
@@ -830,13 +314,25 @@ export default function AjouterPelerin() {
 
   const { data: localProfiles } = useQuery<{ agence_id: string | null }>(
     'SELECT agence_id FROM profiles WHERE id = ?',
-    [userId ?? ''],
+    [userId ?? '']
+  )
+
+  // Lecture locale instantanée des pèlerins de l'agence (pour anti-doublon passeport + suggestions forfaits/groupes)
+  const { data: agencyPelerins } = useQuery<ExistingPelerinRow>(
+    `SELECT id, nom_complet, prenom, num_passeport, campagne, nom_package, prix_package, devise, reference, agence_ou_personne_associee
+     FROM pelerins
+     WHERE agence_id = ?
+     ORDER BY created_at DESC
+     LIMIT 400`,
+    [agenceId ?? '__none__']
   )
 
   useEffect(() => {
     async function fetchUserAgence() {
       try {
-        const { data: { user } } = await getUser()
+        const {
+          data: { user },
+        } = await getUser()
         if (user) {
           setUserId(user.id)
           setProfileReady(true)
@@ -850,7 +346,6 @@ export default function AjouterPelerin() {
         }
       } catch (error) {
         console.error('[AjouterPelerin] getUser error', error)
-        setProfileReady(true)
       } finally {
         setProfileReady(true)
       }
@@ -858,15 +353,18 @@ export default function AjouterPelerin() {
     fetchUserAgence()
   }, [])
 
+  // Préchargement silencieux en arrière-plan (idle) des modèles visage
   useEffect(() => {
-    loadFaceModel().catch(() => {})
+    const idleTimer = setTimeout(() => {
+      ensureFaceModelsLoaded().catch(() => {})
+    }, 900)
     return () => {
+      clearTimeout(idleTimer)
       if (fullPageWsRef.current) {
         fullPageWsRef.current.close()
         fullPageWsRef.current = null
       }
       if (mrzTimeoutRef.current) clearTimeout(mrzTimeoutRef.current)
-      if (resetTimeoutRef.current) clearTimeout(resetTimeoutRef.current)
     }
   }, [])
 
@@ -875,63 +373,425 @@ export default function AjouterPelerin() {
     if (localAgenceId) setAgenceId(localAgenceId)
   }, [localProfiles])
 
-  // Synchronisation automatique de la campagne avec l'année sélectionnée depuis le dashboard
   useEffect(() => {
     setCampagne(selectedYear === 'all' ? new Date().getFullYear() : Number(selectedYear))
   }, [selectedYear])
 
+  // Restauration du brouillon de session (anti-perte sur appel téléphonique / mise en veille)
+  useEffect(() => {
+    try {
+      const raw = sessionStorage.getItem(DRAFT_STORAGE_KEY)
+      if (!raw) return
+      const d = JSON.parse(raw)
+      if (d.nom) setNom(d.nom)
+      if (d.prenom) setPrenom(d.prenom)
+      if (d.reference) setReference(d.reference)
+      if (d.passeport) setPasseport(d.passeport)
+      if (d.phone) setPhone(d.phone)
+      if (d.sexe) setSexe(d.sexe)
+      if (d.dateNaissance) setDateNaissance(d.dateNaissance)
+      if (d.dateExpiration) setDateExpiration(d.dateExpiration)
+      if (d.associe) setAssocie(d.associe)
+      if (d.nomPackage) setNomPackage(d.nomPackage)
+      if (d.notes) setNotes(d.notes)
+      if (d.devise) setDevise(normalizeHajjCurrency(d.devise))
+      if (typeof d.total === 'number' && d.total > 0) {
+        setTotal(d.total)
+        setTotalInput(d.total.toLocaleString('fr-FR'))
+      }
+      if (typeof d.paye === 'number' && d.paye > 0) {
+        setPaye(d.paye)
+        setPayeInput(d.paye.toLocaleString('fr-FR'))
+      }
+    } catch {}
+  }, [])
+
+  useEffect(() => {
+    try {
+      if (!nom && !prenom && !passeport && !phone && !notes && !total) return
+      sessionStorage.setItem(
+        DRAFT_STORAGE_KEY,
+        JSON.stringify({
+          nom,
+          prenom,
+          reference,
+          passeport,
+          phone,
+          sexe,
+          dateNaissance,
+          dateExpiration,
+          associe,
+          nomPackage,
+          notes,
+          devise,
+          total,
+          paye,
+        })
+      )
+    } catch {}
+  }, [
+    nom,
+    prenom,
+    reference,
+    passeport,
+    phone,
+    sexe,
+    dateNaissance,
+    dateExpiration,
+    associe,
+    nomPackage,
+    notes,
+    devise,
+    total,
+    paye,
+  ])
+
   useEffect(() => {
     setHideNavbar(
-      Boolean(mrzPreviewModalOpen || cropModalOpen || passportCropModalOpen || mobileScannerSheetOpen)
+      Boolean(
+        cameraModalOpen ||
+          mrzModalOpen ||
+          cropModalOpen ||
+          passportCropModalOpen ||
+          mobileScannerSheetOpen ||
+          savedSummary
+      )
     )
     return () => setHideNavbar(false)
-  }, [mrzPreviewModalOpen, cropModalOpen, passportCropModalOpen, mobileScannerSheetOpen, setHideNavbar])
+  }, [
+    cameraModalOpen,
+    mrzModalOpen,
+    cropModalOpen,
+    passportCropModalOpen,
+    mobileScannerSheetOpen,
+    savedSummary,
+    setHideNavbar,
+  ])
 
-  const isPassportExpiringSoon = (() => {
-    if (!dateExpiration) return false
+  // ── Contrôles métier automatiques (Expiration, Âge, Doublon, Suggestions) ──
+  const passportValidityInfo = useMemo(() => {
+    if (!dateExpiration) return { status: 'empty' as const, monthsLeft: 0 }
     const exp = new Date(dateExpiration)
-    if (isNaN(exp.getTime())) return false
-    const sixMonthsFromNow = new Date()
-    sixMonthsFromNow.setMonth(sixMonthsFromNow.getMonth() + 6)
-    return exp < sixMonthsFromNow
-  })()
+    if (isNaN(exp.getTime())) return { status: 'empty' as const, monthsLeft: 0 }
+    const now = new Date()
+    now.setHours(0, 0, 0, 0)
+    if (exp < now) {
+      return { status: 'expired' as const, monthsLeft: 0 }
+    }
+    const sixMonths = new Date(now)
+    sixMonths.setMonth(sixMonths.getMonth() + 6)
+    const monthsLeft = Math.max(
+      0,
+      Math.round((exp.getTime() - now.getTime()) / (1000 * 60 * 60 * 24 * 30.44))
+    )
+    if (exp < sixMonths) {
+      return { status: 'soon' as const, monthsLeft }
+    }
+    return { status: 'valid' as const, monthsLeft }
+  }, [dateExpiration])
 
-  const processScannedPassportImage = async (fullDataUrl: string) => {
-    setCropImageSrc(fullDataUrl)
+  const pilgrimAgeInfo = useMemo(() => {
+    if (!dateNaissance) return null
+    const dob = new Date(dateNaissance)
+    if (isNaN(dob.getTime())) return null
+    const now = new Date()
+    let age = now.getFullYear() - dob.getFullYear()
+    const m = now.getMonth() - dob.getMonth()
+    if (m < 0 || (m === 0 && now.getDate() < dob.getDate())) age--
+    if (age < 0 || age > 118) return { age, invalid: true }
+    return { age, invalid: false }
+  }, [dateNaissance])
 
-    const [formattedRes, autoCropRes, ocrRes] = await Promise.allSettled([
-      compressAndFormatPassportNusuk(fullDataUrl),
-      autoDetectAndCropNusuk(fullDataUrl),
-      postMrzOcr(fullDataUrl),
-    ])
+  const duplicatePassportMatch = useMemo(() => {
+    const cleanNum = passeport.replace(/\s+/g, '').toUpperCase()
+    if (cleanNum.length < 5 || !agencyPelerins?.length) return null
+    const matches = agencyPelerins.filter(
+      (p) => (p.num_passeport || '').replace(/\s+/g, '').toUpperCase() === cleanNum
+    )
+    if (!matches.length) return null
+    const sameCampagne = matches.find((m) => Number(m.campagne) === Number(campagne))
+    return {
+      record: sameCampagne || matches[0],
+      isSameCampagne: Boolean(sameCampagne),
+    }
+  }, [passeport, agencyPelerins, campagne])
 
-    if (formattedRes.status === 'fulfilled') {
-      setFileToUpload(formattedRes.value.file)
+  useEffect(() => {
+    setConfirmDuplicateOverride(false)
+  }, [passeport, campagne])
+
+  const smartSuggestions = useMemo(() => {
+    const packagesMap = new Map<
+      string,
+      { name: string; price: number; devise: HajjCurrency; count: number }
+    >()
+    const refsCount = new Map<string, number>()
+    const associesCount = new Map<string, number>()
+
+    for (const p of agencyPelerins || []) {
+      const pkg = (p.nom_package || '').trim().toUpperCase()
+      if (pkg) {
+        const prev = packagesMap.get(pkg)
+        const curDev = normalizeHajjCurrency(p.devise)
+        packagesMap.set(pkg, {
+          name: pkg,
+          price: p.prix_package && p.prix_package > 0 ? p.prix_package : prev?.price || 0,
+          devise: curDev,
+          count: (prev?.count || 0) + 1,
+        })
+      }
+      const ref = (p.reference || '').trim().toUpperCase()
+      if (ref) refsCount.set(ref, (refsCount.get(ref) || 0) + 1)
+
+      const assoc = (p.agence_ou_personne_associee || '').trim().toUpperCase()
+      if (assoc) associesCount.set(assoc, (associesCount.get(assoc) || 0) + 1)
     }
 
-    if (autoCropRes.status === 'fulfilled') {
-      setPhotoFile(autoCropRes.value.file)
-      setPhotoPreview(autoCropRes.value.dataUrl)
-      setCropBox(autoCropRes.value.cropBox)
-      setCropImgDims(autoCropRes.value.dims)
+    return {
+      packages: Array.from(packagesMap.values())
+        .sort((a, b) => b.count - a.count)
+        .slice(0, 5),
+      references: Array.from(refsCount.entries())
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 5)
+        .map(([k]) => k),
+      associes: Array.from(associesCount.entries())
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 5)
+        .map(([k]) => k),
     }
+  }, [agencyPelerins])
 
-    if (ocrRes.status === 'fulfilled' && ocrRes.value) {
-      const ocrData = ocrRes.value
-      if (ocrData.nom) setNom(ocrData.nom)
-      if (ocrData.prenom) setPrenom(ocrData.prenom)
-      if (ocrData.numPasseport) setPasseport(ocrData.numPasseport)
-      if (ocrData.sexe) setSexe(ocrData.sexe)
-      if (ocrData.dateNaissance) setDateNaissance(ocrData.dateNaissance)
-      if (ocrData.dateExpiration) setDateExpiration(ocrData.dateExpiration)
-    } else if (ocrRes.status === 'rejected') {
-      console.warn("Échec de la lecture automatique :", ocrRes.reason)
+  const campaignOptions = useMemo(() => {
+    const currentY = new Date().getFullYear()
+    const end = currentY + 6
+    const years: number[] = []
+    for (let y = 2024; y <= end; y++) years.push(y)
+    if (campagne && !years.includes(campagne)) years.push(campagne)
+    return years.sort((a, b) => a - b)
+  }, [campagne])
+
+  const isOverpaid = total > 0 && paye > total
+
+  const isFieldFlagged = (field: MrzFieldKey): boolean => {
+    if (!mrzAudit) return false
+    if (confirmedFields[field]) return false
+    return mrzAudit.unverifiedFields.includes(field)
+  }
+
+  const markFieldEdited = (field: MrzFieldKey) => {
+    setConfirmedFields((prev) => (prev[field] ? prev : { ...prev, [field]: true }))
+  }
+
+  // ── Application centralisée d'un résultat MRZ ──
+  const applyMrzFields = (mrz: MrzParseResult) => {
+    setMrzAudit(mrz)
+    setConfirmedFields({})
+    if (mrz.nom) setNom(mrz.nom)
+    if (mrz.prenom) setPrenom(mrz.prenom)
+    if (mrz.numPasseport) setPasseport(mrz.numPasseport)
+    if (mrz.sexe) setSexe(mrz.sexe)
+    if (mrz.dateNaissance) setDateNaissance(mrz.dateNaissance)
+    if (mrz.dateExpiration) setDateExpiration(mrz.dateExpiration)
+  }
+
+  // ── Exécution complète du scan rapide passeport + photo ──
+  const executeFullPassportScan = async (input: File | string) => {
+    setIsScanning(true)
+    setScanStageText('Lecture rapide du passeport…')
+    setMessage({
+      text: '⏳ Lecture rapide du passeport en cours…',
+      type: 'info',
+    })
+
+    try {
+      const outcome = await scanPassportComplete(input, {
+        onMrzReady: (mrz, ms) => {
+          applyMrzFields(mrz)
+          setScanStageText(`Informations remplies (${(ms / 1000).toFixed(1)}s) • Photo en cours…`)
+        },
+      })
+
+      setPassportSourceSrc(outcome.masterPassportDataUrl)
+      setPhotoSourceSrc(outcome.masterPassportDataUrl)
+      setMrzCropBox(outcome.mrzBox)
+
+      if (outcome.passportFile) {
+        setFileToUpload(outcome.passportFile)
+      }
+
+      if (outcome.photoResult) {
+        setPhotoFile(outcome.photoResult.file)
+        setPhotoPreview(outcome.photoResult.dataUrl)
+        setPhotoQuality(outcome.photoResult.quality)
+        setOriginalPhotoBackup({
+          file: outcome.photoResult.file,
+          dataUrl: outcome.photoResult.dataUrl,
+        })
+        setWhiteBgApplied(false)
+        setCropBox(outcome.photoResult.cropBox)
+        setCropImgDims(outcome.photoResult.dims)
+        setMrzImgDims(outcome.photoResult.dims)
+      }
+
+      if (outcome.mrzResult) {
+        applyMrzFields(outcome.mrzResult)
+        const unv = outcome.mrzResult.unverifiedFields
+        const sec = (outcome.elapsedMs / 1000).toFixed(1)
+
+        if (unv.length === 0) {
+          setMessage({
+            text: `✅ Passeport lu en ${sec}s et photo d'identité prête !`,
+            type: 'success',
+          })
+        } else {
+          setMessage({
+            text: `✅ Passeport lu en ${sec}s. Vérifiez les champs signalés en orange.`,
+            type: 'info',
+          })
+        }
+      } else {
+        setMessage({
+          text: "⚠️ Photo d'identité et copie du passeport prêtes, mais les écritures sont floues. Cliquez sur « Relire le code » ou complétez les champs.",
+          type: 'info',
+        })
+      }
+    } catch (err: unknown) {
+      console.error(err)
+      setMessage({
+        text: `⚠️ ${humanizeError(err, 'Impossible de traiter cette image de passeport.')}`,
+        type: 'error',
+      })
+    } finally {
+      setIsScanning(false)
+      setScanStageText('')
     }
   }
 
+  const handleGalleryScanInput = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const f = e.target.files?.[0]
+    e.target.value = ''
+    if (!f) return
+    await executeFullPassportScan(f)
+  }
+
+  // Ouverture manuelle de la zone MRZ si l'utilisateur veut recibler précisément les 2 lignes
+  const openManualMrzModal = async () => {
+    if (!passportSourceSrc) return
+    try {
+      const auto = await detectMrzRegionAuto(passportSourceSrc)
+      setMrzImgDims(auto.dims)
+      if (!mrzCropBox.width || mrzCropBox.width === 300) {
+        setMrzCropBox(auto.region)
+      }
+      setMrzModalOpen(true)
+    } catch {
+      setMrzModalOpen(true)
+    }
+  }
+
+  const handleConfirmManualMrzRescan = async () => {
+    if (!passportSourceSrc) return
+    setMrzModalOpen(false)
+    setIsScanning(true)
+    setScanStageText('Lecture rapide en cours…')
+    setMessage({ text: '⏳ Nouvelle lecture de la zone sélectionnée…', type: 'info' })
+
+    try {
+      const mrz = await readMrzHybrid(passportSourceSrc, mrzCropBox)
+      applyMrzFields(mrz)
+      if (mrz.unverifiedFields.length === 0) {
+        setMessage({
+          text: '✅ Informations du passeport lues avec succès !',
+          type: 'success',
+        })
+      } else {
+        setMessage({
+          text: '✅ Lecture terminée. Vérifiez les champs surlignés en orange.',
+          type: 'info',
+        })
+      }
+    } catch (err: unknown) {
+      setMessage({
+        text: `⚠️ ${humanizeError(err, 'Impossible de lire cette zone MRZ.')}`,
+        type: 'error',
+      })
+    } finally {
+      setIsScanning(false)
+      setScanStageText('')
+    }
+  }
+
+  // Rotation 90° dans les modales de recadrage
+  const handleRotatePhotoSource = async (deg: 90 | 270) => {
+    if (!photoSourceSrc) return
+    const rotated = await rotateImageDataUrl(photoSourceSrc, deg)
+    setPhotoSourceSrc(rotated)
+    const auto = await autoDetectAndCropNusuk(rotated)
+    setCropImgDims(auto.dims)
+    setCropBox(auto.cropBox)
+  }
+
+  const handleRotatePassportSource = async (deg: 90 | 270) => {
+    if (!passportSourceSrc) return
+    const rotated = await rotateImageDataUrl(passportSourceSrc, deg)
+    setPassportSourceSrc(rotated)
+    const auto = await detectMrzRegionAuto(rotated)
+    setPassportImgDims(auto.dims)
+    setPassportCropBox({ x: 0, y: 0, width: auto.dims.width, height: auto.dims.height })
+    setMrzImgDims(auto.dims)
+    setMrzCropBox(auto.region)
+  }
+
+  // Option 1-clic "Fond blanc pur IA (Nusuk)"
+  const handleToggleWhiteBackground = async () => {
+    if (whiteBgApplied && originalPhotoBackup) {
+      setPhotoFile(originalPhotoBackup.file)
+      setPhotoPreview(originalPhotoBackup.dataUrl)
+      setWhiteBgApplied(false)
+      setMessage({ text: "Photo rétablie avec son fond d'origine.", type: 'info' })
+      return
+    }
+
+    if (!photoPreview || isRemovingBg) return
+    setIsRemovingBg(true)
+    setMessage({
+      text: '⏳ Nettoyage du fond en blanc pur (norme Nusuk)…',
+      type: 'info',
+    })
+
+    try {
+      if (!originalPhotoBackup && photoFile) {
+        setOriginalPhotoBackup({ file: photoFile, dataUrl: photoPreview })
+      }
+      const cleaned = await applyPureWhiteBackgroundNusuk(photoPreview)
+      setPhotoFile(cleaned.file)
+      setPhotoPreview(cleaned.dataUrl)
+      setPhotoQuality((prev) =>
+        prev
+          ? { ...prev, sizeBytes: cleaned.sizeBytes, sizeOk: cleaned.sizeBytes <= 100 * 1024 }
+          : null
+      )
+      setWhiteBgApplied(true)
+      setMessage({
+        text: '✅ Fond blanc pur appliqué avec succès (480×680 < 100 Ko) !',
+        type: 'success',
+      })
+    } catch (err) {
+      console.warn('Erreur détourage IA:', err)
+      setMessage({
+        text: "⚠️ Impossible d'isoler le fond automatiquement sur cette image. La photo recadrée reste conservée.",
+        type: 'error',
+      })
+    } finally {
+      setIsRemovingBg(false)
+    }
+  }
+
+  // Scanners matériels TWAIN & Pleine Page
   const triggerTwainScan = async () => {
     setIsTwainScanning(true)
-    setMessage({ text: '⏳ Numérisation en cours sur le scanner...', type: 'info' })
+    setMessage({ text: '⏳ Numérisation en cours sur le scanner…', type: 'info' })
 
     if (isRunningInTauri()) {
       try {
@@ -940,15 +800,16 @@ export default function AjouterPelerin() {
         if (typeof tauriInvoke === 'function') {
           const rawResult: string = await tauriInvoke('scan_passport')
           if (rawResult) {
-            const dataUrl = rawResult.startsWith('data:') ? rawResult : `data:image/jpeg;base64,${rawResult}`
-            await processScannedPassportImage(dataUrl)
-            setMessage({ text: '✅ Passeport numérisé, photo extraite et informations remplies !', type: 'success' })
+            const dataUrl = rawResult.startsWith('data:')
+              ? rawResult
+              : `data:image/jpeg;base64,${rawResult}`
+            await executeFullPassportScan(dataUrl)
             setIsTwainScanning(false)
             return
           }
         }
       } catch (tauriErr) {
-        console.warn("Bascule vers le scanner local :", tauriErr)
+        console.warn('Bascule vers le scanner local :', tauriErr)
       }
     }
 
@@ -956,70 +817,86 @@ export default function AjouterPelerin() {
       const res = await fetch('http://127.0.0.1:18622/scan', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ format: 'jpg', quality: 90, resolution: 300 })
+        body: JSON.stringify({ format: 'jpg', quality: 92, resolution: 300 }),
       }).catch(async () => {
         return await fetch('http://127.0.0.1:9090/scan', { method: 'POST' })
       })
 
       if (!res || !res.ok) {
-        throw new Error("Aucun scanner détecté. Vérifiez que votre scanner est bien branché et allumé.")
+        throw new Error(
+          'Aucun scanner détecté. Vérifiez que votre scanner est bien branché et allumé.'
+        )
       }
 
       const data = await res.json()
       const rawImageBase64 = data.imageBase64 || data.image || data.data
-
       if (!rawImageBase64) {
-        throw new Error("Le scanner n'a renvoyé aucune image. Vérifiez que le passeport est bien posé sur la vitre.")
+        throw new Error(
+          "Le scanner n'a renvoyé aucune image. Vérifiez que le passeport est bien posé sur la vitre."
+        )
       }
 
-      const fullDataUrl = rawImageBase64.startsWith('data:') 
-        ? rawImageBase64 
+      const fullDataUrl = rawImageBase64.startsWith('data:')
+        ? rawImageBase64
         : `data:image/jpeg;base64,${rawImageBase64}`
 
-      await processScannedPassportImage(fullDataUrl)
-      setMessage({ text: '✅ Passeport numérisé, photo extraite et informations remplies !', type: 'success' })
+      await executeFullPassportScan(fullDataUrl)
     } catch (err: unknown) {
       console.error(err)
-      setMessage({ text: `⚠️ ${humanizeError(err, "Impossible de communiquer avec le scanner.")}`, type: 'error' })
+      setMessage({
+        text: `⚠️ ${humanizeError(err, 'Impossible de communiquer avec le scanner.')}`,
+        type: 'error',
+      })
     } finally {
       setIsTwainScanning(false)
     }
   }
 
-  const applyFullPageScanResult = async (res: any) => {
-    if (res.nom) setNom(res.nom)
-    if (res.prenom) setPrenom(res.prenom)
-    if (res.numPasseport) setPasseport(res.numPasseport)
-    if (res.sexe) setSexe(res.sexe)
-    if (res.dateNaissance) setDateNaissance(res.dateNaissance)
-    if (res.dateExpiration) setDateExpiration(res.dateExpiration)
+  const applyFullPageScanResult = async (res: Record<string, unknown>) => {
+    if (typeof res.nom === 'string' && res.nom) setNom(res.nom)
+    if (typeof res.prenom === 'string' && res.prenom) setPrenom(res.prenom)
+    if (typeof res.numPasseport === 'string' && res.numPasseport) setPasseport(res.numPasseport)
+    if (typeof res.sexe === 'string' && res.sexe) setSexe(res.sexe)
+    if (typeof res.dateNaissance === 'string' && res.dateNaissance)
+      setDateNaissance(res.dateNaissance)
+    if (typeof res.dateExpiration === 'string' && res.dateExpiration)
+      setDateExpiration(res.dateExpiration)
 
-    if (res.photoBase64) {
-      const rawDataUrl = res.photoBase64.startsWith('data:') 
-        ? res.photoBase64 
+    if (typeof res.photoBase64 === 'string' && res.photoBase64) {
+      const rawDataUrl = res.photoBase64.startsWith('data:')
+        ? res.photoBase64
         : `data:image/jpeg;base64,${res.photoBase64}`
+      setPhotoSourceSrc(rawDataUrl)
       const nusuk = await formatNusukSquare(rawDataUrl)
       setPhotoFile(nusuk.file)
       setPhotoPreview(nusuk.dataUrl)
+      setOriginalPhotoBackup({ file: nusuk.file, dataUrl: nusuk.dataUrl })
+      setWhiteBgApplied(false)
     }
 
-    if (res.pageFullBase64) {
-      const fullDataUrl = res.pageFullBase64.startsWith('data:') 
-        ? res.pageFullBase64 
+    if (typeof res.pageFullBase64 === 'string' && res.pageFullBase64) {
+      const fullDataUrl = res.pageFullBase64.startsWith('data:')
+        ? res.pageFullBase64
         : `data:image/jpeg;base64,${res.pageFullBase64}`
-      setCropImageSrc(fullDataUrl)
+      setPassportSourceSrc(fullDataUrl)
       try {
         const formatted = await compressAndFormatPassportNusuk(fullDataUrl)
         setFileToUpload(formatted.file)
       } catch {
-        const fullFile = base64ToFile(fullDataUrl, `scan_complet_${res.numPasseport || Date.now()}.jpg`)
+        const fullFile = base64ToFile(
+          fullDataUrl,
+          `scan_complet_${String(res.numPasseport || Date.now())}.jpg`
+        )
         setFileToUpload(fullFile)
       }
       if (!res.photoBase64) {
         try {
+          setPhotoSourceSrc(fullDataUrl)
           const autoCrop = await autoDetectAndCropNusuk(fullDataUrl)
           setPhotoFile(autoCrop.file)
           setPhotoPreview(autoCrop.dataUrl)
+          setPhotoQuality(autoCrop.quality)
+          setOriginalPhotoBackup({ file: autoCrop.file, dataUrl: autoCrop.dataUrl })
           setCropBox(autoCrop.cropBox)
           setCropImgDims(autoCrop.dims)
         } catch {}
@@ -1031,7 +908,6 @@ export default function AjouterPelerin() {
     if (isFullPageListening) {
       if (fullPageWsRef.current) fullPageWsRef.current.close()
       setIsFullPageListening(false)
-      setIsFullPageConnected(false)
       setMessage({ text: 'Le scanner automatique est désactivé.', type: 'info' })
       return
     }
@@ -1041,65 +917,271 @@ export default function AjouterPelerin() {
         // @ts-expect-error Tauri API globale
         const tauriInvoke = window.__TAURI__?.invoke || window.__TAURI_INTERNALS__?.invoke
         if (typeof tauriInvoke === 'function') {
-          setMessage({ text: '⏳ Posez le passeport sur le scanner...', type: 'info' })
-          const res: any = await tauriInvoke('scan_full_page')
+          setMessage({ text: '⏳ Posez le passeport sur le scanner…', type: 'info' })
+          const res = await tauriInvoke('scan_full_page')
           if (res) {
-            await applyFullPageScanResult(res)
-            setMessage({ text: '✅ Passeport et photo récupérés avec succès !', type: 'success' })
+            await applyFullPageScanResult(res as Record<string, unknown>)
+            setMessage({
+              text: '✅ Passeport et photo récupérés avec succès !',
+              type: 'success',
+            })
             return
           }
         }
       } catch (e) {
-        console.warn("Bascule vers le mode standard :", e)
+        console.warn('Bascule vers le mode standard :', e)
       }
     }
 
-    const wsUrl = 'ws://127.0.0.1:9090'
-    setMessage({ text: 'Connexion au scanner en cours...', type: 'info' })
-
+    setMessage({ text: 'Connexion au scanner en cours…', type: 'info' })
     try {
-      const ws = new WebSocket(wsUrl)
+      const ws = new WebSocket('ws://127.0.0.1:9090')
       fullPageWsRef.current = ws
 
       ws.onopen = () => {
-        setIsFullPageConnected(true)
         setIsFullPageListening(true)
-        setMessage({ text: '🟢 Scanner prêt : posez le passeport sur la vitre.', type: 'success' })
+        setMessage({
+          text: '🟢 Scanner prêt : posez le passeport sur la vitre.',
+          type: 'success',
+        })
       }
-
       ws.onmessage = async (event) => {
         try {
           const res = JSON.parse(event.data)
           await applyFullPageScanResult(res)
-          setMessage({ text: '✅ Passeport et photo récupérés avec succès !', type: 'success' })
+          setMessage({
+            text: '✅ Passeport et photo récupérés avec succès !',
+            type: 'success',
+          })
         } catch (e) {
           console.error(e)
         }
       }
-
       ws.onerror = () => {
-        setIsFullPageConnected(false)
         setIsFullPageListening(false)
-        setMessage({ text: '⚠️ Le scanner automatique ne répond pas. Vérifiez qu’il est bien branché et allumé.', type: 'error' })
+        setMessage({
+          text: "⚠️ Le scanner automatique ne répond pas. Vérifiez qu'il est bien branché et allumé.",
+          type: 'error',
+        })
       }
-
       ws.onclose = () => {
-        setIsFullPageConnected(false)
         setIsFullPageListening(false)
       }
     } catch {
-      setIsFullPageConnected(false)
       setIsFullPageListening(false)
     }
   }
 
-  const resetForm = () => {
-    setNom(''); setPrenom(''); setReference(''); setPasseport(''); setPhone(''); setSexe(''); setDateNaissance('')
-    setDateExpiration(''); setDateInscription(new Date().toISOString().split('T')[0])
-    setCampagne(selectedYear === 'all' ? new Date().getFullYear() : Number(selectedYear))
-    setAssocie(''); setTotal(0); setTotalInput(''); setPaye(0); setPayeInput(''); setNomPackage(''); setFileToUpload(null)
-    setNotes(''); setPhotoFile(null); setPhotoPreview(null); setCropImageSrc(null); setMrzBuffer('')
+  // Douchette physique USB HID (avec support AZERTY automatique + checksums ICAO)
+  const evaluateMrzBuffer = (buffer: string) => {
+    const parsed = parseMrzSmart(buffer, 'douchette')
+    if (parsed && (parsed.nom || parsed.numPasseport || parsed.prenom)) {
+      applyMrzFields(parsed)
+      if (parsed.unverifiedFields.length === 0) {
+        setMessage({
+          text: '✅ Passeport lu avec succès !',
+          type: 'success',
+        })
+      } else {
+        setMessage({
+          text: '⚠️ Lecture partielle par douchette : vérifiez les champs en orange.',
+          type: 'info',
+        })
+      }
+      setShowPhysicalScannerInput(false)
+      setMrzBuffer('')
+    }
+  }
+
+  const handlePhysicalScanChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const newVal = e.target.value
+    setMrzBuffer(newVal)
+    if (mrzTimeoutRef.current) clearTimeout(mrzTimeoutRef.current)
+    if (newVal.length >= 20) {
+      mrzTimeoutRef.current = setTimeout(() => {
+        evaluateMrzBuffer(newVal)
+      }, 110)
+    }
+  }
+
+  const handlePhysicalScanKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter') {
+      e.preventDefault()
+      if (mrzTimeoutRef.current) clearTimeout(mrzTimeoutRef.current)
+      mrzTimeoutRef.current = setTimeout(() => {
+        evaluateMrzBuffer(mrzBuffer)
+      }, 40)
+    }
+  }
+
+  // Ajout séparé de la copie du passeport (image ou PDF)
+  const handlePassportFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const selectedFile = e.target.files?.[0]
+    e.target.value = ''
+    if (!selectedFile) return
+
+    if (selectedFile.type.startsWith('image/')) {
+      const { dataUrl } = await readFileAsCleanDataUrl(selectedFile, 2200)
+      setPassportSourceSrc(dataUrl)
+
+      const [formattedRes, faceRes] = await Promise.allSettled([
+        compressAndFormatPassportNusuk(dataUrl),
+        !photoFile ? autoDetectAndCropNusuk(dataUrl) : Promise.resolve(null),
+      ])
+
+      if (formattedRes.status === 'fulfilled') {
+        setFileToUpload(formattedRes.value.file)
+      } else {
+        setFileToUpload(selectedFile)
+      }
+
+      if (faceRes.status === 'fulfilled' && faceRes.value) {
+        const result = faceRes.value
+        setPhotoSourceSrc(dataUrl)
+        setPhotoFile(result.file)
+        setPhotoPreview(result.dataUrl)
+        setPhotoQuality(result.quality)
+        setOriginalPhotoBackup({ file: result.file, dataUrl: result.dataUrl })
+        setWhiteBgApplied(false)
+        setCropBox(result.cropBox)
+        setCropImgDims(result.dims)
+        setMessage({
+          text: "✅ Copie du passeport jointe et photo d'identité préparée automatiquement !",
+          type: 'success',
+        })
+      } else {
+        setMessage({ text: '✅ Copie du passeport ajoutée (< 400 Ko).', type: 'success' })
+      }
+    } else {
+      setFileToUpload(selectedFile)
+      setMessage({ text: '✅ Document PDF du passeport joint.', type: 'success' })
+    }
+  }
+
+  // Ajout séparé d'une photo d'identité dédiée (SANS écraser passportSourceSrc !)
+  const handlePhotoFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    e.target.value = ''
+    if (!file) return
+
+    try {
+      const { dataUrl } = await readFileAsCleanDataUrl(file, 2000)
+      setPhotoSourceSrc(dataUrl)
+      const autoCrop = await autoDetectAndCropNusuk(dataUrl)
+      setPhotoFile(autoCrop.file)
+      setPhotoPreview(autoCrop.dataUrl)
+      setPhotoQuality(autoCrop.quality)
+      setOriginalPhotoBackup({ file: autoCrop.file, dataUrl: autoCrop.dataUrl })
+      setWhiteBgApplied(false)
+      setCropBox(autoCrop.cropBox)
+      setCropImgDims(autoCrop.dims)
+      setMessage({
+        text: "✅ Photo d'identité alignée au format Nusuk (480×680 < 100 Ko) !",
+        type: 'success',
+      })
+    } catch {
+      setCropModalOpen(true)
+    }
+  }
+
+  const openPhotoCropper = async () => {
+    const src = photoSourceSrc || passportSourceSrc
+    if (!src) return
+    if (!photoSourceSrc) setPhotoSourceSrc(src)
+    const img = await loadHtmlImage(src)
+    setCropImgDims({ width: img.width, height: img.height })
+    setCropModalOpen(true)
+  }
+
+  const handleConfirmCropNusuk = async () => {
+    const src = photoSourceSrc || passportSourceSrc
+    if (!src) return
+    try {
+      const img = await loadHtmlImage(src)
+      const rendered = await renderNusukPhoto(img, cropBox.x, cropBox.y, cropBox.size)
+      setPhotoFile(rendered.file)
+      setPhotoPreview(rendered.dataUrl)
+      setOriginalPhotoBackup({ file: rendered.file, dataUrl: rendered.dataUrl })
+      setWhiteBgApplied(false)
+      setPhotoQuality({
+        width: 480,
+        height: 680,
+        sizeBytes: rendered.sizeBytes,
+        sizeOk: rendered.sizeBytes <= 100 * 1024,
+        faceDetected: true,
+        landmarksAligned: true,
+        tiltCorrectedDeg: 0,
+      })
+      setCropModalOpen(false)
+      setMessage({ text: '✅ Photo du pèlerin ajustée (480×680) !', type: 'success' })
+    } catch {
+      setMessage({
+        text: '⚠️ Impossible de recadrer la photo. Veuillez réessayer.',
+        type: 'error',
+      })
+    }
+  }
+
+  const openPassportCropper = async () => {
+    if (!passportSourceSrc) return
+    const img = await loadHtmlImage(passportSourceSrc)
+    setPassportImgDims({ width: img.width, height: img.height })
+    setPassportCropBox({ x: 0, y: 0, width: img.width, height: img.height })
+    setPassportCropModalOpen(true)
+  }
+
+  const handleConfirmPassportCrop = async () => {
+    if (!passportSourceSrc) return
+    try {
+      const formatted = await compressAndFormatPassportNusuk(passportSourceSrc, passportCropBox)
+      setFileToUpload(formatted.file)
+      setPassportCropModalOpen(false)
+      setMessage({ text: '✅ Copie du passeport recadrée (< 400 Ko) !', type: 'success' })
+    } catch {
+      setMessage({
+        text: '⚠️ Impossible de recadrer le passeport. Veuillez réessayer.',
+        type: 'error',
+      })
+    }
+  }
+
+  const resetForm = (keepGroupAndPackage = false) => {
+    setNom('')
+    setPrenom('')
+    setPasseport('')
+    setPhone('')
+    setSexe('')
+    setDateNaissance('')
+    setDateExpiration('')
+    setDateInscription(new Date().toISOString().split('T')[0])
+    if (!keepGroupAndPackage) {
+      setCampagne(selectedYear === 'all' ? new Date().getFullYear() : Number(selectedYear))
+      setReference('')
+      setAssocie('')
+      setTotal(0)
+      setTotalInput('')
+      setNomPackage('')
+    }
+    setPaye(0)
+    setPayeInput('')
+    setNotes('')
+    setFileToUpload(null)
+    setPhotoFile(null)
+    setPhotoPreview(null)
+    setPhotoQuality(null)
+    setOriginalPhotoBackup(null)
+    setWhiteBgApplied(false)
+    setPassportSourceSrc(null)
+    setPhotoSourceSrc(null)
+    setMrzAudit(null)
+    setConfirmedFields({})
+    setConfirmDuplicateOverride(false)
+    setMrzBuffer('')
+    setSavedSummary(null)
     setMessage({ text: '', type: '' })
+    try {
+      sessionStorage.removeItem(DRAFT_STORAGE_KEY)
+    } catch {}
   }
 
   const sanitizeAmount = (value: string) => value.replace(/\D/g, '')
@@ -1112,363 +1194,57 @@ export default function AjouterPelerin() {
     return digits === '' ? '' : Number(digits).toLocaleString('fr-FR')
   }
 
-  const evaluateMrzBuffer = (buffer: string) => {
-    const parsed = parseMrzRawLines(buffer)
-    if (parsed && (parsed.nom || parsed.numPasseport || parsed.prenom)) {
-      if (parsed.nom) setNom(parsed.nom)
-      if (parsed.prenom) setPrenom(parsed.prenom)
-      if (parsed.numPasseport) setPasseport(parsed.numPasseport)
-      if (parsed.sexe) setSexe(parsed.sexe)
-      if (parsed.dateNaissance) setDateNaissance(parsed.dateNaissance)
-      if (parsed.dateExpiration) setDateExpiration(parsed.dateExpiration)
-
-      const isIncomplete = !parsed.nom || !parsed.numPasseport || !parsed.dateNaissance
-      if (isIncomplete) {
-        setMessage({ 
-          text: "⚠️ Certaines informations ont été remplies. Veuillez vérifier et compléter les champs manquants.", 
-          type: 'info' 
-        })
-      } else {
-        setMessage({ text: "✅ Passeport lu avec succès ! Vérifiez les informations.", type: 'success' })
-      }
-
-      setShowPhysicalScannerInput(false)
-      setMrzBuffer('')
-    }
-  }
-
-  const handlePhysicalScanChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const newVal = e.target.value
-    setMrzBuffer(newVal)
-
-    if (mrzTimeoutRef.current) clearTimeout(mrzTimeoutRef.current)
-    if (newVal.length >= 15) {
-      mrzTimeoutRef.current = setTimeout(() => {
-        evaluateMrzBuffer(newVal)
-      }, 100)
-    }
-  }
-
-  const handlePhysicalScanKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === 'Enter') {
-      e.preventDefault()
-      if (mrzTimeoutRef.current) clearTimeout(mrzTimeoutRef.current)
-      mrzTimeoutRef.current = setTimeout(() => {
-        evaluateMrzBuffer(mrzBuffer)
-      }, 50)
-    }
-  }
-
-  const handlePassportFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const selectedFile = e.target.files?.[0]
-    e.target.value = ''
-    if (!selectedFile) return
-
-    if (selectedFile.type.startsWith('image/')) {
-      const reader = new FileReader()
-      reader.onload = async () => {
-        const dataUrl = reader.result as string
-        setCropImageSrc(dataUrl)
-
-        const [formattedRes, faceRes] = await Promise.allSettled([
-          compressAndFormatPassportNusuk(dataUrl),
-          autoDetectAndCropNusuk(dataUrl),
-        ])
-
-        if (formattedRes.status === 'fulfilled') {
-          setFileToUpload(formattedRes.value.file)
-        } else {
-          setFileToUpload(selectedFile)
-        }
-
-        if (faceRes.status === 'fulfilled') {
-          const result = faceRes.value
-          setPhotoFile(result.file)
-          setPhotoPreview(result.dataUrl)
-          setCropBox(result.cropBox)
-          setCropImgDims(result.dims)
-
-          if (result.detected) {
-            setMessage({ text: "✅ Passeport ajouté et photo d'identité préparée automatiquement !", type: 'success' })
-          } else {
-            setMessage({ text: "✅ Passeport ajouté ! Vous pouvez ajuster la photo si besoin.", type: 'success' })
-          }
-        } else {
-          setCropModalOpen(true)
-        }
-      }
-      reader.readAsDataURL(selectedFile)
-    } else {
-      setFileToUpload(selectedFile)
-    }
-  }
-
-  const handlePhotoFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    e.target.value = ''
-    if (!file) return
-
-    const reader = new FileReader()
-    reader.onload = async () => {
-      const dataUrl = reader.result as string
-      setCropImageSrc(dataUrl)
-
-      try {
-        const autoCrop = await autoDetectAndCropNusuk(dataUrl)
-        setPhotoFile(autoCrop.file)
-        setPhotoPreview(autoCrop.dataUrl)
-        setCropBox(autoCrop.cropBox)
-        setCropImgDims(autoCrop.dims)
-        setMessage({ text: "✅ Photo d'identité ajoutée et préparée avec succès !", type: 'success' })
-      } catch {
-        setCropModalOpen(true)
-      }
-    }
-    reader.readAsDataURL(file)
-  }
-
-  const openPassportCropper = () => {
-    if (!cropImageSrc) return
-    const img = new Image()
-    img.onload = () => {
-      setPassportImgDims({ width: img.width, height: img.height })
-      setPassportCropBox({
-        x: 0,
-        y: 0,
-        width: img.width,
-        height: img.height
-      })
-      setPassportCropModalOpen(true)
-    }
-    img.src = cropImageSrc
-  }
-
-  const handleConfirmPassportCrop = async () => {
-    if (!cropImageSrc) return
-    try {
-      const formatted = await compressAndFormatPassportNusuk(cropImageSrc, passportCropBox)
-      setFileToUpload(formatted.file)
-      setPassportCropModalOpen(false)
-      setMessage({ text: "✅ Passeport recadré avec succès !", type: 'success' })
-    } catch {
-      setMessage({ text: "⚠️ Impossible de recadrer le passeport. Veuillez réessayer.", type: 'error' })
-    }
-  }
-
-  const handleConfirmCropNusuk = () => {
-    if (!cropImageSrc) return
-    const img = new Image()
-    img.crossOrigin = 'anonymous'
-    img.onload = async () => {
-      try {
-        const rendered = await renderNusukPhoto(img, cropBox.x, cropBox.y, cropBox.size)
-        setPhotoFile(rendered.file)
-        setPhotoPreview(rendered.dataUrl)
-        setCropModalOpen(false)
-        setMessage({ text: "✅ Photo du pèlerin ajustée avec succès !", type: 'success' })
-      } catch {
-        setMessage({ text: "⚠️ Impossible de recadrer la photo. Veuillez réessayer.", type: 'error' })
-      }
-    }
-    img.src = cropImageSrc
-  }
-
-  const handlePointerDownBox = (e: React.PointerEvent) => {
-    e.stopPropagation()
-    isDraggingRef.current = true
-    dragStartRef.current = { mouseX: e.clientX, mouseY: e.clientY, boxX: cropBox.x, boxY: cropBox.y, boxSize: cropBox.size }
-  }
-  const handlePointerDownHandle = (e: React.PointerEvent) => {
-    e.stopPropagation()
-    isResizingRef.current = true
-    dragStartRef.current = { mouseX: e.clientX, mouseY: e.clientY, boxX: cropBox.x, boxY: cropBox.y, boxSize: cropBox.size }
-  }
-  const handlePointerMoveContainer = (e: React.PointerEvent) => {
-    if (!cropContainerRef.current) return
-    const rect = cropContainerRef.current.getBoundingClientRect()
-    const scaleX = cropImgDims.width / rect.width
-
-    if (isDraggingRef.current) {
-      const deltaX = (e.clientX - dragStartRef.current.mouseX) * scaleX
-      const deltaY = (e.clientY - dragStartRef.current.mouseY) * scaleX
-      const nextX = Math.max(0, Math.min(cropImgDims.width - cropBox.size, dragStartRef.current.boxX + deltaX))
-      const nextY = Math.max(0, Math.min(cropImgDims.height - cropBox.size * NUSUK_PHOTO_ASPECT, dragStartRef.current.boxY + deltaY))
-      setCropBox(prev => ({ ...prev, x: nextX, y: nextY }))
-    } else if (isResizingRef.current) {
-      const delta = (e.clientX - dragStartRef.current.mouseX) * scaleX
-      const nextSize = Math.max(80, Math.min(cropImgDims.width - cropBox.x, (cropImgDims.height - cropBox.y) / NUSUK_PHOTO_ASPECT, dragStartRef.current.boxSize + delta))
-      setCropBox(prev => ({ ...prev, size: nextSize }))
-    }
-  }
-  const handlePointerUpContainer = () => {
-    isDraggingRef.current = false
-    isResizingRef.current = false
-  }
-
-  const handlePassportPointerDownBox = (e: React.PointerEvent) => {
-    e.stopPropagation()
-    isPassportDraggingRef.current = true
-    passportDragStartRef.current = { mouseX: e.clientX, mouseY: e.clientY, boxX: passportCropBox.x, boxY: passportCropBox.y, boxW: passportCropBox.width, boxH: passportCropBox.height }
-  }
-  const handlePassportPointerDownHandle = (e: React.PointerEvent) => {
-    e.stopPropagation()
-    isPassportResizingRef.current = true
-    passportDragStartRef.current = { mouseX: e.clientX, mouseY: e.clientY, boxX: passportCropBox.x, boxY: passportCropBox.y, boxW: passportCropBox.width, boxH: passportCropBox.height }
-  }
-  const handlePassportPointerMoveContainer = (e: React.PointerEvent) => {
-    if (!passportContainerRef.current) return
-    const rect = passportContainerRef.current.getBoundingClientRect()
-    const scaleX = passportImgDims.width / rect.width
-
-    if (isPassportDraggingRef.current) {
-      const deltaX = (e.clientX - passportDragStartRef.current.mouseX) * scaleX
-      const deltaY = (e.clientY - passportDragStartRef.current.mouseY) * scaleX
-      const nextX = Math.max(0, Math.min(passportImgDims.width - passportCropBox.width, passportDragStartRef.current.boxX + deltaX))
-      const nextY = Math.max(0, Math.min(passportImgDims.height - passportCropBox.height, passportDragStartRef.current.boxY + deltaY))
-      setPassportCropBox(prev => ({ ...prev, x: nextX, y: nextY }))
-    } else if (isPassportResizingRef.current) {
-      const deltaX = (e.clientX - passportDragStartRef.current.mouseX) * scaleX
-      const nextW = Math.max(150, Math.min(passportImgDims.width - passportCropBox.x, passportDragStartRef.current.boxW + deltaX))
-      const nextH = Math.max(100, Math.min(passportImgDims.height - passportCropBox.y, passportDragStartRef.current.boxH + ((e.clientY - passportDragStartRef.current.mouseY) * scaleX)))
-      setPassportCropBox(prev => ({ ...prev, width: nextW, height: nextH }))
-    }
-  }
-  const handlePassportPointerUpContainer = () => {
-    isPassportDraggingRef.current = false
-    isPassportResizingRef.current = false
-  }
-
-  const handleMrzPointerDownBox = (e: React.PointerEvent) => {
-    e.stopPropagation()
-    isMrzDraggingRef.current = true
-    mrzDragStartRef.current = { mouseX: e.clientX, mouseY: e.clientY, boxX: mrzCropBox.x, boxY: mrzCropBox.y, boxW: mrzCropBox.width, boxH: mrzCropBox.height }
-  }
-  const handleMrzPointerDownHandle = (e: React.PointerEvent) => {
-    e.stopPropagation()
-    isMrzResizingRef.current = true
-    mrzDragStartRef.current = { mouseX: e.clientX, mouseY: e.clientY, boxX: mrzCropBox.x, boxY: mrzCropBox.y, boxW: mrzCropBox.width, boxH: mrzCropBox.height }
-  }
-  const handleMrzPointerMoveContainer = (e: React.PointerEvent) => {
-    if (!mrzContainerRef.current) return
-    const rect = mrzContainerRef.current.getBoundingClientRect()
-    const scaleX = mrzImgDims.width / rect.width
-
-    if (isMrzDraggingRef.current) {
-      const deltaX = (e.clientX - mrzDragStartRef.current.mouseX) * scaleX
-      const deltaY = (e.clientY - mrzDragStartRef.current.mouseY) * scaleX
-      const nextX = Math.max(0, Math.min(mrzImgDims.width - mrzCropBox.width, mrzDragStartRef.current.boxX + deltaX))
-      const nextY = Math.max(0, Math.min(mrzImgDims.height - mrzCropBox.height, mrzDragStartRef.current.boxY + deltaY))
-      setMrzCropBox(prev => ({ ...prev, x: nextX, y: nextY }))
-    } else if (isMrzResizingRef.current) {
-      const deltaX = (e.clientX - mrzDragStartRef.current.mouseX) * scaleX
-      const deltaY = (e.clientY - mrzDragStartRef.current.mouseY) * scaleX
-      const nextW = Math.max(100, Math.min(mrzImgDims.width - mrzCropBox.x, mrzDragStartRef.current.boxW + deltaX))
-      const nextH = Math.max(30, Math.min(mrzImgDims.height - mrzCropBox.y, mrzDragStartRef.current.boxH + deltaY))
-      setMrzCropBox(prev => ({ ...prev, width: nextW, height: nextH }))
-    }
-  }
-  const handleMrzPointerUpContainer = () => {
-    isMrzDraggingRef.current = false
-    isMrzResizingRef.current = false
-  }
-
-  const handleAutoFill = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const scanFile = e.target.files?.[0]
-    e.target.value = ''
-    if (!scanFile) return
-
-    pendingScanFileRef.current = scanFile
-    setMessage({ text: "⏳ Préparation de l'aperçu du passeport...", type: 'info' })
-
-    try {
-      const optimizedImageUrl = await preparePassportImage(scanFile)
-      setMrzPreviewImageSrc(optimizedImageUrl)
-
-      const img = new Image()
-      img.onload = () => {
-        setMrzImgDims({ width: img.width, height: img.height })
-        
-        const defaultW = Math.round(img.width * 0.94)
-        const defaultH = Math.round(img.height * 0.25)
-        const defaultX = Math.round((img.width - defaultW) / 2)
-        const defaultY = Math.round(img.height - defaultH - (img.height * 0.03))
-
-        setMrzCropBox({
-          x: Math.max(0, defaultX),
-          y: Math.max(0, defaultY),
-          width: defaultW,
-          height: defaultH
-        })
-
-        setMrzPreviewModalOpen(true)
-        setMessage({ text: '', type: '' })
-      }
-      img.src = optimizedImageUrl
-    } catch (err: unknown) {
-      console.error(err)
-      setMessage({ text: `⚠️ ${humanizeError(err, "Impossible d'ouvrir cette image.")}`, type: 'error' })
-    }
-  }
-
-  const handleConfirmAndRunMrzScan = async () => {
-    if (!mrzPreviewImageSrc) return
-    setMrzPreviewModalOpen(false)
-    setIsScanning(true)
-    setMessage({ text: "⏳ Lecture automatique du passeport en cours...", type: 'info' })
-
-    const fullImageUrl = mrzPreviewImageSrc
-    setCropImageSrc(fullImageUrl)
-
-    const filePromise: Promise<File | null> = compressAndFormatPassportNusuk(fullImageUrl)
-      .then((f) => f.file)
-      .catch(() => pendingScanFileRef.current)
-    const facePromise = autoDetectAndCropNusuk(fullImageUrl).catch(() => null)
-
-    try {
-      const mrzOnlyBase64 = await extractMrzRegionBase64(fullImageUrl, mrzCropBox)
-      const data = await postMrzOcr(mrzOnlyBase64)
-
-      if (data.nom) setNom(data.nom)
-      if (data.prenom) setPrenom(data.prenom)
-      if (data.numPasseport) setPasseport(data.numPasseport)
-      if (data.sexe) setSexe(data.sexe)
-      if (data.dateNaissance) setDateNaissance(data.dateNaissance)
-      if (data.dateExpiration) setDateExpiration(data.dateExpiration)
-
-      const [nusukFile, autoCrop] = await Promise.all([filePromise, facePromise])
-
-      if (nusukFile) setFileToUpload(nusukFile)
-
-      if (autoCrop) {
-        setPhotoFile(autoCrop.file)
-        setPhotoPreview(autoCrop.dataUrl)
-        setCropBox(autoCrop.cropBox)
-        setCropImgDims(autoCrop.dims)
-        setMessage({ text: "✅ Passeport lu et photo extraite avec succès !", type: 'success' })
-      } else {
-        setMessage({ text: "✅ Passeport lu avec succès !", type: 'success' })
-      }
-
-    } catch (err: unknown) {
-      console.error(err)
-      setMessage({ text: `⚠️ ${humanizeError(err, "Impossible de lire automatiquement le passeport.")}`, type: 'error' })
-    } finally {
-      setIsScanning(false)
+  const applyPackageSuggestion = (pkg: {
+    name: string
+    price: number
+    devise: HajjCurrency
+  }) => {
+    setNomPackage(pkg.name)
+    if (total === 0 && pkg.price > 0) {
+      setDevise(pkg.devise)
+      setTotal(pkg.price)
+      setTotalInput(formatAmount(pkg.price))
     }
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (loading) return
+
     if (!agenceId) {
       setMessage({
         text: profileReady
           ? "⚠️ Votre compte n'est rattaché à aucune agence. Veuillez contacter l'administrateur."
-          : "⏳ Chargement de votre espace en cours, veuillez patienter...",
-        type: 'error'
+          : '⏳ Chargement de votre espace en cours, veuillez patienter…',
+        type: 'error',
       })
       return
     }
+
+    if (isOverpaid) {
+      setMessage({
+        text: "⚠️ L'acompte saisi dépasse le prix total du forfait. Vérifiez les montants.",
+        type: 'error',
+      })
+      return
+    }
+
+    if (pilgrimAgeInfo?.invalid) {
+      setMessage({
+        text: '⚠️ La date de naissance semble invalide. Veuillez la vérifier avant enregistrement.',
+        type: 'error',
+      })
+      return
+    }
+
+    if (duplicatePassportMatch?.isSameCampagne && !confirmDuplicateOverride) {
+      setMessage({
+        text: '⚠️ Ce numéro de passeport existe déjà dans cette campagne. Cochez la confirmation de doublon si vous souhaitez vraiment créer une seconde fiche.',
+        type: 'error',
+      })
+      return
+    }
+
     setLoading(true)
     try {
       const [uploadedDoc, uploadedPhoto] = await Promise.all([
@@ -1478,13 +1254,14 @@ export default function AjouterPelerin() {
 
       const fileUrl = uploadedDoc?.path || ''
       const photoUrl = uploadedPhoto?.path || ''
+      const newId = crypto.randomUUID()
 
       const { error } = await supabase.from('pelerins').insert({
-        id: crypto.randomUUID(),
-        nom_complet: nom.trim(),
-        prenom: prenom.trim(),
-        reference: reference.trim() || null,
-        num_passeport: passeport.trim() || null,
+        id: newId,
+        nom_complet: nom.trim().toUpperCase(),
+        prenom: prenom.trim().toUpperCase(),
+        reference: reference.trim().toUpperCase() || null,
+        num_passeport: passeport.trim().toUpperCase() || null,
         telephone_pelerin: phone.trim() || null,
         sexe: sexe || null,
         date_naissance: dateNaissance || null,
@@ -1494,37 +1271,181 @@ export default function AjouterPelerin() {
         prix_package: total,
         total_paye: paye,
         devise,
-        nom_package: nomPackage.trim() || null,
+        nom_package: nomPackage.trim().toUpperCase() || null,
         document_url: fileUrl || null,
         photo_url: photoUrl || null,
         notes: notes.trim() || null,
         agence_id: agenceId,
-        agence_ou_personne_associee: associe.trim() || null,
+        agence_ou_personne_associee: associe.trim().toUpperCase() || null,
         created_by_name: workProfile?.name?.trim() || null,
         created_by_role: workProfile?.profile_type || null,
         created_at: new Date().toISOString(),
       })
       if (error) throw error
 
-      setMessage({ text: "✅ Le dossier du pèlerin a été enregistré avec succès !", type: 'success' })
-      if (resetTimeoutRef.current) clearTimeout(resetTimeoutRef.current)
-      resetTimeoutRef.current = setTimeout(resetForm, 2000)
+      try {
+        sessionStorage.removeItem(DRAFT_STORAGE_KEY)
+      } catch {}
+
+      setSavedSummary({
+        id: newId,
+        nomComplet: `${nom.trim().toUpperCase()} ${prenom.trim().toUpperCase()}`.trim(),
+        numPasseport: passeport.trim().toUpperCase(),
+        reste: Math.max(0, total - paye),
+        devise,
+      })
+      setMessage({
+        text: '✅ Le dossier du pèlerin a été enregistré avec succès !',
+        type: 'success',
+      })
     } catch (err: unknown) {
       console.error(err)
-      setMessage({ text: `⚠️ ${humanizeError(err, "Impossible d'enregistrer le dossier. Vérifiez votre connexion et réessayez.")}`, type: 'error' })
+      setMessage({
+        text: `⚠️ ${humanizeError(
+          err,
+          "Impossible d'enregistrer le dossier. Vérifiez votre connexion et réessayez."
+        )}`,
+        type: 'error',
+      })
     } finally {
       setLoading(false)
     }
   }
 
+  // ── Indicateur de conformité Nusuk du dossier ──
+  const nusukChecklist = [
+    { label: 'Identité', ok: Boolean(nom.trim() && prenom.trim() && sexe) },
+    {
+      label: 'Passeport valide',
+      ok: Boolean(passeport.trim() && passportValidityInfo.status === 'valid'),
+    },
+    { label: 'Photo 480×680', ok: Boolean(photoFile) },
+    { label: 'Copie < 400 Ko', ok: Boolean(fileToUpload) },
+  ]
+
+  // ── Composants réutilisés Mobile & PC pour éviter les divergences ──
+  const renderMrzVerificationBanner = () => {
+    if (!mrzAudit) return null
+    const pendingUnverified = mrzAudit.unverifiedFields.filter((f) => !confirmedFields[f])
+    const allOk = pendingUnverified.length === 0
+
+    return (
+      <div
+        className={`p-3.5 rounded-2xl border text-xs space-y-1.5 ${
+          allOk
+            ? 'bg-emerald-50/90 border-emerald-200 text-emerald-900'
+            : 'bg-amber-50/95 border-amber-300 text-amber-950'
+        }`}
+      >
+        <div className="flex items-center justify-between gap-2">
+          <span className="font-black flex items-center gap-1.5">
+            {allOk ? (
+              <>
+                <ShieldCheck size={16} className="text-emerald-600 shrink-0" />
+                <span>Lecture rapide vérifiée</span>
+              </>
+            ) : (
+              <>
+                <AlertTriangle size={16} className="text-amber-600 shrink-0" />
+                <span>Vérification conseillée sur {pendingUnverified.length} champ(s)</span>
+              </>
+            )}
+          </span>
+          {passportSourceSrc && (
+            <button
+              type="button"
+              onClick={openManualMrzModal}
+              className="text-[11px] font-black underline cursor-pointer shrink-0"
+            >
+              Relire le code
+            </button>
+          )}
+        </div>
+        {!allOk && (
+          <p className="text-[11px] font-semibold">
+            Contrôlez les champs encadrés en orange avant d&apos;enregistrer.
+          </p>
+        )}
+      </div>
+    )
+  }
+
+  const renderDuplicateWarning = () => {
+    if (!duplicatePassportMatch) return null
+    const { record, isSameCampagne } = duplicatePassportMatch
+    return (
+      <div
+        className={`p-3.5 rounded-2xl border text-xs space-y-2 ${
+          isSameCampagne
+            ? 'bg-rose-50 border-rose-300 text-rose-900'
+            : 'bg-blue-50 border-blue-200 text-blue-900'
+        }`}
+      >
+        <div className="flex items-start justify-between gap-2">
+          <div className="space-y-0.5">
+            <p className="font-black flex items-center gap-1.5">
+              <AlertTriangle
+                size={15}
+                className={isSameCampagne ? 'text-rose-600 shrink-0' : 'text-blue-600 shrink-0'}
+              />
+              <span>
+                {isSameCampagne
+                  ? `Passeport déjà inscrit en Campagne ${record.campagne}`
+                  : `Ce passeport figure déjà en Campagne ${record.campagne || 'précédente'}`}
+              </span>
+            </p>
+            <p className="font-bold text-[11px]">
+              {record.nom_complet} {record.prenom}
+            </p>
+          </div>
+          <Link
+            href={`/hajj/pelerin?id=${record.id}`}
+            className="px-2.5 py-1.5 rounded-xl bg-white border border-current/20 font-black text-[11px] flex items-center gap-1 shrink-0"
+          >
+            <span>Voir fiche</span>
+            <ExternalLink size={12} />
+          </Link>
+        </div>
+
+        {isSameCampagne && (
+          <label className="flex items-center gap-2 pt-1 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={confirmDuplicateOverride}
+              onChange={(e) => setConfirmDuplicateOverride(e.target.checked)}
+              className="w-4 h-4 rounded accent-rose-600"
+            />
+            <span className="text-[11px] font-bold">
+              Je confirme vouloir créer quand même une nouvelle fiche
+            </span>
+          </label>
+        )}
+      </div>
+    )
+  }
+
+  const renderFieldVerifyBadge = (field: MrzFieldKey) => {
+    if (!isFieldFlagged(field)) return null
+    return (
+      <button
+        type="button"
+        onClick={() => markFieldEdited(field)}
+        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 text-[10px] font-black cursor-pointer hover:bg-amber-200"
+        title="Cliquez pour marquer comme vérifié"
+      >
+        <span>À vérifier • OK ?</span>
+      </button>
+    )
+  }
+
   return (
     <div className="min-h-screen bg-slate-50 md:bg-gray-50 md:flex md:items-center md:justify-center p-0 md:p-6 lg:p-8">
       {/* =================================================================== */}
-      {/* 📱 VERSION MOBILE NATIVE — EN-TÊTE BLANC PUR (`md:hidden`)          */}
+      {/* 📱 VERSION MOBILE NATIVE (`md:hidden`)                              */}
       {/* =================================================================== */}
       <div className="md:hidden pb-28">
         {/* 1. BARRE SUPÉRIEURE BLANCHE COLLANTE */}
-        <div className="bg-white/95 backdrop-blur-md border-b border-slate-100 px-4 py-3 sticky top-0 z-30 flex items-center justify-between gap-2">
+        <div className="bg-white/95 backdrop-blur-md border-b border-slate-100 px-4 py-3 sticky top-0 z-40 flex items-center justify-between gap-2">
           <Link
             href="/hajj/liste-pelerins"
             aria-label="Retour aux dossiers"
@@ -1534,7 +1455,7 @@ export default function AjouterPelerin() {
           </Link>
 
           <div className="min-w-0 flex-1 text-center px-1">
-            <h1 className="text-base font-black text-slate-900 tracking-tight leading-tight truncate">
+            <h1 className="text-base font-black text-blue-950 tracking-tight leading-tight truncate">
               Nouveau pèlerin
             </h1>
             <p className="text-[11px] font-semibold text-slate-400 truncate">
@@ -1544,7 +1465,7 @@ export default function AjouterPelerin() {
 
           <button
             type="button"
-            onClick={resetForm}
+            onClick={() => resetForm(false)}
             aria-label="Vider le formulaire"
             className="w-10 h-10 rounded-full bg-slate-100 text-slate-500 active:bg-rose-50 active:text-rose-600 flex items-center justify-center active:scale-90 transition shrink-0 cursor-pointer"
           >
@@ -1552,8 +1473,28 @@ export default function AjouterPelerin() {
           </button>
         </div>
 
-        <div className="px-4 pt-4 space-y-4">
-          {/* Bannière de statut immédiatement visible après un scan ou une action */}
+        <div className="px-4 pt-3.5 space-y-3.5">
+          {/* Barre compacte de conformité Nusuk */}
+          <div className="bg-white rounded-2xl border border-blue-950/10 px-3 py-2.5 flex items-center justify-between gap-1.5 overflow-x-auto no-scrollbar">
+            {nusukChecklist.map((item) => (
+              <div
+                key={item.label}
+                className={`px-2.5 py-1 rounded-xl text-[10px] font-black flex items-center gap-1 shrink-0 ${
+                  item.ok
+                    ? 'bg-emerald-50 text-emerald-800 border border-emerald-200/80'
+                    : 'bg-slate-50 text-slate-400 border border-slate-100'
+                }`}
+              >
+                <CheckCircle2
+                  size={12}
+                  className={item.ok ? 'text-emerald-600' : 'text-slate-300'}
+                />
+                <span>{item.label}</span>
+              </div>
+            ))}
+          </div>
+
+          {/* Bannière de statut */}
           {message.text && (
             <div
               className={`p-3.5 rounded-2xl text-xs font-bold border leading-relaxed ${
@@ -1568,46 +1509,83 @@ export default function AjouterPelerin() {
             </div>
           )}
 
-          {/* 2. CARTE SCAN PASSEPORT (1 TAP MOBILE) */}
-          <div className="bg-white rounded-3xl border border-slate-100 shadow-xs p-4 space-y-3">
-            <label className="w-full p-4 rounded-2xl bg-slate-900 text-white flex items-center gap-3.5 active:scale-[0.98] transition cursor-pointer shadow-sm">
+          {renderMrzVerificationBanner()}
+
+          {/* 2. CARTE SCAN PASSEPORT HAUTE PRÉCISION (Caméra Guidée 1-Tap + Galerie Directe) */}
+          <div className="bg-white rounded-3xl border border-blue-950/12 shadow-xs p-4 space-y-3">
+            <button
+              type="button"
+              disabled={isScanning || isTwainScanning}
+              onClick={() => setCameraModalOpen(true)}
+              className="w-full p-4 rounded-2xl bg-[#1E3A5F] text-white flex items-center gap-3.5 active:scale-[0.98] transition cursor-pointer shadow-sm text-left disabled:opacity-70"
+            >
               <div className="w-12 h-12 rounded-2xl bg-white/15 flex items-center justify-center shrink-0">
                 {isScanning || isTwainScanning ? (
-                  <Loader2 size={22} className="animate-spin text-blue-300" />
+                  <Loader2 size={22} className="animate-spin text-emerald-300" />
                 ) : (
-                  <ScanLine size={22} className="text-blue-300" />
+                  <Camera size={22} className="text-emerald-300" />
                 )}
               </div>
               <div className="min-w-0 flex-1">
                 <p className="text-sm font-black leading-tight">
-                  {isScanning ? 'Lecture du passeport…' : 'Scanner le passeport'}
+                  {isScanning ? 'Lecture rapide…' : 'Scanner le passeport'}
                 </p>
-                <p className="text-[11px] text-slate-300 font-medium mt-0.5 leading-snug">
-                  Photo ou galerie • Lecture MRZ & portrait 480×680 auto
+                <p className="text-[11px] text-blue-100/85 font-medium mt-0.5 leading-snug">
+                  {scanStageText || 'Lecture rapide & photo 480×680 automatique'}
                 </p>
               </div>
-              <ChevronRight size={18} className="text-slate-400 shrink-0" />
-              <input
-                type="file"
-                className="hidden"
-                accept="image/*"
-                onChange={handleAutoFill}
-                disabled={isScanning}
-              />
-            </label>
+              <ChevronRight size={18} className="text-blue-200 shrink-0" />
+            </button>
 
-            <div className="flex items-center justify-between gap-2 px-1">
-              <span className="text-[11px] font-semibold text-slate-400">
-                Scanner externe ou douchette ?
-              </span>
-              <button
-                type="button"
-                onClick={() => setMobileScannerSheetOpen(true)}
-                className="text-xs font-black text-blue-600 active:opacity-70 py-1 cursor-pointer"
-              >
-                Autres modes →
-              </button>
+            <div className="grid grid-cols-2 gap-2">
+              <label className="h-11 px-3 rounded-2xl bg-slate-100 active:bg-slate-200 text-slate-800 text-xs font-black flex items-center justify-center gap-1.5 cursor-pointer transition">
+                <ImageIcon size={15} className="text-blue-700 shrink-0" />
+                <span className="truncate">Depuis Galerie</span>
+                <input
+                  type="file"
+                  className="hidden"
+                  accept="image/*"
+                  onChange={handleGalleryScanInput}
+                  disabled={isScanning}
+                />
+              </label>
+
+              {passportSourceSrc ? (
+                <button
+                  type="button"
+                  onClick={openManualMrzModal}
+                  disabled={isScanning}
+                  className="h-11 px-3 rounded-2xl bg-amber-50 border border-amber-200 text-amber-900 text-xs font-black flex items-center justify-center gap-1.5 active:scale-95 transition cursor-pointer"
+                >
+                  <ScanLine size={15} className="text-amber-600 shrink-0" />
+                  <span className="truncate">Relire le code</span>
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setMobileScannerSheetOpen(true)}
+                  className="h-11 px-3 rounded-2xl bg-slate-100 active:bg-slate-200 text-slate-700 text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer"
+                >
+                  <Keyboard size={15} className="text-slate-600 shrink-0" />
+                  <span className="truncate">Autres scanners</span>
+                </button>
+              )}
             </div>
+
+            {passportSourceSrc && (
+              <div className="flex items-center justify-between px-1">
+                <span className="text-[11px] font-semibold text-slate-400">
+                  Douchette ou scanner USB ?
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setMobileScannerSheetOpen(true)}
+                  className="text-xs font-black text-blue-700 cursor-pointer"
+                >
+                  Autres modes →
+                </button>
+              </div>
+            )}
 
             {showPhysicalScannerInput && (
               <div className="p-3.5 bg-emerald-50/60 rounded-2xl border border-emerald-200 space-y-2 animate-in fade-in">
@@ -1638,7 +1616,7 @@ export default function AjouterPelerin() {
           </div>
 
           {/* 3. CARTE PHOTO NUSUK (480×680) & COPIE DU PASSEPORT */}
-          <div className="bg-white rounded-3xl border border-slate-100 shadow-xs p-4 space-y-4">
+          <div className="bg-white rounded-3xl border border-blue-950/12 shadow-xs p-4 space-y-4">
             {/* Photo Nusuk */}
             <div className="space-y-3">
               <div className="flex items-center justify-between gap-2">
@@ -1652,6 +1630,9 @@ export default function AjouterPelerin() {
                     onClick={() => {
                       setPhotoFile(null)
                       setPhotoPreview(null)
+                      setPhotoQuality(null)
+                      setOriginalPhotoBackup(null)
+                      setWhiteBgApplied(false)
                     }}
                     className="text-[11px] font-bold text-rose-500 active:opacity-70 cursor-pointer"
                   >
@@ -1663,32 +1644,66 @@ export default function AjouterPelerin() {
               <div className="flex items-center gap-3.5">
                 <div className="w-20 h-28 rounded-2xl border-2 border-dashed border-slate-200 bg-slate-50 flex items-center justify-center overflow-hidden shrink-0 relative">
                   {photoPreview ? (
-                    <img src={photoPreview} alt="Aperçu Nusuk" className="w-full h-full object-cover" />
+                    <img
+                      src={photoPreview}
+                      alt="Aperçu Nusuk"
+                      className="w-full h-full object-cover"
+                    />
                   ) : (
                     <ImageIcon size={24} className="text-slate-300" />
                   )}
                   {photoPreview && (
-                    <div className="absolute bottom-0 inset-x-0 bg-emerald-600 text-[9px] font-black text-white text-center py-0.5 uppercase">
-                      Nusuk OK
+                    <div
+                      className={`absolute bottom-0 inset-x-0 text-[9px] font-black text-white text-center py-0.5 uppercase ${
+                        photoQuality && !photoQuality.faceDetected
+                          ? 'bg-amber-600'
+                          : 'bg-emerald-600'
+                      }`}
+                    >
+                      {photoQuality && !photoQuality.faceDetected ? 'À ajuster' : 'Nusuk OK'}
                     </div>
                   )}
                 </div>
 
                 <div className="flex-1 space-y-2">
-                  {cropImageSrc && (
-                    <button
-                      type="button"
-                      onClick={() => setCropModalOpen(true)}
-                      className="w-full h-10 px-3 bg-blue-50 active:bg-blue-100 text-blue-700 border border-blue-200/80 rounded-xl text-xs font-black flex items-center justify-center gap-1.5 transition cursor-pointer"
-                    >
-                      <Crop size={14} />
-                      <span>Ajuster la photo</span>
-                    </button>
-                  )}
+                  <div className="grid grid-cols-2 gap-1.5">
+                    {(photoSourceSrc || passportSourceSrc) && (
+                      <button
+                        type="button"
+                        onClick={openPhotoCropper}
+                        className="h-9 px-2.5 bg-blue-50 active:bg-blue-100 text-blue-700 border border-blue-200/80 rounded-xl text-[11px] font-black flex items-center justify-center gap-1 transition cursor-pointer"
+                      >
+                        <Crop size={13} />
+                        <span>Ajuster</span>
+                      </button>
+                    )}
 
-                  <label className="w-full h-10 px-3 bg-slate-100 active:bg-slate-200 text-slate-800 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer transition">
-                    <Upload size={14} />
-                    <span>{photoFile ? 'Remplacer' : 'Choisir une photo'}</span>
+                    {photoPreview && (
+                      <button
+                        type="button"
+                        disabled={isRemovingBg}
+                        onClick={handleToggleWhiteBackground}
+                        className={`h-9 px-2.5 rounded-xl text-[11px] font-black flex items-center justify-center gap-1 transition cursor-pointer border ${
+                          whiteBgApplied
+                            ? 'bg-slate-900 text-white border-slate-900'
+                            : 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                        }`}
+                      >
+                        {isRemovingBg ? (
+                          <Loader2 size={13} className="animate-spin" />
+                        ) : whiteBgApplied ? (
+                          <Undo2 size={13} />
+                        ) : (
+                          <Sparkles size={13} />
+                        )}
+                        <span>{whiteBgApplied ? 'Origine' : 'Fond blanc'}</span>
+                      </button>
+                    )}
+                  </div>
+
+                  <label className="w-full h-9 px-3 bg-slate-100 active:bg-slate-200 text-slate-800 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer transition">
+                    <Upload size={13} />
+                    <span>{photoFile ? 'Remplacer la photo' : 'Importer une photo'}</span>
                     <input
                       type="file"
                       className="hidden"
@@ -1696,8 +1711,11 @@ export default function AjouterPelerin() {
                       onChange={handlePhotoFileChange}
                     />
                   </label>
-                  <p className="text-[10px] text-slate-400 font-medium leading-tight">
-                    480×680 px (&lt; 100 Ko) • Visage isolé auto
+
+                  <p className="text-[10px] text-slate-500 font-semibold leading-tight">
+                    {photoFile
+                      ? `480×680 px • ${(photoFile.size / 1024).toFixed(0)} Ko • Prête`
+                      : '480×680 px (< 100 Ko) • Cadrage automatique'}
                   </p>
                 </div>
               </div>
@@ -1717,13 +1735,13 @@ export default function AjouterPelerin() {
                 )}
               </div>
 
-              <label className="w-full min-h-[52px] px-3.5 py-2.5 bg-slate-50 rounded-2xl border border-dashed border-slate-300 active:bg-slate-100 flex items-center gap-3 cursor-pointer transition">
+              <label className="w-full min-h-[50px] px-3.5 py-2.5 bg-slate-50 rounded-2xl border border-dashed border-slate-300 active:bg-slate-100 flex items-center gap-3 cursor-pointer transition">
                 <Upload size={17} className="text-blue-600 shrink-0" />
                 <div className="min-w-0 flex-1">
                   <p className="text-xs font-bold text-slate-800 truncate">
                     {fileToUpload ? fileToUpload.name : 'Joindre la copie du passeport'}
                   </p>
-                  <p className="text-[10px] text-slate-400">Compression Nusuk &lt; 400 Ko</p>
+                  <p className="text-[10px] text-slate-400">Compression fidèle Nusuk &lt; 400 Ko</p>
                 </div>
                 <input
                   type="file"
@@ -1733,11 +1751,11 @@ export default function AjouterPelerin() {
                 />
               </label>
 
-              {cropImageSrc && (
+              {passportSourceSrc && (
                 <button
                   type="button"
                   onClick={openPassportCropper}
-                  className="w-full h-10 px-3 bg-white active:bg-slate-50 text-slate-700 border border-slate-200 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition cursor-pointer"
+                  className="w-full h-9 px-3 bg-white active:bg-slate-50 text-slate-700 border border-slate-200 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition cursor-pointer"
                 >
                   <Crop size={14} className="text-blue-600" />
                   <span>Recadrer le passeport</span>
@@ -1746,45 +1764,66 @@ export default function AjouterPelerin() {
             </div>
           </div>
 
-          {/* 4. FORMULAIRE STRUCTURÉ PAR CARTES AÉRÉES */}
+          {/* 4. FORMULAIRE MOBILE STRUCTURÉ PAR CARTES */}
           <form onSubmit={handleSubmit} className="space-y-4">
             {/* Carte Identité */}
-            <div className="bg-white rounded-3xl border border-slate-100 shadow-xs p-5 space-y-4">
+            <div className="bg-white rounded-3xl border border-blue-950/12 shadow-xs p-5 space-y-4">
               <h2 className="text-sm font-black text-slate-900">Identité</h2>
 
               <div>
-                <label className="text-[11px] font-black uppercase text-slate-400 block mb-1.5">
-                  Nom *
-                </label>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="text-[11px] font-black uppercase text-slate-400">
+                    Nom de famille *
+                  </label>
+                  {renderFieldVerifyBadge('nom')}
+                </div>
                 <input
                   type="text"
                   value={nom}
-                  onChange={(e) => setNom(e.target.value)}
-                  className="w-full h-12 px-4 rounded-2xl border border-slate-200 bg-slate-50 text-slate-900 text-sm font-bold focus:bg-white focus:border-blue-600 outline-none transition uppercase"
+                  onChange={(e) => {
+                    setNom(e.target.value)
+                    markFieldEdited('nom')
+                  }}
+                  className={`w-full h-12 px-4 rounded-2xl border text-slate-900 text-sm font-bold outline-none transition uppercase ${
+                    isFieldFlagged('nom')
+                      ? 'border-amber-400 bg-amber-50/40'
+                      : 'border-slate-200 bg-slate-50 focus:bg-white focus:border-blue-600'
+                  }`}
                   placeholder="NOM DE FAMILLE"
                   required
                 />
               </div>
 
               <div>
-                <label className="text-[11px] font-black uppercase text-slate-400 block mb-1.5">
-                  Prénom *
-                </label>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="text-[11px] font-black uppercase text-slate-400">
+                    Prénom(s) *
+                  </label>
+                  {renderFieldVerifyBadge('prenom')}
+                </div>
                 <input
                   type="text"
                   value={prenom}
-                  onChange={(e) => setPrenom(e.target.value)}
-                  className="w-full h-12 px-4 rounded-2xl border border-slate-200 bg-slate-50 text-slate-900 text-sm font-bold focus:bg-white focus:border-blue-600 outline-none transition uppercase"
-                  placeholder="PRÉNOM(S)"
+                  onChange={(e) => {
+                    setPrenom(e.target.value)
+                    markFieldEdited('prenom')
+                  }}
+                  className={`w-full h-12 px-4 rounded-2xl border text-slate-900 text-sm font-bold outline-none transition uppercase ${
+                    isFieldFlagged('prenom')
+                      ? 'border-amber-400 bg-amber-50/40'
+                      : 'border-slate-200 bg-slate-50 focus:bg-white focus:border-blue-600'
+                  }`}
+                  placeholder="TOUS LES PRÉNOMS"
                   required
                 />
               </div>
 
-              {/* Sexe en 2 pills tactiles */}
+              {/* Sexe */}
               <div>
-                <label className="text-[11px] font-black uppercase text-slate-400 block mb-1.5">
-                  Sexe
-                </label>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="text-[11px] font-black uppercase text-slate-400">Sexe</label>
+                  {renderFieldVerifyBadge('sexe')}
+                </div>
                 <div className="grid grid-cols-2 gap-2">
                   {(['HOMME', 'FEMME'] as const).map((g) => {
                     const active = sexe === g
@@ -1792,7 +1831,10 @@ export default function AjouterPelerin() {
                       <button
                         key={g}
                         type="button"
-                        onClick={() => setSexe(active ? '' : g)}
+                        onClick={() => {
+                          setSexe(active ? '' : g)
+                          markFieldEdited('sexe')
+                        }}
                         className={`h-11 rounded-2xl text-xs font-black transition active:scale-[0.98] cursor-pointer ${
                           active
                             ? 'bg-slate-900 text-white shadow-xs'
@@ -1808,15 +1850,36 @@ export default function AjouterPelerin() {
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="text-[11px] font-black uppercase text-slate-400 block mb-1.5">
-                    Naissance
-                  </label>
+                  <div className="flex items-center justify-between mb-1.5 gap-1">
+                    <label className="text-[11px] font-black uppercase text-slate-400">
+                      Naissance
+                    </label>
+                    {pilgrimAgeInfo && !pilgrimAgeInfo.invalid && (
+                      <span
+                        className={`text-[10px] font-black px-1.5 py-0.5 rounded-md ${
+                          pilgrimAgeInfo.age < 18
+                            ? 'bg-amber-100 text-amber-800'
+                            : 'bg-slate-100 text-slate-700'
+                        }`}
+                      >
+                        {pilgrimAgeInfo.age} ans
+                      </span>
+                    )}
+                  </div>
                   <input
                     type="date"
                     value={dateNaissance}
-                    onChange={(e) => setDateNaissance(e.target.value)}
-                    className="w-full h-12 px-3 rounded-2xl border border-slate-200 bg-slate-50 text-slate-900 font-bold text-xs outline-none focus:bg-white focus:border-blue-600"
+                    onChange={(e) => {
+                      setDateNaissance(e.target.value)
+                      markFieldEdited('dateNaissance')
+                    }}
+                    className={`w-full h-12 px-3 rounded-2xl border font-bold text-xs outline-none ${
+                      isFieldFlagged('dateNaissance') || pilgrimAgeInfo?.invalid
+                        ? 'border-amber-400 bg-amber-50/50 text-amber-950'
+                        : 'border-slate-200 bg-slate-50 text-slate-900 focus:bg-white focus:border-blue-600'
+                    }`}
                   />
+                  {renderFieldVerifyBadge('dateNaissance')}
                 </div>
                 <div>
                   <label className="text-[11px] font-black uppercase text-slate-400 block mb-1.5">
@@ -1834,49 +1897,82 @@ export default function AjouterPelerin() {
             </div>
 
             {/* Carte Passeport & Dossier */}
-            <div className="bg-white rounded-3xl border border-slate-100 shadow-xs p-5 space-y-4">
+            <div className="bg-white rounded-3xl border border-blue-950/12 shadow-xs p-5 space-y-4">
               <h2 className="text-sm font-black text-slate-900">Passeport & Dossier</h2>
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="text-[11px] font-black uppercase text-slate-400 block mb-1.5">
-                    N° Passeport
-                  </label>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="text-[11px] font-black uppercase text-slate-400">
+                      N° Passeport
+                    </label>
+                    {renderFieldVerifyBadge('passeport')}
+                  </div>
                   <input
                     type="text"
                     value={passeport}
-                    onChange={(e) => setPasseport(e.target.value)}
-                    className="w-full h-12 px-3.5 rounded-2xl border border-slate-200 bg-slate-50 text-slate-900 font-mono font-bold text-sm outline-none focus:bg-white focus:border-blue-600 uppercase"
+                    onChange={(e) => {
+                      setPasseport(e.target.value)
+                      markFieldEdited('passeport')
+                    }}
+                    className={`w-full h-12 px-3.5 rounded-2xl border font-mono font-bold text-sm outline-none uppercase ${
+                      duplicatePassportMatch?.isSameCampagne
+                        ? 'border-rose-400 bg-rose-50/50 text-rose-900'
+                        : isFieldFlagged('passeport')
+                        ? 'border-amber-400 bg-amber-50/50 text-amber-950'
+                        : 'border-slate-200 bg-slate-50 text-slate-900 focus:bg-white focus:border-blue-600'
+                    }`}
                     placeholder="A000000"
                   />
                 </div>
                 <div>
-                  <label className="text-[11px] font-black uppercase text-slate-400 block mb-1.5">
-                    Expiration
-                  </label>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="text-[11px] font-black uppercase text-slate-400">
+                      Expiration
+                    </label>
+                    {passportValidityInfo.status === 'valid' && (
+                      <span className="text-[10px] font-black text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded-md">
+                        +{passportValidityInfo.monthsLeft}m
+                      </span>
+                    )}
+                  </div>
                   <input
                     type="date"
                     value={dateExpiration}
-                    onChange={(e) => setDateExpiration(e.target.value)}
+                    onChange={(e) => {
+                      setDateExpiration(e.target.value)
+                      markFieldEdited('dateExpiration')
+                    }}
                     className={`w-full h-12 px-3 rounded-2xl border font-bold text-xs outline-none ${
-                      isPassportExpiringSoon
+                      passportValidityInfo.status === 'expired'
+                        ? 'border-rose-500 bg-rose-50 text-rose-900'
+                        : passportValidityInfo.status === 'soon' ||
+                          isFieldFlagged('dateExpiration')
                         ? 'border-amber-500 bg-amber-50/50 text-amber-900'
                         : 'border-slate-200 bg-slate-50 text-slate-900 focus:bg-white focus:border-blue-600'
                     }`}
                   />
+                  {renderFieldVerifyBadge('dateExpiration')}
                 </div>
               </div>
 
-              {isPassportExpiringSoon && (
-                <p className="text-xs font-bold text-amber-700 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2">
-                  ⚠️ Attention : ce passeport expire dans moins de 6 mois.
+              {passportValidityInfo.status === 'expired' && (
+                <p className="text-xs font-black text-rose-700 bg-rose-50 border border-rose-200 rounded-xl px-3 py-2">
+                  ⛔ Ce passeport est EXPIRÉ ! Renouvellement obligatoire pour Nusuk.
                 </p>
               )}
+              {passportValidityInfo.status === 'soon' && (
+                <p className="text-xs font-bold text-amber-800 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2">
+                  ⚠️ Passeport valide seulement {passportValidityInfo.monthsLeft} mois (&lt; 6 mois).
+                </p>
+              )}
+
+              {renderDuplicateWarning()}
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="text-[11px] font-black uppercase text-slate-400 block mb-1.5">
-                    Référence
+                    Référence / Groupe
                   </label>
                   <input
                     type="text"
@@ -1892,24 +1988,40 @@ export default function AjouterPelerin() {
                   </label>
                   <select
                     value={campagne ?? ''}
-                    onChange={(e) => setCampagne(e.target.value ? Number(e.target.value) : null)}
+                    onChange={(e) =>
+                      setCampagne(e.target.value ? Number(e.target.value) : null)
+                    }
                     className="w-full h-12 px-3.5 rounded-2xl border border-slate-200 bg-slate-50 text-slate-900 font-bold text-sm outline-none focus:bg-white focus:border-blue-600"
                   >
                     <option value="">Sélectionner</option>
-                    {(() => {
-                      const start = 2024
-                      const end = new Date().getFullYear() + 100
-                      const opts = [] as number[]
-                      for (let y = start; y <= end; y++) opts.push(y)
-                      return opts.map((y) => (
-                        <option key={y} value={y}>
-                          {y}
-                        </option>
-                      ))
-                    })()}
+                    {campaignOptions.map((y) => (
+                      <option key={y} value={y}>
+                        {y}
+                      </option>
+                    ))}
                   </select>
                 </div>
               </div>
+
+              {smartSuggestions.references.length > 0 && (
+                <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar">
+                  <span className="text-[10px] font-bold text-slate-400 shrink-0">Groupes :</span>
+                  {smartSuggestions.references.map((refName) => (
+                    <button
+                      key={refName}
+                      type="button"
+                      onClick={() => setReference(refName)}
+                      className={`px-2.5 py-1 rounded-full text-[10px] font-black shrink-0 cursor-pointer border ${
+                        reference.toUpperCase() === refName
+                          ? 'bg-blue-600 text-white border-blue-600'
+                          : 'bg-slate-50 text-slate-600 border-slate-200'
+                      }`}
+                    >
+                      {refName}
+                    </button>
+                  ))}
+                </div>
+              )}
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
@@ -1936,11 +2048,58 @@ export default function AjouterPelerin() {
                   />
                 </div>
               </div>
+
+              {smartSuggestions.associes.length > 0 && (
+                <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar">
+                  <span className="text-[10px] font-bold text-slate-400 shrink-0">Associés :</span>
+                  {smartSuggestions.associes.map((aName) => (
+                    <button
+                      key={aName}
+                      type="button"
+                      onClick={() => setAssocie(aName)}
+                      className={`px-2.5 py-1 rounded-full text-[10px] font-black shrink-0 cursor-pointer border ${
+                        associe.toUpperCase() === aName
+                          ? 'bg-slate-900 text-white border-slate-900'
+                          : 'bg-slate-50 text-slate-600 border-slate-200'
+                      }`}
+                    >
+                      {aName}
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
 
             {/* Carte Forfait & Paiement */}
-            <div className="bg-white rounded-3xl border border-slate-100 shadow-xs p-5 space-y-4">
+            <div className="bg-white rounded-3xl border border-blue-950/12 shadow-xs p-5 space-y-4">
               <h2 className="text-sm font-black text-slate-900">Forfait & Paiement</h2>
+
+              {smartSuggestions.packages.length > 0 && (
+                <div className="space-y-1.5">
+                  <span className="text-[10px] font-black uppercase text-slate-400 block">
+                    Forfaits habituels (1 clic = nom + tarif)
+                  </span>
+                  <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar pb-0.5">
+                    {smartSuggestions.packages.map((pkg) => (
+                      <button
+                        key={pkg.name}
+                        type="button"
+                        onClick={() => applyPackageSuggestion(pkg)}
+                        className={`px-3 py-1.5 rounded-xl text-[11px] font-black shrink-0 cursor-pointer border transition ${
+                          nomPackage.toUpperCase() === pkg.name
+                            ? 'bg-blue-600 text-white border-blue-600'
+                            : 'bg-blue-50/60 text-blue-900 border-blue-200/70'
+                        }`}
+                      >
+                        {pkg.name}
+                        {pkg.price > 0
+                          ? ` • ${formatHajjMoney(pkg.price, pkg.devise)}`
+                          : ''}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               <div>
                 <label className="text-[11px] font-black uppercase text-slate-400 block mb-1.5">
@@ -1955,9 +2114,7 @@ export default function AjouterPelerin() {
                         type="button"
                         onClick={() => setDevise(cur.code)}
                         className={`h-10 rounded-xl text-xs font-black transition active:scale-[0.98] cursor-pointer ${
-                          active
-                            ? cur.pillActiveClass
-                            : 'text-slate-600'
+                          active ? cur.pillActiveClass : 'text-slate-600'
                         }`}
                       >
                         {cur.shortLabel}
@@ -1987,8 +2144,12 @@ export default function AjouterPelerin() {
                   />
                 </div>
 
-                <div className="bg-emerald-600 p-3.5 rounded-2xl">
-                  <label className="text-[10px] font-black text-emerald-100 uppercase block mb-1">
+                <div
+                  className={`p-3.5 rounded-2xl ${
+                    isOverpaid ? 'bg-rose-600' : 'bg-emerald-600'
+                  }`}
+                >
+                  <label className="text-[10px] font-black text-white/80 uppercase block mb-1">
                     Acompte ({getHajjCurrencySymbol(devise)})
                   </label>
                   <input
@@ -2006,10 +2167,16 @@ export default function AjouterPelerin() {
                 </div>
               </div>
 
+              {isOverpaid && (
+                <p className="text-xs font-black text-rose-700 bg-rose-50 border border-rose-200 rounded-xl px-3 py-2">
+                  ⚠️ L&apos;acompte dépasse le prix total du forfait !
+                </p>
+              )}
+
               <div className="flex items-center justify-between px-4 py-3 bg-slate-50 rounded-2xl border border-slate-100">
                 <span className="text-xs font-bold text-slate-500">Reste à payer</span>
                 <span className="text-base font-black text-slate-900 tabular-nums">
-                  {formatHajjMoney(total - paye, devise)}
+                  {formatHajjMoney(Math.max(0, total - paye), devise)}
                 </span>
               </div>
 
@@ -2043,9 +2210,9 @@ export default function AjouterPelerin() {
             {/* Bouton Enregistrer principal */}
             <button
               type="submit"
-              disabled={loading || !agenceId || !profileReady}
+              disabled={loading || !agenceId || !profileReady || isOverpaid}
               className={`w-full h-14 rounded-2xl text-white font-black text-base shadow-lg active:scale-[0.98] transition flex items-center justify-center gap-2.5 cursor-pointer ${
-                loading || !agenceId || !profileReady
+                loading || !agenceId || !profileReady || isOverpaid
                   ? 'bg-slate-400 cursor-not-allowed shadow-none'
                   : 'bg-blue-600 active:bg-blue-700 shadow-blue-600/25'
               }`}
@@ -2059,24 +2226,10 @@ export default function AjouterPelerin() {
                   : 'Enregistrer le dossier'}
               </span>
             </button>
-
-            {message.text && (
-              <div
-                className={`p-3.5 rounded-2xl text-center font-bold text-xs border ${
-                  message.type === 'success'
-                    ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
-                    : message.type === 'info'
-                    ? 'bg-blue-50 text-blue-800 border-blue-200'
-                    : 'bg-rose-50 text-rose-800 border-rose-200'
-                }`}
-              >
-                {message.text}
-              </div>
-            )}
           </form>
         </div>
 
-        {/* Bottom Sheet Autres modes de scan (USB / Pleine page / Douchette) */}
+        {/* Bottom Sheet Scanners Externes */}
         {mobileScannerSheetOpen && (
           <div
             onClick={() => setMobileScannerSheetOpen(false)}
@@ -2164,7 +2317,9 @@ export default function AjouterPelerin() {
                   </div>
                   <div className="min-w-0 flex-1">
                     <p className="text-sm font-black text-slate-900">Douchette MRZ</p>
-                    <p className="text-xs font-medium text-slate-500">Lecteur code passeport USB</p>
+                    <p className="text-xs font-medium text-slate-500">
+                      Lecteur code passeport USB
+                    </p>
                   </div>
                   <ChevronRight size={18} className="text-slate-400 shrink-0" />
                 </button>
@@ -2183,38 +2338,82 @@ export default function AjouterPelerin() {
       </div>
 
       {/* =================================================================== */}
-      {/* 💻 VERSION PC / TABLETTE (100% INCHANGÉE `hidden md:block`)         */}
+      {/* 💻 VERSION PC / TABLETTE (`hidden md:block`)                        */}
       {/* =================================================================== */}
       <div className="hidden md:block w-full max-w-6xl">
         <div className="bg-white md:rounded-[2.5rem] shadow-xl border border-gray-100 p-5 md:p-10 min-h-screen md:min-h-0">
-          
-          <div className="text-center mb-8">
-            <h2 className="text-2xl md:text-4xl font-black text-gray-900 uppercase tracking-tighter">Nouveau Dossier</h2>
-            <p className="text-gray-400 font-bold uppercase text-[10px] tracking-widest mt-1 italic">Gestion Immédiate & Compatibilité Scanner</p>
+          <div className="flex flex-wrap items-center justify-between gap-4 mb-6 pb-4 border-b border-gray-100">
+            <div>
+              <h2 className="text-2xl md:text-3xl font-black text-gray-900 uppercase tracking-tight">
+                Nouveau Dossier Pèlerin
+              </h2>
+              <p className="text-gray-400 font-bold uppercase text-[10px] tracking-widest mt-1">
+                Lecture rapide du passeport • Photo d&apos;identité automatique
+              </p>
+            </div>
+
+            <div className="flex items-center gap-2 flex-wrap">
+              {nusukChecklist.map((item) => (
+                <div
+                  key={item.label}
+                  className={`px-3 py-1.5 rounded-xl text-[11px] font-black flex items-center gap-1.5 ${
+                    item.ok
+                      ? 'bg-emerald-50 text-emerald-800 border border-emerald-200'
+                      : 'bg-gray-50 text-gray-400 border border-gray-100'
+                  }`}
+                >
+                  <CheckCircle2
+                    size={13}
+                    className={item.ok ? 'text-emerald-600' : 'text-gray-300'}
+                  />
+                  <span>{item.label}</span>
+                </div>
+              ))}
+            </div>
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 lg:gap-8 items-start">
-            
             {/* BLOC GAUCHE */}
             <div className="lg:col-span-5 space-y-5 lg:sticky lg:top-24">
-              
               {/* OPTIONS DE SCAN */}
               <div className="p-5 bg-blue-50/70 rounded-3xl border-2 border-dashed border-blue-200 shadow-inner space-y-3">
                 <div className="flex items-center justify-between">
-                  <label className="text-[10px] font-black text-blue-900 uppercase italic flex items-center gap-2">
+                  <label className="text-[10px] font-black text-blue-900 uppercase flex items-center gap-2">
                     <Smartphone size={14} /> 1. Mode de Scan Passeport
                   </label>
-                  {(isScanning || isTwainScanning) && <Loader2 className="animate-spin text-blue-600" size={18} />}
+                  {(isScanning || isTwainScanning) && (
+                    <Loader2 className="animate-spin text-blue-600" size={18} />
+                  )}
                 </div>
 
                 <div className="grid grid-cols-2 gap-2">
                   <label className="flex flex-col items-center justify-center p-3 bg-white rounded-2xl border border-blue-100 cursor-pointer hover:border-blue-300 active:scale-95 transition shadow-xs text-center">
                     <ScanLine className="text-blue-600 mb-1" size={18} />
                     <span className="text-[9px] font-black text-blue-900 uppercase leading-tight">
-                      {isScanning ? "Lecture..." : "Scan Photo / Lecture Auto"}
+                      {isScanning ? 'Lecture rapide…' : 'Importer & Lire'}
                     </span>
-                    <input type="file" className="hidden" accept="image/*" onChange={handleAutoFill} disabled={isScanning} />
+                    <span className="text-[7.5px] text-slate-500">Photo / Scan fichier</span>
+                    <input
+                      type="file"
+                      className="hidden"
+                      accept="image/*"
+                      onChange={handleGalleryScanInput}
+                      disabled={isScanning}
+                    />
                   </label>
+
+                  <button
+                    type="button"
+                    onClick={() => setCameraModalOpen(true)}
+                    disabled={isScanning}
+                    className="flex flex-col items-center justify-center p-3 bg-slate-900 hover:bg-slate-800 text-white rounded-2xl border border-slate-900 cursor-pointer active:scale-95 transition shadow-xs text-center disabled:opacity-50"
+                  >
+                    <Camera className="text-emerald-400 mb-1" size={18} />
+                    <span className="text-[9px] font-black uppercase leading-tight">
+                      Caméra Guidée
+                    </span>
+                    <span className="text-[7.5px] opacity-80">Cadre + Netteté live</span>
+                  </button>
 
                   <button
                     type="button"
@@ -2222,8 +2421,14 @@ export default function AjouterPelerin() {
                     disabled={isTwainScanning}
                     className="flex flex-col items-center justify-center p-3 rounded-2xl border bg-blue-600 hover:bg-blue-700 text-white border-blue-600 transition cursor-pointer active:scale-95 text-center shadow-xs disabled:opacity-50"
                   >
-                    {isTwainScanning ? <Loader2 size={18} className="animate-spin mb-1" /> : <Printer size={18} className="mb-1" />}
-                    <span className="text-[9px] font-black uppercase leading-tight">Numériser</span>
+                    {isTwainScanning ? (
+                      <Loader2 size={18} className="animate-spin mb-1" />
+                    ) : (
+                      <Printer size={18} className="mb-1" />
+                    )}
+                    <span className="text-[9px] font-black uppercase leading-tight">
+                      Numériser
+                    </span>
                     <span className="text-[7.5px] opacity-80">Scanner à plat / USB</span>
                   </button>
 
@@ -2231,34 +2436,56 @@ export default function AjouterPelerin() {
                     type="button"
                     onClick={toggleFullPageScanner}
                     className={`flex flex-col items-center justify-center p-3 rounded-2xl border text-center transition cursor-pointer active:scale-95 ${
-                      isFullPageListening 
-                        ? 'bg-emerald-600 text-white border-emerald-600 shadow-sm' 
+                      isFullPageListening
+                        ? 'bg-emerald-600 text-white border-emerald-600 shadow-sm'
                         : 'bg-white text-slate-800 border-blue-100 hover:border-emerald-500 shadow-xs'
                     }`}
                   >
-                    <Radio size={18} className={isFullPageListening ? 'text-white mb-1 animate-pulse' : 'text-emerald-600 mb-1'} />
-                    <span className="text-[9px] font-black uppercase leading-tight">Pleine Page</span>
-                    <span className="text-[7.5px] opacity-75">{isFullPageListening ? 'Actif' : 'Vitre USB'}</span>
+                    <Radio
+                      size={18}
+                      className={
+                        isFullPageListening
+                          ? 'text-white mb-1 animate-pulse'
+                          : 'text-emerald-600 mb-1'
+                      }
+                    />
+                    <span className="text-[9px] font-black uppercase leading-tight">
+                      Pleine Page
+                    </span>
+                    <span className="text-[7.5px] opacity-75">
+                      {isFullPageListening ? 'Actif' : 'Vitre USB'}
+                    </span>
                   </button>
+                </div>
 
+                <div className="grid grid-cols-2 gap-2">
                   <button
                     type="button"
                     onClick={() => {
-                      setShowPhysicalScannerInput(true)
+                      setShowPhysicalScannerInput((prev) => !prev)
                       setTimeout(() => physicalInputRef.current?.focus(), 100)
                     }}
-                    className={`flex flex-col items-center justify-center p-3 rounded-2xl border text-center transition cursor-pointer active:scale-95 ${
-                      showPhysicalScannerInput 
-                        ? 'bg-slate-900 text-white border-slate-900 shadow-md' 
-                        : 'bg-white text-slate-800 border-blue-100 hover:border-blue-300 shadow-xs'
+                    className={`py-2 px-3 rounded-xl border text-[10px] font-black uppercase flex items-center justify-center gap-1.5 transition cursor-pointer ${
+                      showPhysicalScannerInput
+                        ? 'bg-slate-900 text-white border-slate-900'
+                        : 'bg-white text-slate-700 border-blue-100 hover:border-blue-300'
                     }`}
                   >
-                    <Keyboard size={18} className={showPhysicalScannerInput ? "text-emerald-400 mb-1" : "text-blue-600 mb-1"} />
-                    <span className="text-[9px] font-black uppercase leading-tight">
-                      Douchette
-                    </span>
-                    <span className="text-[7.5px] opacity-75">Lecteur USB</span>
+                    <Keyboard size={14} className="text-blue-600" />
+                    <span>Douchette USB</span>
                   </button>
+
+                  {passportSourceSrc && (
+                    <button
+                      type="button"
+                      onClick={openManualMrzModal}
+                      disabled={isScanning}
+                      className="py-2 px-3 rounded-xl border border-amber-300 bg-amber-50 hover:bg-amber-100 text-amber-900 text-[10px] font-black uppercase flex items-center justify-center gap-1.5 transition cursor-pointer"
+                    >
+                      <ScanLine size={14} className="text-amber-600" />
+                      <span>Relire le code</span>
+                    </button>
+                  )}
                 </div>
 
                 {showPhysicalScannerInput && (
@@ -2268,10 +2495,10 @@ export default function AjouterPelerin() {
                         <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping inline-block mr-1" />
                         Prêt pour la douchette
                       </span>
-                      <button 
-                        type="button" 
+                      <button
+                        type="button"
                         onClick={() => setShowPhysicalScannerInput(false)}
-                        className="text-slate-400 hover:text-slate-600"
+                        className="text-slate-400 hover:text-slate-600 cursor-pointer"
                       >
                         <X size={14} />
                       </button>
@@ -2282,23 +2509,32 @@ export default function AjouterPelerin() {
                       value={mrzBuffer}
                       onChange={handlePhysicalScanChange}
                       onKeyDown={handlePhysicalScanKeyDown}
-                      placeholder="Glissez le passeport dans la douchette..."
+                      placeholder="Glissez le passeport dans la douchette…"
                       className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono font-bold text-slate-900 outline-none focus:border-emerald-500"
                     />
                   </div>
                 )}
               </div>
 
-              {/* SECTION PHOTO D'IDENTITÉ */}
+              {renderMrzVerificationBanner()}
+
+              {/* SECTION PHOTO D'IDENTITÉ NUSUK */}
               <div className="p-4 bg-gray-50 rounded-2xl border border-gray-100 space-y-3">
                 <div className="flex items-center justify-between">
                   <span className="text-[10px] font-black text-gray-700 uppercase flex items-center gap-1.5">
-                    <Camera size={14} className="text-blue-600" /> Photo d'identité Nusuk (480×680)
+                    <Camera size={14} className="text-blue-600" /> Photo d&apos;identité Nusuk
+                    (480×680)
                   </span>
                   {photoPreview && (
                     <button
                       type="button"
-                      onClick={() => { setPhotoFile(null); setPhotoPreview(null) }}
+                      onClick={() => {
+                        setPhotoFile(null)
+                        setPhotoPreview(null)
+                        setPhotoQuality(null)
+                        setOriginalPhotoBackup(null)
+                        setWhiteBgApplied(false)
+                      }}
                       className="text-[9px] font-bold text-red-500 hover:text-red-700 uppercase cursor-pointer"
                     >
                       Supprimer
@@ -2309,43 +2545,79 @@ export default function AjouterPelerin() {
                 <div className="flex items-center gap-3">
                   <div className="w-20 h-28 rounded-2xl border-2 border-dashed border-gray-200 bg-white flex items-center justify-center overflow-hidden shrink-0 shadow-inner relative">
                     {photoPreview ? (
-                      <img src={photoPreview} alt="Aperçu Nusuk" className="w-full h-full object-cover" />
+                      <img
+                        src={photoPreview}
+                        alt="Aperçu Nusuk"
+                        className="w-full h-full object-cover"
+                      />
                     ) : (
                       <ImageIcon size={24} className="text-gray-300" />
                     )}
                     {photoPreview && (
-                      <div className="absolute bottom-0 inset-x-0 bg-emerald-600 text-[8px] font-black text-white text-center py-0.5 uppercase">
-                        Nusuk OK
+                      <div
+                        className={`absolute bottom-0 inset-x-0 text-[8px] font-black text-white text-center py-0.5 uppercase ${
+                          photoQuality && !photoQuality.faceDetected
+                            ? 'bg-amber-600'
+                            : 'bg-emerald-600'
+                        }`}
+                      >
+                        {photoQuality && !photoQuality.faceDetected ? 'À ajuster' : 'Nusuk OK'}
                       </div>
                     )}
                   </div>
 
                   <div className="flex-1 space-y-1.5">
-                    {cropImageSrc && (
-                      <button
-                        type="button"
-                        onClick={() => setCropModalOpen(true)}
-                        className="w-full py-2 px-2.5 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 rounded-xl text-center text-[10px] font-black uppercase flex items-center justify-center gap-1.5 transition cursor-pointer"
-                      >
-                        <Crop size={13} />
-                        <span>Ajuster la photo</span>
-                      </button>
-                    )}
+                    <div className="grid grid-cols-2 gap-1.5">
+                      {(photoSourceSrc || passportSourceSrc) && (
+                        <button
+                          type="button"
+                          onClick={openPhotoCropper}
+                          className="py-2 px-2 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 rounded-xl text-[10px] font-black uppercase flex items-center justify-center gap-1 transition cursor-pointer"
+                        >
+                          <Crop size={12} />
+                          <span>Ajuster</span>
+                        </button>
+                      )}
+
+                      {photoPreview && (
+                        <button
+                          type="button"
+                          disabled={isRemovingBg}
+                          onClick={handleToggleWhiteBackground}
+                          className={`py-2 px-2 rounded-xl text-[10px] font-black uppercase flex items-center justify-center gap-1 transition cursor-pointer border ${
+                            whiteBgApplied
+                              ? 'bg-slate-900 text-white border-slate-900'
+                              : 'bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border-emerald-200'
+                          }`}
+                        >
+                          {isRemovingBg ? (
+                            <Loader2 size={12} className="animate-spin" />
+                          ) : whiteBgApplied ? (
+                            <Undo2 size={12} />
+                          ) : (
+                            <Sparkles size={12} />
+                          )}
+                          <span>{whiteBgApplied ? 'Origine' : 'Fond blanc'}</span>
+                        </button>
+                      )}
+                    </div>
 
                     <label className="block w-full py-2 px-2.5 bg-white border border-gray-200 hover:border-blue-300 rounded-xl text-center text-[10px] font-bold text-gray-700 cursor-pointer transition shadow-2xs">
-                      {photoFile ? "Remplacer la photo" : "Choisir une photo"}
-                      <input 
-                        type="file" 
-                        className="hidden" 
-                        accept="image/*" 
-                        onChange={handlePhotoFileChange} 
+                      {photoFile ? 'Remplacer la photo' : 'Choisir une photo'}
+                      <input
+                        type="file"
+                        className="hidden"
+                        accept="image/*"
+                        onChange={handlePhotoFileChange}
                       />
                     </label>
                   </div>
                 </div>
 
-                <p className="text-[9px] text-gray-400 font-medium leading-tight">
-                  Format officiel : 480×680 pixels (&lt; 100 Ko) • Visage isolé automatiquement.
+                <p className="text-[9px] text-gray-500 font-semibold leading-tight">
+                  {photoFile
+                    ? `480×680 px • ${(photoFile.size / 1024).toFixed(0)} Ko / 100 Ko • Prête`
+                    : 'Format officiel : 480×680 pixels (< 100 Ko) • Cadrage automatique.'}
                 </p>
               </div>
 
@@ -2353,7 +2625,8 @@ export default function AjouterPelerin() {
               <div className="p-4 bg-gray-50 rounded-2xl border border-gray-100 space-y-2.5">
                 <div className="flex items-center justify-between">
                   <span className="text-[10px] font-black text-gray-700 uppercase flex items-center gap-1.5">
-                    <FileCheck size={14} className="text-blue-600" /> Copie du Passeport (Nusuk &lt; 400 Ko)
+                    <FileCheck size={14} className="text-blue-600" /> Copie du Passeport (Nusuk &lt;
+                    400 Ko)
                   </span>
                   {fileToUpload && (
                     <span className="text-[9px] font-black text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded">
@@ -2366,16 +2639,21 @@ export default function AjouterPelerin() {
                   <Upload size={16} className="text-blue-600 mr-2.5 shrink-0" />
                   <div className="min-w-0 flex-1">
                     <p className="text-xs font-bold text-gray-700 truncate">
-                      {fileToUpload ? fileToUpload.name : "Joindre la photo du passeport"}
+                      {fileToUpload ? fileToUpload.name : 'Joindre la copie du passeport'}
                     </p>
                     <p className="text-[9px] text-gray-400">
-                      Préparation automatique de la photo d'identité et de la taille du fichier
+                      Couleurs préservées & poids garanti &lt; 400 Ko
                     </p>
                   </div>
-                  <input type="file" className="hidden" accept="image/*,.pdf" onChange={handlePassportFileChange} />
+                  <input
+                    type="file"
+                    className="hidden"
+                    accept="image/*,.pdf"
+                    onChange={handlePassportFileChange}
+                  />
                 </label>
 
-                {cropImageSrc && (
+                {passportSourceSrc && (
                   <button
                     type="button"
                     onClick={openPassportCropper}
@@ -2388,73 +2666,135 @@ export default function AjouterPelerin() {
               </div>
 
               <div className="bg-gray-50 p-4 rounded-2xl border border-gray-100 flex items-center justify-between px-4">
-                <p className="text-[9px] font-black text-gray-400 uppercase tracking-tighter italic">2. Formulaire Pèlerin</p>
-                <button type="button" onClick={resetForm} className="text-[9px] font-black text-red-500 hover:text-red-700 flex items-center gap-1 uppercase bg-white px-3 py-1.5 rounded-xl border border-gray-200/60 shadow-sm transition-all active:scale-95 cursor-pointer">
+                <p className="text-[9px] font-black text-gray-400 uppercase tracking-tighter">
+                  2. Formulaire Pèlerin
+                </p>
+                <button
+                  type="button"
+                  onClick={() => resetForm(false)}
+                  className="text-[9px] font-black text-red-500 hover:text-red-700 flex items-center gap-1 uppercase bg-white px-3 py-1.5 rounded-xl border border-gray-200/60 shadow-sm transition-all active:scale-95 cursor-pointer"
+                >
                   <RotateCcw size={10} /> Vider le formulaire
                 </button>
               </div>
             </div>
 
-            {/* BLOC DROIT : FORMULAIRE */}
+            {/* BLOC DROIT : FORMULAIRE PC */}
             <form onSubmit={handleSubmit} className="lg:col-span-7 space-y-5">
-              
+              {message.text && (
+                <div
+                  className={`p-4 rounded-2xl font-bold text-xs tracking-wide shadow-xs border ${
+                    message.type === 'success'
+                      ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                      : message.type === 'info'
+                      ? 'bg-blue-50 text-blue-800 border-blue-200'
+                      : 'bg-rose-50 text-rose-800 border-rose-200'
+                  }`}
+                >
+                  {message.text}
+                </div>
+              )}
+
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
-                  <label className="text-[10px] font-black text-gray-400 uppercase ml-4 mb-1 block">Nom (Obligatoire)</label>
-                  <input 
-                    type="text" value={nom} onChange={(e) => setNom(e.target.value)}
-                    className="w-full px-5 py-4 rounded-2xl border-2 border-gray-100 bg-gray-50 text-gray-900 text-base font-bold focus:border-blue-600 outline-none transition-all uppercase"
-                    placeholder="NOM" required 
+                  <div className="flex items-center justify-between ml-4 mr-2 mb-1">
+                    <label className="text-[10px] font-black text-gray-400 uppercase">
+                      Nom de famille *
+                    </label>
+                    {renderFieldVerifyBadge('nom')}
+                  </div>
+                  <input
+                    type="text"
+                    value={nom}
+                    onChange={(e) => {
+                      setNom(e.target.value)
+                      markFieldEdited('nom')
+                    }}
+                    className={`w-full px-5 py-4 rounded-2xl border-2 text-gray-900 text-base font-bold outline-none transition-all uppercase ${
+                      isFieldFlagged('nom')
+                        ? 'border-amber-400 bg-amber-50/40'
+                        : 'border-gray-100 bg-gray-50 focus:border-blue-600 focus:bg-white'
+                    }`}
+                    placeholder="NOM DE FAMILLE"
+                    required
                   />
                 </div>
                 <div>
-                  <label className="text-[10px] font-black text-gray-400 uppercase ml-4 mb-1 block">Prénom (Obligatoire)</label>
-                  <input 
-                    type="text" value={prenom} onChange={(e) => setPrenom(e.target.value)}
-                    className="w-full px-5 py-4 rounded-2xl border-2 border-gray-100 bg-gray-50 text-gray-900 text-base font-bold focus:border-blue-600 outline-none transition-all uppercase"
-                    placeholder="PRÉNOM" required 
+                  <div className="flex items-center justify-between ml-4 mr-2 mb-1">
+                    <label className="text-[10px] font-black text-gray-400 uppercase">
+                      Prénom(s) *
+                    </label>
+                    {renderFieldVerifyBadge('prenom')}
+                  </div>
+                  <input
+                    type="text"
+                    value={prenom}
+                    onChange={(e) => {
+                      setPrenom(e.target.value)
+                      markFieldEdited('prenom')
+                    }}
+                    className={`w-full px-5 py-4 rounded-2xl border-2 text-gray-900 text-base font-bold outline-none transition-all uppercase ${
+                      isFieldFlagged('prenom')
+                        ? 'border-amber-400 bg-amber-50/40'
+                        : 'border-gray-100 bg-gray-50 focus:border-blue-600 focus:bg-white'
+                    }`}
+                    placeholder="TOUS LES PRÉNOMS"
+                    required
                   />
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div>
                   <label className="text-[10px] font-black text-blue-600 uppercase ml-4 mb-1 flex items-center gap-1">
-                    <CalendarDays size={12}/> Date d'inscription (Optionnel)
+                    <CalendarDays size={12} /> Inscription
                   </label>
-                  <input 
-                    type="date" value={dateInscription} onChange={(e) => setDateInscription(e.target.value)}
-                    className="w-full px-5 py-4 rounded-2xl border-2 border-blue-50 bg-blue-50/30 text-gray-900 font-bold focus:border-blue-600 outline-none"
+                  <input
+                    type="date"
+                    value={dateInscription}
+                    onChange={(e) => setDateInscription(e.target.value)}
+                    className="w-full px-4 py-4 rounded-2xl border-2 border-blue-50 bg-blue-50/30 text-gray-900 font-bold text-sm focus:border-blue-600 outline-none"
                   />
                 </div>
 
                 <div>
-                  <label className="text-[10px] font-black text-gray-400 uppercase ml-4 mb-1 block">Campagne (Optionnel)</label>
+                  <label className="text-[10px] font-black text-gray-400 uppercase ml-4 mb-1 block">
+                    Campagne
+                  </label>
                   <select
                     value={campagne ?? ''}
-                    onChange={(e) => setCampagne(e.target.value ? Number(e.target.value) : null)}
-                    className="w-full px-5 py-4 rounded-2xl border-2 border-gray-100 bg-gray-50 text-gray-900 font-bold focus:border-blue-600 outline-none appearance-none"
+                    onChange={(e) =>
+                      setCampagne(e.target.value ? Number(e.target.value) : null)
+                    }
+                    className="w-full px-4 py-4 rounded-2xl border-2 border-gray-100 bg-gray-50 text-gray-900 font-bold text-sm focus:border-blue-600 outline-none"
                   >
                     <option value="">SÉLECTIONNER</option>
-                    {(() => {
-                      const start = 2024
-                      const end = new Date().getFullYear() + 100
-                      const opts = [] as number[]
-                      for (let y = start; y <= end; y++) opts.push(y)
-                      return opts.map(y => <option key={y} value={y}>{y}</option>)
-                    })()}
+                    {campaignOptions.map((y) => (
+                      <option key={y} value={y}>
+                        {y}
+                      </option>
+                    ))}
                   </select>
                 </div>
 
                 <div>
-                  <label className="text-[10px] font-black text-gray-400 uppercase ml-4 mb-1 flex items-center gap-1">
-                    <UserRound size={12}/> Sexe (Optionnel)
-                  </label>
+                  <div className="flex items-center justify-between ml-4 mr-2 mb-1">
+                    <label className="text-[10px] font-black text-gray-400 uppercase flex items-center gap-1">
+                      <UserRound size={12} /> Sexe
+                    </label>
+                    {renderFieldVerifyBadge('sexe')}
+                  </div>
                   <select
                     value={sexe}
-                    onChange={(e) => setSexe(e.target.value)}
-                    className="w-full px-5 py-4 rounded-2xl border-2 border-gray-100 bg-gray-50 text-gray-900 font-bold focus:border-blue-600 outline-none transition-all appearance-none cursor-pointer"
-                    style={{ backgroundImage: 'url("data:image/svg+xml;utf8,<svg xmlns=\'http://www.w3.org/2000/svg\' width=\'24\' height=\'24\' viewBox=\'0 0 24 24\' fill=\'none\' stroke=\'%236b7280\' stroke-width=\'2\' stroke-linecap=\'round\' stroke-linejoin=\'round\'><polyline points=\'6 9 12 15 18 9\'></polyline></svg>")', backgroundRepeat: 'no-repeat', backgroundPosition: 'right 1.25rem center', backgroundSize: '1rem' }}
+                    onChange={(e) => {
+                      setSexe(e.target.value)
+                      markFieldEdited('sexe')
+                    }}
+                    className={`w-full px-4 py-4 rounded-2xl border-2 text-gray-900 font-bold text-sm outline-none transition-all cursor-pointer ${
+                      isFieldFlagged('sexe')
+                        ? 'border-amber-400 bg-amber-50/40'
+                        : 'border-gray-100 bg-gray-50 focus:border-blue-600'
+                    }`}
                   >
                     <option value="">SÉLECTIONNER</option>
                     <option value="HOMME">HOMME</option>
@@ -2465,69 +2805,212 @@ export default function AjouterPelerin() {
 
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="text-[10px] font-black text-gray-400 uppercase ml-4 mb-1 block">Référence (Optionnel)</label>
-                  <input 
-                    type="text" value={reference} onChange={(e) => setReference(e.target.value)}
-                    className="w-full px-5 py-4 rounded-2xl border-2 border-gray-100 bg-gray-50 text-gray-900 font-bold focus:border-blue-600 outline-none uppercase"
+                  <label className="text-[10px] font-black text-gray-400 uppercase ml-4 mb-1 block">
+                    Référence / Groupe
+                  </label>
+                  <input
+                    type="text"
+                    value={reference}
+                    onChange={(e) => setReference(e.target.value)}
+                    className="w-full px-5 py-4 rounded-2xl border-2 border-gray-100 bg-gray-50 text-gray-900 font-bold focus:border-blue-600 focus:bg-white outline-none uppercase"
                     placeholder="GRP-A"
                   />
+                  {smartSuggestions.references.length > 0 && (
+                    <div className="flex flex-wrap gap-1 mt-1.5 ml-1">
+                      {smartSuggestions.references.map((refName) => (
+                        <button
+                          key={refName}
+                          type="button"
+                          onClick={() => setReference(refName)}
+                          className="px-2 py-0.5 rounded-lg bg-gray-100 hover:bg-blue-50 text-gray-600 hover:text-blue-700 text-[10px] font-bold cursor-pointer"
+                        >
+                          {refName}
+                        </button>
+                      ))}
+                    </div>
+                  )}
                 </div>
+
                 <div>
-                  <label className="text-[10px] font-black text-gray-400 uppercase ml-4 mb-1 block">N° Passeport (Optionnel)</label>
-                  <input 
-                    type="text" value={passeport} onChange={(e) => setPasseport(e.target.value)}
-                    className="w-full px-5 py-4 rounded-2xl border-2 border-gray-100 bg-gray-50 text-gray-900 font-bold focus:border-blue-600 outline-none uppercase"
+                  <div className="flex items-center justify-between ml-4 mr-2 mb-1">
+                    <label className="text-[10px] font-black text-gray-400 uppercase">
+                      N° Passeport
+                    </label>
+                    {renderFieldVerifyBadge('passeport')}
+                  </div>
+                  <input
+                    type="text"
+                    value={passeport}
+                    onChange={(e) => {
+                      setPasseport(e.target.value)
+                      markFieldEdited('passeport')
+                    }}
+                    className={`w-full px-5 py-4 rounded-2xl border-2 font-mono text-gray-900 font-bold outline-none uppercase ${
+                      duplicatePassportMatch?.isSameCampagne
+                        ? 'border-rose-400 bg-rose-50/40'
+                        : isFieldFlagged('passeport')
+                        ? 'border-amber-400 bg-amber-50/40'
+                        : 'border-gray-100 bg-gray-50 focus:border-blue-600 focus:bg-white'
+                    }`}
                     placeholder="A000000"
                   />
                 </div>
               </div>
 
+              {renderDuplicateWarning()}
+
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
-                  <label className="text-[10px] font-black text-gray-400 uppercase ml-4 mb-1 block">Intermédiaire / Agence (Optionnel)</label>
-                  <input 
-                    type="text" value={associe} onChange={(e) => setAssocie(e.target.value)}
-                    className="w-full px-5 py-4 rounded-2xl border-2 border-gray-100 bg-gray-50 text-gray-900 font-bold focus:border-blue-600 outline-none uppercase"
-                    placeholder="NOM DE L'ASSOCIÉ" 
+                  <label className="text-[10px] font-black text-gray-400 uppercase ml-4 mb-1 block">
+                    Intermédiaire / Agence
+                  </label>
+                  <input
+                    type="text"
+                    value={associe}
+                    onChange={(e) => setAssocie(e.target.value)}
+                    className="w-full px-5 py-4 rounded-2xl border-2 border-gray-100 bg-gray-50 text-gray-900 font-bold focus:border-blue-600 focus:bg-white outline-none uppercase"
+                    placeholder="NOM DE L'ASSOCIÉ"
                   />
+                  {smartSuggestions.associes.length > 0 && (
+                    <div className="flex flex-wrap gap-1 mt-1.5 ml-1">
+                      {smartSuggestions.associes.map((aName) => (
+                        <button
+                          key={aName}
+                          type="button"
+                          onClick={() => setAssocie(aName)}
+                          className="px-2 py-0.5 rounded-lg bg-gray-100 hover:bg-blue-50 text-gray-600 hover:text-blue-700 text-[10px] font-bold cursor-pointer"
+                        >
+                          {aName}
+                        </button>
+                      ))}
+                    </div>
+                  )}
                 </div>
                 <div>
-                  <label className="text-[10px] font-black text-gray-400 uppercase ml-4 mb-1 block">Téléphone (Optionnel)</label>
-                  <input 
-                    type="text" value={phone} onChange={(e) => setPhone(e.target.value)}
-                    className="w-full px-5 py-4 rounded-2xl border-2 border-gray-100 bg-gray-50 text-gray-900 font-bold focus:border-blue-600 outline-none"
-                    placeholder="70 00 00 00" 
+                  <label className="text-[10px] font-black text-gray-400 uppercase ml-4 mb-1 block">
+                    Téléphone
+                  </label>
+                  <input
+                    type="tel"
+                    value={phone}
+                    onChange={(e) => setPhone(e.target.value)}
+                    className="w-full px-5 py-4 rounded-2xl border-2 border-gray-100 bg-gray-50 text-gray-900 font-bold focus:border-blue-600 focus:bg-white outline-none"
+                    placeholder="70 00 00 00"
                   />
                 </div>
               </div>
 
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="text-[10px] font-black text-gray-400 uppercase ml-4 mb-1 block">Naissance (Optionnel)</label>
-                  <input 
-                    type="date" value={dateNaissance} onChange={(e) => setDateNaissance(e.target.value)}
-                    className="w-full px-4 py-4 rounded-2xl border-2 border-gray-100 bg-gray-50 text-gray-900 font-bold text-sm outline-none"
-                  />
-                </div>
-                <div>
-                  <label className="text-[10px] font-black text-gray-400 uppercase ml-4 mb-1 block">Exp. Passeport (Optionnel)</label>
-                  <input 
-                    type="date" value={dateExpiration} onChange={(e) => setDateExpiration(e.target.value)}
-                    className={`w-full px-4 py-4 rounded-2xl border-2 bg-gray-50 text-gray-900 font-bold text-sm outline-none ${
-                      isPassportExpiringSoon ? 'border-amber-500 bg-amber-50/40' : 'border-gray-100'
+                  <div className="flex items-center justify-between ml-4 mr-2 mb-1">
+                    <label className="text-[10px] font-black text-gray-400 uppercase">
+                      Date de naissance
+                    </label>
+                    <div className="flex items-center gap-1.5">
+                      {pilgrimAgeInfo && !pilgrimAgeInfo.invalid && (
+                        <span
+                          className={`text-[10px] font-black px-2 py-0.5 rounded-md ${
+                            pilgrimAgeInfo.age < 18
+                              ? 'bg-amber-100 text-amber-800'
+                              : 'bg-gray-100 text-gray-700'
+                          }`}
+                        >
+                          {pilgrimAgeInfo.age} ans
+                        </span>
+                      )}
+                      {renderFieldVerifyBadge('dateNaissance')}
+                    </div>
+                  </div>
+                  <input
+                    type="date"
+                    value={dateNaissance}
+                    onChange={(e) => {
+                      setDateNaissance(e.target.value)
+                      markFieldEdited('dateNaissance')
+                    }}
+                    className={`w-full px-4 py-4 rounded-2xl border-2 text-gray-900 font-bold text-sm outline-none ${
+                      isFieldFlagged('dateNaissance') || pilgrimAgeInfo?.invalid
+                        ? 'border-amber-400 bg-amber-50/40'
+                        : 'border-gray-100 bg-gray-50 focus:border-blue-600 focus:bg-white'
                     }`}
                   />
-                  {isPassportExpiringSoon && (
-                    <p className="text-[9px] font-black text-amber-600 mt-1 ml-2 uppercase">
-                      ⚠️ Attention : expire dans moins de 6 mois
+                </div>
+
+                <div>
+                  <div className="flex items-center justify-between ml-4 mr-2 mb-1">
+                    <label className="text-[10px] font-black text-gray-400 uppercase">
+                      Exp. Passeport
+                    </label>
+                    <div className="flex items-center gap-1.5">
+                      {passportValidityInfo.status === 'valid' && (
+                        <span className="text-[10px] font-black text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md">
+                          Valide (+{passportValidityInfo.monthsLeft} mois)
+                        </span>
+                      )}
+                      {renderFieldVerifyBadge('dateExpiration')}
+                    </div>
+                  </div>
+                  <input
+                    type="date"
+                    value={dateExpiration}
+                    onChange={(e) => {
+                      setDateExpiration(e.target.value)
+                      markFieldEdited('dateExpiration')
+                    }}
+                    className={`w-full px-4 py-4 rounded-2xl border-2 text-gray-900 font-bold text-sm outline-none ${
+                      passportValidityInfo.status === 'expired'
+                        ? 'border-rose-500 bg-rose-50 text-rose-900'
+                        : passportValidityInfo.status === 'soon' ||
+                          isFieldFlagged('dateExpiration')
+                        ? 'border-amber-500 bg-amber-50/40'
+                        : 'border-gray-100 bg-gray-50 focus:border-blue-600 focus:bg-white'
+                    }`}
+                  />
+                  {passportValidityInfo.status === 'expired' && (
+                    <p className="text-[10px] font-black text-rose-600 mt-1 ml-2 uppercase">
+                      ⛔ Passeport expiré — renouvellement requis
+                    </p>
+                  )}
+                  {passportValidityInfo.status === 'soon' && (
+                    <p className="text-[10px] font-black text-amber-600 mt-1 ml-2 uppercase">
+                      ⚠️ Expire dans moins de 6 mois ({passportValidityInfo.monthsLeft} mois)
                     </p>
                   )}
                 </div>
               </div>
 
               <div className="space-y-3">
+                {smartSuggestions.packages.length > 0 && (
+                  <div>
+                    <span className="text-[10px] font-black text-gray-400 uppercase ml-4 mb-1.5 block">
+                      Forfaits rapides (pré-remplit le tarif)
+                    </span>
+                    <div className="flex flex-wrap gap-2">
+                      {smartSuggestions.packages.map((pkg) => (
+                        <button
+                          key={pkg.name}
+                          type="button"
+                          onClick={() => applyPackageSuggestion(pkg)}
+                          className={`px-3 py-1.5 rounded-xl text-xs font-black border transition cursor-pointer ${
+                            nomPackage.toUpperCase() === pkg.name
+                              ? 'bg-blue-600 text-white border-blue-600'
+                              : 'bg-blue-50/60 hover:bg-blue-100 text-blue-900 border-blue-200'
+                          }`}
+                        >
+                          {pkg.name}
+                          {pkg.price > 0
+                            ? ` • ${formatHajjMoney(pkg.price, pkg.devise)}`
+                            : ''}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
                 <div>
-                  <label className="text-[10px] font-black text-gray-400 uppercase ml-4 mb-1.5 block">Devise de paiement</label>
+                  <label className="text-[10px] font-black text-gray-400 uppercase ml-4 mb-1.5 block">
+                    Devise de paiement
+                  </label>
                   <div className="grid grid-cols-3 gap-2">
                     {HAJJ_CURRENCIES.map((cur) => {
                       const active = devise === cur.code
@@ -2554,37 +3037,60 @@ export default function AjouterPelerin() {
                     <label className="text-[9px] font-black text-gray-400 uppercase mb-1 block">
                       Prix Total ({getHajjCurrencySymbol(devise)}) *
                     </label>
-                    <input 
-                      type="text" inputMode="numeric" pattern="[0-9\s]*" value={totalInput}
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      pattern="[0-9\s]*"
+                      value={totalInput}
                       onChange={(e) => {
                         setTotalInput(formatAmount(e.target.value))
                         setTotal(parseAmount(e.target.value))
                       }}
-                      className="w-full bg-transparent text-white font-black text-lg outline-none" required 
+                      placeholder="0"
+                      className="w-full bg-transparent text-white font-black text-lg tabular-nums outline-none"
+                      required
                     />
                   </div>
-                  <div className="bg-green-600 p-4 rounded-2xl shadow-inner">
-                    <label className="text-[9px] font-black text-green-200 uppercase mb-1 block">
+                  <div
+                    className={`p-4 rounded-2xl shadow-inner ${
+                      isOverpaid ? 'bg-rose-600' : 'bg-green-600'
+                    }`}
+                  >
+                    <label className="text-[9px] font-black text-white/80 uppercase mb-1 block">
                       Acompte ({getHajjCurrencySymbol(devise)})
                     </label>
-                    <input 
-                      type="text" inputMode="numeric" pattern="[0-9\s]*" value={payeInput}
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      pattern="[0-9\s]*"
+                      value={payeInput}
                       onChange={(e) => {
                         setPayeInput(formatAmount(e.target.value))
                         setPaye(parseAmount(e.target.value))
                       }}
-                      className="w-full bg-transparent text-white font-black text-lg outline-none" 
+                      placeholder="0"
+                      className="w-full bg-transparent text-white font-black text-lg tabular-nums outline-none"
                     />
                   </div>
                 </div>
+
+                {isOverpaid && (
+                  <p className="text-xs font-black text-rose-700 bg-rose-50 border border-rose-200 rounded-xl px-4 py-2.5">
+                    ⚠️ L&apos;acompte dépasse le prix total du forfait !
+                  </p>
+                )}
               </div>
 
               <div>
-                <label className="text-[10px] font-black text-gray-400 uppercase ml-4 mb-1 block">Nom du Package (Optionnel)</label>
-                <input 
-                  type="text" value={nomPackage} onChange={(e) => setNomPackage(e.target.value)}
-                  className="w-full px-5 py-4 rounded-2xl border-2 border-gray-100 bg-gray-50 text-gray-900 text-base font-bold focus:border-blue-600 outline-none transition-all uppercase"
-                  placeholder="Ex: PREMIUM, ÉCONOMIQUE, ETC." 
+                <label className="text-[10px] font-black text-gray-400 uppercase ml-4 mb-1 block">
+                  Nom du Package (Optionnel)
+                </label>
+                <input
+                  type="text"
+                  value={nomPackage}
+                  onChange={(e) => setNomPackage(e.target.value)}
+                  className="w-full px-5 py-4 rounded-2xl border-2 border-gray-100 bg-gray-50 text-gray-900 text-base font-bold focus:border-blue-600 focus:bg-white outline-none transition-all uppercase"
+                  placeholder="Ex: PREMIUM, ÉCONOMIQUE, ETC."
                 />
               </div>
 
@@ -2596,280 +3102,147 @@ export default function AjouterPelerin() {
                   rows={3}
                   value={notes}
                   onChange={(e) => setNotes(e.target.value)}
-                  placeholder="Observations médicales, demandes particulières, régime alimentaire, statut spécial..."
-                  className="w-full px-5 py-3.5 rounded-2xl border-2 border-gray-100 bg-gray-50 text-gray-900 font-semibold text-sm focus:border-blue-600 outline-none transition-all resize-none"
+                  placeholder="Observations médicales, demandes particulières, régime alimentaire, statut spécial…"
+                  className="w-full px-5 py-3.5 rounded-2xl border-2 border-gray-100 bg-gray-50 text-gray-900 font-semibold text-sm focus:border-blue-600 focus:bg-white outline-none transition-all resize-none"
                 />
               </div>
 
               <div className="flex justify-between items-center px-5 py-4 bg-gray-100 rounded-2xl border border-gray-200/50 shadow-sm">
-                 <span className="text-[10px] font-black uppercase text-gray-500 tracking-wider">Reste à payer :</span>
-                 <span className="font-black text-lg text-gray-900 tabular-nums">{formatHajjMoney(total - paye, devise)}</span>
+                <span className="text-[10px] font-black uppercase text-gray-500 tracking-wider">
+                  Reste à payer :
+                </span>
+                <span className="font-black text-lg text-gray-900 tabular-nums">
+                  {formatHajjMoney(Math.max(0, total - paye), devise)}
+                </span>
               </div>
 
-              <button 
-                type="submit" disabled={loading || !agenceId || !profileReady}
-                className={`w-full py-5 rounded-2xl text-white font-black text-lg shadow-lg active:scale-95 transition-all flex items-center justify-center gap-3 ${loading || !agenceId || !profileReady ? 'bg-gray-400 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700 shadow-blue-600/20'}`}
+              <button
+                type="submit"
+                disabled={loading || !agenceId || !profileReady || isOverpaid}
+                className={`w-full py-5 rounded-2xl text-white font-black text-lg shadow-lg active:scale-95 transition-all flex items-center justify-center gap-3 cursor-pointer ${
+                  loading || !agenceId || !profileReady || isOverpaid
+                    ? 'bg-gray-400 cursor-not-allowed'
+                    : 'bg-blue-600 hover:bg-blue-700 shadow-blue-600/20'
+                }`}
               >
                 {loading ? <Loader2 className="animate-spin" /> : <Save size={20} />}
-                {loading ? "ENREGISTREMENT EN COURS..." : !profileReady ? "CHARGEMENT..." : "ENREGISTRER LE DOSSIER"}
+                {loading
+                  ? 'ENREGISTREMENT EN COURS…'
+                  : !profileReady
+                  ? 'CHARGEMENT…'
+                  : 'ENREGISTRER LE DOSSIER'}
               </button>
-
-              {message.text && (
-                <div className={`p-4 rounded-2xl text-center font-bold text-xs tracking-wide shadow-sm border ${message.type === 'success' ? 'bg-green-100 text-green-800 border-green-200' : message.type === 'info' ? 'bg-blue-100 text-blue-800 border-blue-200' : 'bg-red-100 text-red-800 border-red-200'}`}>
-                  {message.text}
-                </div>
-              )}
             </form>
-
           </div>
-
         </div>
       </div>
 
-      {/* ── MODAL APERÇU ET CADRAGE AVANT LECTURE AUTOMATIQUE ── */}
-      {mrzPreviewModalOpen && mrzPreviewImageSrc && (
-        <div 
-          className="fixed inset-0 z-[9999] bg-slate-900/85 backdrop-blur-sm flex items-center justify-center p-3 sm:p-5 animate-in fade-in duration-150"
-          onPointerMove={handleMrzPointerMoveContainer}
-          onPointerUp={handleMrzPointerUpContainer}
-        >
-          <div className="bg-white rounded-3xl shadow-2xl max-w-2xl w-full overflow-hidden border border-slate-200 flex flex-col max-h-[95vh]">
-            <div className="p-4 bg-slate-900 text-white flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <ScanLine size={18} className="text-amber-400" />
-                <h3 className="font-black text-sm uppercase">Aperçu & Zone de lecture du passeport</h3>
+      {/* ── FEUILLE / MODALE DE CONFIRMATION POST-ENREGISTREMENT (ZÉRO RESET BRUTAL) ── */}
+      {savedSummary && (
+        <div className="fixed inset-0 z-[9999] bg-slate-950/70 backdrop-blur-xs flex items-end md:items-center justify-center p-0 md:p-5 animate-in fade-in duration-150">
+          <div className="w-full md:max-w-md bg-white rounded-t-[2rem] md:rounded-3xl shadow-2xl p-6 pb-[max(1.75rem,env(safe-area-inset-bottom))] space-y-5 animate-in slide-in-from-bottom duration-200">
+            <div className="flex items-center gap-3.5">
+              <div className="w-12 h-12 rounded-2xl bg-emerald-100 text-emerald-700 flex items-center justify-center shrink-0">
+                <Check size={24} strokeWidth={3} />
               </div>
-              <button 
-                type="button"
-                onClick={() => setMrzPreviewModalOpen(false)} 
-                className="w-8 h-8 rounded-lg bg-white/10 hover:bg-white/20 flex items-center justify-center cursor-pointer text-slate-300"
-              >
-                <X size={16} />
-              </button>
-            </div>
-
-            <p className="px-4 py-2 bg-amber-50 text-[11px] text-amber-800 font-medium border-b border-amber-200">
-              Vérifiez que le <strong>cadre jaune</strong> entoure bien les deux lignes de codes tout en bas du passeport, puis cliquez sur <strong>Lire le passeport</strong>.
-            </p>
-
-            <div className="p-4 overflow-auto flex-1 flex items-center justify-center bg-slate-950/90 select-none">
-              <div ref={mrzContainerRef} className="relative max-w-full max-h-[55vh] inline-block touch-none">
-                <img src={mrzPreviewImageSrc} alt="Aperçu passeport" className="max-h-[55vh] w-auto max-w-full object-contain pointer-events-none block" />
-                {(() => {
-                  const scalePctX = (mrzCropBox.x / mrzImgDims.width) * 100
-                  const scalePctY = (mrzCropBox.y / mrzImgDims.height) * 100
-                  const scalePctW = (mrzCropBox.width / mrzImgDims.width) * 100
-                  const scalePctH = (mrzCropBox.height / mrzImgDims.height) * 100
-
-                  return (
-                    <div
-                      onPointerDown={handleMrzPointerDownBox}
-                      style={{
-                        left: `${scalePctX}%`,
-                        top: `${scalePctY}%`,
-                        width: `${scalePctW}%`,
-                        height: `${scalePctH}%`,
-                      }}
-                      className="absolute border-2 border-amber-400 bg-amber-400/20 shadow-lg cursor-move rounded-xl touch-none ring-2 ring-amber-500/50"
-                    >
-                      <div className="absolute inset-0 flex items-center justify-center pointer-events-none opacity-40">
-                        <Move size={20} className="text-white" />
-                      </div>
-                      <div
-                        onPointerDown={handleMrzPointerDownHandle}
-                        className="absolute -right-2.5 -bottom-2.5 w-6 h-6 bg-amber-500 border-2 border-white rounded-full flex items-center justify-center cursor-nwse-resize shadow-md touch-none"
-                      >
-                        <div className="w-1.5 h-1.5 bg-white rounded-full" />
-                      </div>
-                    </div>
-                  )
-                })()}
+              <div className="min-w-0">
+                <p className="text-xs font-black uppercase text-emerald-700">
+                  Inscription confirmée
+                </p>
+                <h3 className="text-base font-black text-slate-900 truncate">
+                  {savedSummary.nomComplet}
+                </h3>
+                <p className="text-xs font-semibold text-slate-500">
+                  {savedSummary.numPasseport
+                    ? `Passeport ${savedSummary.numPasseport} • `
+                    : ''}
+                  Reste : {formatHajjMoney(savedSummary.reste, savedSummary.devise)}
+                </p>
               </div>
             </div>
 
-            <div className="p-4 bg-white border-t border-slate-200 flex items-center justify-between gap-3">
+            <div className="space-y-2.5">
               <button
                 type="button"
-                onClick={() => setMrzPreviewModalOpen(false)}
-                className="px-4 py-2.5 rounded-xl border border-slate-300 text-slate-700 font-bold text-xs hover:bg-slate-100 cursor-pointer"
+                onClick={() => resetForm(true)}
+                className="w-full h-12 rounded-2xl bg-blue-600 hover:bg-blue-700 text-white font-black text-xs sm:text-sm flex items-center justify-center gap-2 cursor-pointer shadow-sm"
               >
-                Annuler
+                <UserPlus size={17} />
+                <span>Inscrire un proche / même forfait</span>
               </button>
+
               <button
                 type="button"
-                onClick={handleConfirmAndRunMrzScan}
-                className="flex items-center gap-1.5 px-5 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-black text-xs transition shadow-sm cursor-pointer"
+                onClick={() => resetForm(false)}
+                className="w-full h-12 rounded-2xl bg-slate-900 hover:bg-slate-800 text-white font-black text-xs sm:text-sm flex items-center justify-center gap-2 cursor-pointer"
               >
-                <ScanLine size={16} />
-                <span>Lire le passeport</span>
+                <RotateCcw size={16} />
+                <span>Nouveau dossier vierge</span>
               </button>
+
+              <Link
+                href={`/hajj/pelerin?id=${savedSummary.id}`}
+                className="w-full h-11 rounded-2xl bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold text-xs flex items-center justify-center gap-1.5"
+              >
+                <span>Ouvrir la fiche du pèlerin</span>
+                <ExternalLink size={14} />
+              </Link>
             </div>
           </div>
         </div>
       )}
 
-      {/* ── 🎯 MODAL 1 : RECADRAGE VISAGE NUSUK (480x680 px) ── */}
-      {cropModalOpen && cropImageSrc && (
-        <div 
-          className="fixed inset-0 z-[9999] bg-slate-900/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-5 animate-in fade-in duration-150"
-          onPointerMove={handlePointerMoveContainer}
-          onPointerUp={handlePointerUpContainer}
-        >
-          <div className="bg-white rounded-3xl shadow-2xl max-w-xl w-full overflow-hidden border border-slate-200 flex flex-col max-h-[95vh]">
-            <div className="p-4 bg-slate-900 text-white flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <Crop size={18} className="text-emerald-400" />
-                <h3 className="font-black text-sm uppercase">Ajuster la photo d'identité</h3>
-              </div>
-              <button 
-                type="button"
-                onClick={() => setCropModalOpen(false)} 
-                className="w-8 h-8 rounded-lg bg-white/10 hover:bg-white/20 flex items-center justify-center cursor-pointer text-slate-300"
-              >
-                <X size={16} />
-              </button>
-            </div>
+      {/* ── CAMÉRA GUIDÉE EN DIRECT ── */}
+      <PassportCameraModal
+        open={cameraModalOpen}
+        onClose={() => setCameraModalOpen(false)}
+        onCaptureDataUrl={(dataUrl) => {
+          setCameraModalOpen(false)
+          executeFullPassportScan(dataUrl)
+        }}
+        onPickGalleryFile={(file) => {
+          setCameraModalOpen(false)
+          executeFullPassportScan(file)
+        }}
+      />
 
-            <p className="px-4 py-2 bg-slate-100 text-[11px] text-slate-600 font-medium">
-              Déplacez le <strong>cadre vert</strong> sur le visage ou utilisez le point en bas à droite pour agrandir ou réduire.
-            </p>
+      {/* ── MODALE 1 : RECADRAGE PHOTO D'IDENTITÉ NUSUK (480×680) ── */}
+      <NusukPhotoCropModal
+        open={cropModalOpen}
+        imageSrc={photoSourceSrc || passportSourceSrc}
+        cropBox={cropBox}
+        imgDims={cropImgDims}
+        onChangeCropBox={setCropBox}
+        onRotate90={handleRotatePhotoSource}
+        onCancel={() => setCropModalOpen(false)}
+        onConfirm={handleConfirmCropNusuk}
+      />
 
-            <div className="p-4 overflow-auto flex-1 flex items-center justify-center bg-slate-950/90 select-none">
-              <div ref={cropContainerRef} className="relative max-w-full max-h-[55vh] inline-block touch-none">
-                <img src={cropImageSrc} alt="Passeport" className="max-h-[55vh] w-auto max-w-full object-contain pointer-events-none block" />
-                {(() => {
-                  const scalePctX = (cropBox.x / cropImgDims.width) * 100
-                  const scalePctY = (cropBox.y / cropImgDims.height) * 100
-                  const scalePctW = (cropBox.size / cropImgDims.width) * 100
+      {/* ── MODALE 2 : RECADRAGE PAGE COMPLÈTE DU PASSEPORT ── */}
+      <FreeRectCropModal
+        open={passportCropModalOpen}
+        mode="passport"
+        imageSrc={passportSourceSrc}
+        rectBox={passportCropBox}
+        imgDims={passportImgDims}
+        onChangeRectBox={setPassportCropBox}
+        onRotate90={handleRotatePassportSource}
+        onCancel={() => setPassportCropModalOpen(false)}
+        onConfirm={handleConfirmPassportCrop}
+      />
 
-                  return (
-                    <div
-                      onPointerDown={handlePointerDownBox}
-                      style={{
-                        left: `${scalePctX}%`,
-                        top: `${scalePctY}%`,
-                        width: `${scalePctW}%`,
-                        paddingBottom: `${scalePctW * NUSUK_PHOTO_ASPECT}%`,
-                      }}
-                      className="absolute border-2 border-emerald-400 bg-emerald-400/20 shadow-lg cursor-move rounded-xl touch-none group ring-2 ring-emerald-500/50"
-                    >
-                      <div className="absolute inset-0 flex items-center justify-center pointer-events-none opacity-40">
-                        <Move size={20} className="text-white" />
-                      </div>
-                      <div
-                        onPointerDown={handlePointerDownHandle}
-                        className="absolute -right-2 -bottom-2 w-6 h-6 bg-emerald-500 border-2 border-white rounded-full flex items-center justify-center cursor-nwse-resize shadow-md touch-none"
-                      >
-                        <div className="w-1.5 h-1.5 bg-white rounded-full" />
-                      </div>
-                    </div>
-                  )
-                })()}
-              </div>
-            </div>
-
-            <div className="p-4 bg-white border-t border-slate-200 flex items-center justify-between gap-3">
-              <button
-                type="button"
-                onClick={() => setCropModalOpen(false)}
-                className="px-4 py-2.5 rounded-xl border border-slate-300 text-slate-700 font-bold text-xs hover:bg-slate-100 cursor-pointer"
-              >
-                Annuler
-              </button>
-              <button
-                type="button"
-                onClick={handleConfirmCropNusuk}
-                className="flex items-center gap-1.5 px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs transition shadow-sm cursor-pointer"
-              >
-                <Check size={16} />
-                <span>Valider la photo</span>
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ── 🎯 MODAL 2 : RECADRAGE PASSEPORT COMPLET ── */}
-      {passportCropModalOpen && cropImageSrc && (
-        <div 
-          className="fixed inset-0 z-[9999] bg-slate-900/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-5 animate-in fade-in duration-150"
-          onPointerMove={handlePassportPointerMoveContainer}
-          onPointerUp={handlePassportPointerUpContainer}
-        >
-          <div className="bg-white rounded-3xl shadow-2xl max-w-2xl w-full overflow-hidden border border-slate-200 flex flex-col max-h-[95vh]">
-            <div className="p-4 bg-slate-900 text-white flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <FileCheck size={18} className="text-blue-400" />
-                <h3 className="font-black text-sm uppercase">Recadrer la page du passeport</h3>
-              </div>
-              <button 
-                type="button"
-                onClick={() => setPassportCropModalOpen(false)} 
-                className="w-8 h-8 rounded-lg bg-white/10 hover:bg-white/20 flex items-center justify-center cursor-pointer text-slate-300"
-              >
-                <X size={16} />
-              </button>
-            </div>
-
-            <p className="px-4 py-2 bg-slate-100 text-[11px] text-slate-600 font-medium">
-              Ajustez le <strong>cadre bleu</strong> pour entourer toute la page du passeport.
-            </p>
-
-            <div className="p-4 overflow-auto flex-1 flex items-center justify-center bg-slate-950/90 select-none">
-              <div ref={passportContainerRef} className="relative max-w-full max-h-[55vh] inline-block touch-none">
-                <img src={cropImageSrc} alt="Passeport complet" className="max-h-[55vh] w-auto max-w-full object-contain pointer-events-none block" />
-                {(() => {
-                  const scalePctX = (passportCropBox.x / passportImgDims.width) * 100
-                  const scalePctY = (passportCropBox.y / passportImgDims.height) * 100
-                  const scalePctW = (passportCropBox.width / passportImgDims.width) * 100
-                  const scalePctH = (passportCropBox.height / passportImgDims.height) * 100
-
-                  return (
-                    <div
-                      onPointerDown={handlePassportPointerDownBox}
-                      style={{
-                        left: `${scalePctX}%`,
-                        top: `${scalePctY}%`,
-                        width: `${scalePctW}%`,
-                        height: `${scalePctH}%`,
-                      }}
-                      className="absolute border-2 border-blue-400 bg-blue-400/20 shadow-lg cursor-move rounded-xl touch-none ring-2 ring-blue-500/50"
-                    >
-                      <div className="absolute inset-0 flex items-center justify-center pointer-events-none opacity-40">
-                        <Move size={24} className="text-white" />
-                      </div>
-                      <div
-                        onPointerDown={handlePassportPointerDownHandle}
-                        className="absolute -right-2.5 -bottom-2.5 w-6 h-6 bg-blue-600 border-2 border-white rounded-full flex items-center justify-center cursor-nwse-resize shadow-md touch-none"
-                      >
-                        <div className="w-1.5 h-1.5 bg-white rounded-full" />
-                      </div>
-                    </div>
-                  )
-                })()}
-              </div>
-            </div>
-
-            <div className="p-4 bg-white border-t border-slate-200 flex items-center justify-between gap-3">
-              <button
-                type="button"
-                onClick={() => setPassportCropModalOpen(false)}
-                className="px-4 py-2.5 rounded-xl border border-slate-300 text-slate-700 font-bold text-xs hover:bg-slate-100 cursor-pointer"
-              >
-                Annuler
-              </button>
-              <button
-                type="button"
-                onClick={handleConfirmPassportCrop}
-                className="flex items-center gap-1.5 px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-black text-xs transition shadow-sm cursor-pointer"
-              >
-                <Check size={16} />
-                <span>Valider le passeport</span>
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* ── MODALE 3 : CIBLAGE MANUEL DE LA BANDE MRZ (À LA DEMANDE) ── */}
+      <FreeRectCropModal
+        open={mrzModalOpen}
+        mode="mrz"
+        imageSrc={passportSourceSrc}
+        rectBox={mrzCropBox}
+        imgDims={mrzImgDims}
+        onChangeRectBox={setMrzCropBox}
+        onRotate90={handleRotatePassportSource}
+        onCancel={() => setMrzModalOpen(false)}
+        onConfirm={handleConfirmManualMrzRescan}
+      />
     </div>
   )
 }

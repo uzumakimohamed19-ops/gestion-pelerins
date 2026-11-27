@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { parse as parseMRZ } from 'mrz'
+import { mergeMrzResults, parseMrzSmart, type MrzParseResult } from '@/lib/mrzEngine'
+import { isGeminiConfigured, scanPassportWithGemini } from '@/lib/geminiPassportServer'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -11,204 +12,200 @@ export function OPTIONS() {
   return new NextResponse(null, { status: 204, headers: corsHeaders })
 }
 
-// Nettoyage OCR agressif pour isoler la bande MRZ
-function sanitizeMRZ(raw: string): string {
-  return raw
-    .toUpperCase()
-    .replace(/[([{«]/g, '<')
-    .replace(/[)\]}»]/g, '<')
-    .replace(/[^A-Z0-9<]/g, '')
+async function runOcrSpace(base64Data: string, engine: '2' | '1' = '2'): Promise<string> {
+  const formData = new URLSearchParams()
+  formData.append('base64Image', `data:image/jpeg;base64,${base64Data}`)
+  formData.append('language', 'eng')
+  formData.append('isOverlayRequired', 'false')
+  formData.append('OCREngine', engine)
+  formData.append('scale', 'true')
+  formData.append('detectOrientation', 'true')
+
+  const ocrRes = await fetch('https://api.ocr.space/parse/image', {
+    method: 'POST',
+    headers: {
+      apikey: process.env.OCR_SPACE_API_KEY || 'K86855410088957',
+    },
+    body: formData,
+    signal: AbortSignal.timeout(14000),
+  })
+
+  if (!ocrRes.ok) return ''
+  const ocrData = await ocrRes.json()
+  return ocrData?.ParsedResults?.[0]?.ParsedText || ''
 }
 
-// Correction des confusions courantes pour les chiffres
-function fixDigits(val: string): string {
-  return val
-    .replace(/[ODQ]/g, '0')
-    .replace(/[ILJ]/g, '1')
-    .replace(/Z/g, '2')
-    .replace(/S/g, '5')
-    .replace(/B/g, '8')
-}
+async function runOpenAiVisionFallback(base64Image: string): Promise<MrzParseResult | null> {
+  const apiKey = process.env.OPENAI_API_KEY || process.env.OPENAI_ADMIN_KEY
+  if (!apiKey) return null
 
-// Formatage date YYMMDD -> YYYY-MM-DD
-function formatFieldDate(d: string | null | undefined, isExpiry = false): string {
-  if (!d || d.length < 6) return ''
-  const clean = fixDigits(d)
-  const yy = parseInt(clean.substring(0, 2), 10)
-  const mm = clean.substring(2, 4)
-  const dd = clean.substring(4, 6)
-  const century = isExpiry ? '20' : yy > 30 ? '19' : '20'
-  return `${century}${yy}-${mm}-${dd}`
+  try {
+    const OpenAI = (await import('openai')).default
+    const openai = new OpenAI({ apiKey })
+
+    const cleanB64 = base64Image.replace(/^data:image\/\w+;base64,/, '')
+    const response = await openai.chat.completions.create({
+      model: 'gpt-4o-mini',
+      temperature: 0,
+      messages: [
+        {
+          role: 'system',
+          content: `Tu es un système biométrique expert ICAO 9303 pour passeports.
+Lis l'image du passeport (zone visuelle imprimée + 2 lignes MRZ en bas) et retourne UNIQUEMENT un JSON valide :
+{
+  "nom": "NOM DE FAMILLE EN MAJUSCULES (sans prénom)",
+  "prenom": "TOUS LES PRÉNOMS EN MAJUSCULES",
+  "numPasseport": "NUMÉRO EXACT DU PASSEPORT",
+  "sexe": "HOMME" | "FEMME" | "",
+  "dateNaissance": "YYYY-MM-DD",
+  "dateExpiration": "YYYY-MM-DD",
+  "nationalite": "CODE 3 LETTRES",
+  "mrzLine1": "ligne 1 MRZ 44 caractères si visible sinon vide",
+  "mrzLine2": "ligne 2 MRZ 44 caractères si visible sinon vide"
+}`,
+        },
+        {
+          role: 'user',
+          content: [
+            { type: 'text', text: 'Extrais les données exactes de ce passeport :' },
+            {
+              type: 'image_url',
+              image_url: { url: `data:image/jpeg;base64,${cleanB64}`, detail: 'high' },
+            },
+          ],
+        },
+      ],
+      response_format: { type: 'json_object' },
+    })
+
+    const rawJson = response.choices[0]?.message?.content || '{}'
+    const parsed = JSON.parse(rawJson)
+
+    const mrzParsed =
+      parsed.mrzLine1 || parsed.mrzLine2
+        ? parseMrzSmart([parsed.mrzLine1 || '', parsed.mrzLine2 || ''], 'vision-mrz')
+        : null
+
+    const vizCandidate: MrzParseResult = {
+      nom: String(parsed.nom || '').toUpperCase().trim(),
+      prenom: String(parsed.prenom || '').toUpperCase().trim(),
+      numPasseport: String(parsed.numPasseport || '').toUpperCase().replace(/\s+/g, '').trim(),
+      sexe: parsed.sexe === 'FEMME' ? 'FEMME' : parsed.sexe === 'HOMME' ? 'HOMME' : '',
+      dateNaissance: /^\d{4}-\d{2}-\d{2}$/.test(parsed.dateNaissance || '')
+        ? parsed.dateNaissance
+        : '',
+      dateExpiration: /^\d{4}-\d{2}-\d{2}$/.test(parsed.dateExpiration || '')
+        ? parsed.dateExpiration
+        : '',
+      nationalite: String(parsed.nationalite || '').toUpperCase().trim(),
+      paysEmetteur: String(parsed.nationalite || '').toUpperCase().trim(),
+      verified: {
+        passeport: Boolean(
+          mrzParsed?.verified.passeport && mrzParsed.numPasseport === parsed.numPasseport
+        ),
+        dateNaissance: Boolean(
+          mrzParsed?.verified.dateNaissance && mrzParsed.dateNaissance === parsed.dateNaissance
+        ),
+        dateExpiration: Boolean(
+          mrzParsed?.verified.dateExpiration && mrzParsed.dateExpiration === parsed.dateExpiration
+        ),
+        composite: Boolean(mrzParsed?.verified.composite),
+        nomPrenom: Boolean(parsed.nom && parsed.prenom),
+      },
+      unverifiedFields: [],
+      repairedFields: [],
+      confidenceScore: 88,
+      source: 'openai-vision',
+    }
+
+    return mergeMrzResults([mrzParsed, vizCandidate])
+  } catch (e) {
+    console.warn('[scan-mrz] OpenAI Vision fallback non disponible:', e)
+    return null
+  }
 }
 
 export async function POST(req: NextRequest) {
   try {
-    const { imageBase64 } = await req.json()
-    if (!imageBase64) {
+    const body = await req.json()
+    const { imageBase64, fullImageBase64 } = body || {}
+    if (!imageBase64 && !fullImageBase64) {
       return NextResponse.json({ error: 'Image manquante' }, { status: 400, headers: corsHeaders })
     }
 
-    const base64Data = imageBase64.replace(/^data:image\/\w+;base64,/, '')
+    const candidates: Array<MrzParseResult | null> = []
 
-    // Appel OCR.space avec votre clé personnelle gratuite
-    const formData = new URLSearchParams()
-    formData.append('base64Image', `data:image/jpeg;base64,${base64Data}`)
-    formData.append('language', 'eng')
-    formData.append('isOverlayRequired', 'false')
-    formData.append('OCREngine', '2') // Moteur optimisé pour formulaires, cartes et passeports
-    formData.append('scale', 'true')
-    formData.append('detectOrientation', 'true')
-
-    const ocrRes = await fetch('https://api.ocr.space/parse/image', {
-      method: 'POST',
-      headers: { 
-        apikey: process.env.OCR_SPACE_API_KEY || 'K86855410088957' 
-      },
-      body: formData,
-    })
-
-    const ocrData = await ocrRes.json()
-    const parsedText: string = ocrData?.ParsedResults?.[0]?.ParsedText || ''
-
-    if (!parsedText.trim()) {
-      return NextResponse.json({ 
-        error: 'Texte illisible sur cette photo. Ajustez la luminosité ou le cadrage.' 
-      }, { status: 422, headers: corsHeaders })
-    }
-
-    // Récupération de toutes les lignes brutes
-    const allLines = parsedText
-      .split(/\r?\n/)
-      .map(l => sanitizeMRZ(l))
-      .filter(l => l.length >= 10)
-
-    let line1 = ''
-    let line2 = ''
-
-    // 1. Détection de Ligne 1 (commence par P< ou P avec chevrons)
-    const l1Index = allLines.findIndex(l => /^P[<A-Z]/.test(l) && l.includes('<<'))
-    if (l1Index !== -1) {
-      line1 = allLines[l1Index]
-      if (l1Index + 1 < allLines.length) {
-        line2 = allLines[l1Index + 1]
-      }
-    }
-
-    // Recherche de secours par densité de chevrons
-    if (!line1 || !line2) {
-      const candidates = allLines.filter(l => (l.match(/</g) || []).length >= 3 || /[A-Z0-9]{30,}/.test(l))
-      if (candidates.length >= 2) {
-        line1 = candidates[candidates.length - 2]
-        line2 = candidates[candidates.length - 1]
-      } else if (candidates.length === 1) {
-        line2 = candidates[0]
-      }
-    }
-
-    // Recollement si l'OCR a tronqué la première ligne
-    if (line1.length < 35 && l1Index !== -1 && l1Index + 1 < allLines.length) {
-      if (allLines[l1Index + 1].includes('<')) {
-        line1 += allLines[l1Index + 1]
-      }
-    }
-
-    let nom = ''
-    let prenom = ''
-    let numPasseport = ''
-    let dateNaissance = ''
-    let dateExpiration = ''
-    let sexe: 'HOMME' | 'FEMME' | '' = ''
-
-    // TENTATIVE 1 : Décodage officiel ICAO TD3 (44 caractères)
-    if (line1 && line2) {
+    // 🚀 PRIORITÉ 1 : GOOGLE GEMINI (v1beta, ~0.9s) + validation ICAO 9303
+    if (isGeminiConfigured()) {
       try {
-        const l1_44 = (line1.length > 44 ? line1.substring(0, 44) : line1.padEnd(44, '<'))
-        const l2_44 = (line2.length > 44 ? line2.substring(0, 44) : line2.padEnd(44, '<'))
-        const parsed = parseMRZ([l1_44, l2_44])
-        const f = parsed.fields
-
-        nom = f.lastName ? f.lastName.trim() : ''
-        prenom = f.firstName ? f.firstName.trim() : ''
-        numPasseport = (f.documentNumber || '').replace(/</g, '').trim()
-        dateNaissance = formatFieldDate(f.birthDate, false)
-        dateExpiration = formatFieldDate(f.expirationDate, true)
-        sexe = f.sex === 'male' || f.sex === 'M' ? 'HOMME' : f.sex === 'female' || f.sex === 'F' ? 'FEMME' : ''
-      } catch {
-        // En cas de checksum strict non validé, repli vers le mode forcé
+        // On envoie uniquement l'image complète (ou la bande MRZ si seule fournie) pour diviser par 2 le poids et le temps d'inférence
+        const geminiRes = await scanPassportWithGemini(String(fullImageBase64 || imageBase64))
+        if (geminiRes && (geminiRes.nom || geminiRes.numPasseport)) {
+          candidates.push(geminiRes)
+          if (geminiRes.confidenceScore >= 85 && (geminiRes.nom || geminiRes.numPasseport)) {
+            return NextResponse.json(geminiRes, { headers: corsHeaders })
+          }
+        }
+      } catch (err) {
+        console.warn('[scan-mrz] Gemini indisponible, bascule vers secours OCR :', err)
       }
     }
 
-    // TENTATIVE 2 : MODE FORCÉ (Fuzzy Parser)
-    if (!nom || !numPasseport || !dateNaissance) {
-      // A. Noms et prénoms depuis la ligne 1
-      if (line1) {
-        const cleanL1 = line1.replace(/^P[<A-Z0-9]{1,5}/, '')
-        const tokens = cleanL1.split('<<')
-        if (tokens.length >= 2) {
-          nom = nom || tokens[0].replace(/</g, ' ').trim()
-          prenom = prenom || tokens[1].split('<')[0].replace(/</g, ' ').trim()
-        } else {
-          const parts = cleanL1.split('<').filter(Boolean)
-          nom = nom || parts[0] || ''
-          prenom = prenom || parts[1] || ''
-        }
+    // 🔄 PRIORITÉ 2 (Secours si GEMINI_API_KEY absente ou quota dépassé) : OCR.space Engine 2
+    const mrzB64 = String(imageBase64 || fullImageBase64).replace(/^data:image\/\w+;base64,/, '')
+    try {
+      const textE2 = await runOcrSpace(mrzB64, '2')
+      if (textE2.trim()) {
+        const resE2 = parseMrzSmart(textE2, 'ocr-e2')
+        if (resE2) candidates.push(resE2)
       }
-
-      // B. Numéro et dates depuis la ligne 2 (ou tout le texte fusionné)
-      const fullText = allLines.join('')
-      const targetL2 = line2 || fullText
-
-      // Numéro de passeport
-      if (!numPasseport) {
-        const passMatch = targetL2.match(/([A-Z]{1,2}[0-9]{6,8})/)
-        if (passMatch) {
-          numPasseport = passMatch[1]
-        } else if (line2.length >= 9) {
-          numPasseport = line2.substring(0, 9).replace(/</g, '').trim()
-        }
-      }
-
-      // Sexe et dates
-      const sexPos = targetL2.search(/[0-9]{6}[0-9<][MF][0-9]{6}/)
-      if (sexPos !== -1) {
-        const sexChar = targetL2[sexPos + 7]
-        sexe = sexChar === 'F' ? 'FEMME' : 'HOMME'
-        const rawDob = targetL2.substring(sexPos, sexPos + 6)
-        const rawExp = targetL2.substring(sexPos + 8, sexPos + 14)
-        dateNaissance = dateNaissance || formatFieldDate(rawDob, false)
-        dateExpiration = dateExpiration || formatFieldDate(rawExp, true)
-      } else {
-        if (targetL2.includes('F')) {
-          const idx = targetL2.indexOf('F')
-          if (idx >= 15 && idx <= 25) sexe = 'FEMME'
-        } else if (targetL2.includes('M')) {
-          const idx = targetL2.indexOf('M')
-          if (idx >= 15 && idx <= 25) sexe = 'HOMME'
-        }
-
-        if (line2.length >= 28) {
-          const rawDob = line2.substring(13, 19)
-          const rawExp = line2.substring(21, 27)
-          dateNaissance = dateNaissance || formatFieldDate(rawDob, false)
-          dateExpiration = dateExpiration || formatFieldDate(rawExp, true)
-        }
-      }
+    } catch (e) {
+      console.warn('[scan-mrz] OCR Engine 2 timeout/error:', e)
     }
 
-    if (!nom && !numPasseport) {
-      return NextResponse.json({
-        error: "Bande MRZ trop dégradée. Essayez avec un meilleur éclairage ou sans reflet.",
-      }, { status: 422, headers: corsHeaders })
+    const bestSoFar = mergeMrzResults(candidates)
+    if (
+      bestSoFar &&
+      bestSoFar.verified.passeport &&
+      bestSoFar.verified.dateNaissance &&
+      bestSoFar.verified.dateExpiration &&
+      bestSoFar.nom &&
+      bestSoFar.prenom
+    ) {
+      return NextResponse.json(bestSoFar, { headers: corsHeaders })
     }
 
-    return NextResponse.json({
-      nom,
-      prenom,
-      numPasseport,
-      dateNaissance,
-      dateExpiration,
-      sexe,
-    }, { headers: corsHeaders })
+    // 🔄 PRIORITÉ 3 : Secours OpenAI Vision / OCR Engine 1
+    const fallbackTasks: Array<Promise<MrzParseResult | null>> = []
+    if (process.env.OPENAI_API_KEY || process.env.OPENAI_ADMIN_KEY) {
+      fallbackTasks.push(runOpenAiVisionFallback(String(fullImageBase64 || imageBase64)))
+    }
+    if (!bestSoFar || bestSoFar.confidenceScore < 75) {
+      fallbackTasks.push(
+        runOcrSpace(mrzB64, '1')
+          .then((txt) => (txt.trim() ? parseMrzSmart(txt, 'ocr-e1') : null))
+          .catch(() => null)
+      )
+    }
+
+    if (fallbackTasks.length > 0) {
+      const extraResults = await Promise.all(fallbackTasks)
+      candidates.push(...extraResults)
+    }
+
+    const merged = mergeMrzResults(candidates)
+
+    if (!merged || (!merged.nom && !merged.numPasseport)) {
+      return NextResponse.json(
+        {
+          error:
+            'Bande MRZ illisible sur cette photo. Évitez les reflets et assurez-vous que les 2 lignes du bas soient nettes.',
+        },
+        { status: 422, headers: corsHeaders }
+      )
+    }
+
+    return NextResponse.json(merged, { headers: corsHeaders })
   } catch (err: unknown) {
     console.error('Erreur API Scan MRZ:', err)
     const msg = err instanceof Error ? err.message : 'Erreur interne'
