@@ -10,6 +10,8 @@ import AuthGuard from '@/components/AuthGuard'
 import ProfileProvider, { ProfileRouteGuard } from '@/lib/ProfileContext'
 import AppUpdateBanner from '@/components/AppUpdateBanner'
 import PushActivityTracker from '@/components/PushActivityTracker'
+import NetworkProvider from '@/lib/NetworkContext'
+import OfflinePill from '@/components/OfflinePill'
 
 export const metadata = {
   title: 'Agence Pro',
@@ -103,30 +105,33 @@ export default function RootLayout({
       </head>
       
       <body className="min-h-screen m-0 p-0 antialiased text-slate-900 flex flex-col overscroll-y-contain bg-white dark:bg-[#000000]">
-        <AppUpdateBanner />
-        <AppCacheGuard />
-        <ClientPowerSyncWrapper>
-          <ProfileProvider>
-            <AuthGuard>
-              <ProfileRouteGuard>
-                <UIProvider>
-                  <NativeBackButton />
-                  <ThemeColorSync />
+        <NetworkProvider>
+          <AppUpdateBanner />
+          <AppCacheGuard />
+          <ClientPowerSyncWrapper>
+            <ProfileProvider>
+              <AuthGuard>
+                <ProfileRouteGuard>
+                  <UIProvider>
+                    <NativeBackButton />
+                    <ThemeColorSync />
 
-                  {/* Bandeau d'arrière-plan sans décalage de contenu */}
-                  <TopBarContainer />
+                    {/* Bandeau d'arrière-plan sans décalage de contenu */}
+                    <TopBarContainer />
 
-                  <main className="flex-1 flex flex-col min-h-screen lg:pl-64">
-                    {children}
-                  </main>
+                    <main className="flex-1 flex flex-col min-h-screen lg:pl-64">
+                      {children}
+                    </main>
 
-                  <PwaInstaller />
-                  <PushActivityTracker />
-                </UIProvider>
-              </ProfileRouteGuard>
-            </AuthGuard>
-          </ProfileProvider>
-        </ClientPowerSyncWrapper>
+                    <OfflinePill />
+                    <PwaInstaller />
+                    <PushActivityTracker />
+                  </UIProvider>
+                </ProfileRouteGuard>
+              </AuthGuard>
+            </ProfileProvider>
+          </ClientPowerSyncWrapper>
+        </NetworkProvider>
       </body>
     </html>
   )

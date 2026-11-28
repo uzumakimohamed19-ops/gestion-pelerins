@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useMemo } from 'react'
 import { supabase, getUser } from '@/lib/supabase'
+import { performFullLogout } from '@/lib/sessionCleanup'
 import Link from 'next/link'
 import Image from 'next/image'
 import { usePathname, useRouter } from 'next/navigation'
@@ -148,12 +149,9 @@ export default function Navbar() {
   }, [lastScrollY, isMenuOpen])
 
   const handleLogout = async () => {
-    if (currentUserId) {
-      localStorage.removeItem(`cached_nom_agence_${currentUserId}`)
-      localStorage.removeItem(`cached_user_name_${currentUserId}`)
-      localStorage.removeItem(`cached_user_role_${currentUserId}`)
-    }
-    await supabase.auth.signOut({ scope: 'local' })
+    clearProfile()
+    setIsMenuOpen(false)
+    await performFullLogout({ scope: 'local' })
     router.replace('/login')
     router.refresh()
   }

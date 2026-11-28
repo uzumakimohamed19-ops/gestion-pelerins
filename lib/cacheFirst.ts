@@ -52,7 +52,23 @@ export async function cacheFirstFetch<T>(options: CacheFirstFetchOptions<T>) {
   const isNativeMobile = Capacitor.isNativePlatform()
 
   if (isNativeMobile) {
+    let cachedNative: T | undefined
     try {
+      cachedNative = await get<T>(cacheKey)
+      if (cachedNative !== undefined && cachedNative !== null) {
+        onCache(cachedNative)
+        if (setLoading) setLoading(false)
+      }
+    } catch {}
+
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      if (setLoading) setLoading(false)
+      if (setBackgroundUpdating) setBackgroundUpdating(false)
+      return
+    }
+
+    try {
+      if (cachedNative !== undefined && setBackgroundUpdating) setBackgroundUpdating(true)
       const remote = await fetchWithTimeout(fetchRemote, timeoutMs)
       if (remote !== undefined && remote !== null) {
         onRemote(remote)

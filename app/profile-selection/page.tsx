@@ -20,7 +20,7 @@ import {
 } from 'lucide-react'
 import { useWorkProfile, type WorkProfile, type WorkProfileType } from '@/lib/ProfileContext'
 import { usePowerSync, useQuery } from '@powersync/react'
-import { requireSupabaseRows, supabase, getUser } from '@/lib/supabase'
+import { requireSupabaseRows, supabase, getSession, getPersistedSupabaseUserId } from '@/lib/supabase'
 
 export type ExtendedProfileType = WorkProfileType | 'intermediaire'
 
@@ -32,6 +32,7 @@ export default function ProfileSelectionPage() {
     profiles,
     loading: profilesLoading,
     isBiometricAvailable,
+    verifyProfilePin,
     selectProfile,
     unlockWithBiometrics,
     createProfile,
@@ -148,8 +149,8 @@ export default function ProfileSelectionPage() {
       try {
         if (profilesLoading) return
 
-        const { data: authData } = await getUser()
-        const uid = authData.user?.id
+        const persistedUid = getPersistedSupabaseUserId()
+        const uid = persistedUid || (await getSession()).data?.session?.user?.id || null
 
         if (!uid) {
           if (isMounted) {
@@ -603,7 +604,8 @@ export default function ProfileSelectionPage() {
 
     startTransition(async () => {
       try {
-        await selectProfile(principalDirectorProfile, adminPin)
+        // Vérifie le PIN du Directeur Principal SANS connecter sa session
+        await verifyProfilePin(principalDirectorProfile, adminPin)
         setModalAdminPinOpen(false)
         setAdminPin('')
 
@@ -621,8 +623,12 @@ export default function ProfileSelectionPage() {
           setSuccess('Direction principale définie avec succès.')
         }
         setPendingAction(null)
-      } catch {
-        setError('Code PIN du Directeur Principal incorrect. Accès refusé.')
+      } catch (err: unknown) {
+        setError(
+          err instanceof Error
+            ? err.message
+            : 'Code PIN du Directeur Principal incorrect. Accès refusé.'
+        )
       }
     })
   }

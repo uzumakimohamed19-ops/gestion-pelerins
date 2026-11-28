@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { supabase, getSession } from '@/lib/supabase'
+import { clearAllLocalSessionArtifacts } from '@/lib/sessionCleanup'
 import { useRouter } from 'next/navigation'
 import { Lock, Mail, Loader2, AlertCircle, ShieldCheck, CheckSquare, Square, KeyRound, X, CheckCircle2 } from 'lucide-react'
 
@@ -31,22 +32,32 @@ export default function LoginPage() {
   const [changeError, setChangeError] = useState('')
   const [changeSuccess, setChangeSuccess] = useState('')
 
-  // 1. Pré-remplissage et auto-redirection propre si session déjà active
+  // 1. Pré-remplissage des identifiants mémorisés et redirection rapide si session déjà active
   useEffect(() => {
-    const savedEmail = localStorage.getItem('remembered_email')
-    const savedPassword = localStorage.getItem('remembered_password')
-
-    if (savedEmail) {
-      setEmail(savedEmail)
-      setChangeEmail(savedEmail)
-    }
-    if (savedPassword) setPassword(savedPassword)
+    try {
+      const savedEmail = localStorage.getItem('remembered_email')
+      const savedPassword = localStorage.getItem('remembered_password')
+      if (savedEmail) {
+        setEmail(savedEmail)
+        setChangeEmail(savedEmail)
+      }
+      if (savedPassword) {
+        setPassword(savedPassword)
+      }
+    } catch {}
 
     async function checkExistingSession() {
       try {
         const { data: { session } } = await getSession()
         if (session?.user) {
-          router.replace('/profile-selection')
+          const uid = session.user.id
+          const activeProfileId = localStorage.getItem(`active_profile_id_${uid}`)
+          const lastActivity = Number(localStorage.getItem(`profile_last_activity_${uid}`) || 0)
+          const stillActive =
+            Boolean(activeProfileId) &&
+            lastActivity > 0 &&
+            Date.now() - lastActivity <= 15 * 60 * 1000
+          router.replace(stillActive ? '/' : '/profile-selection')
         }
       } catch (err) {
         console.warn('[LoginPage] Impossible de vérifier la session:', err)
@@ -64,14 +75,16 @@ export default function LoginPage() {
     setError('')
 
     try {
-      // Mémorisation des identifiants
-      if (rememberMe) {
-        localStorage.setItem('remembered_email', email)
-        localStorage.setItem('remembered_password', password)
-      } else {
-        localStorage.removeItem('remembered_email')
-        localStorage.removeItem('remembered_password')
-      }
+      // Mémorisation des identifiants pour reconnexion rapide
+      try {
+        if (rememberMe) {
+          localStorage.setItem('remembered_email', email.trim())
+          localStorage.setItem('remembered_password', password)
+        } else {
+          localStorage.removeItem('remembered_email')
+          localStorage.removeItem('remembered_password')
+        }
+      } catch {}
 
       if (typeof navigator !== 'undefined' && !navigator.onLine) {
         throw new Error('Connexion Internet requise pour vous connecter.')
@@ -201,15 +214,18 @@ export default function LoginPage() {
         throw updateRes.error
       }
 
-      // 3. Déconnexion immédiate pour laisser l'utilisateur se reconnecter proprement
-      await supabase.auth.signOut({ scope: 'local' })
+      // 3. Révoque toutes les sessions actives (autres appareils inclus) pour la sécurité
+      clearAllLocalSessionArtifacts()
+      await supabase.auth.signOut({ scope: 'global' })
 
-      // 4. Mise à jour des identifiants mémorisés si nécessaire
-      if (localStorage.getItem('remembered_email') === changeEmail.trim()) {
-        localStorage.setItem('remembered_password', newPassword)
-      }
+      // 4. Mise à jour des identifiants mémorisés si l'email correspond
+      try {
+        if (localStorage.getItem('remembered_email') === changeEmail.trim()) {
+          localStorage.setItem('remembered_password', newPassword)
+        }
+      } catch {}
 
-      // 5. Mise à jour de l'état principal du formulaire
+      // 5. Mise à jour du formulaire principal
       setEmail(changeEmail.trim())
       setPassword(newPassword)
 

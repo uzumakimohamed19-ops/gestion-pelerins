@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useEffect, useState, useRef } from "react";
+import { usePathname } from "next/navigation";
 import { App } from "@capacitor/app";
 import { Capacitor } from "@capacitor/core";
 import { PowerSyncContext } from "@powersync/react";
@@ -14,6 +15,7 @@ export default function ClientPowerSyncWrapper({
 }: {
   children: React.ReactNode;
 }) {
+  const pathname = usePathname();
   const [ready, setReady] = useState(false);
   const connectorRef = useRef<SupabaseConnector | null>(null);
   const isConnectingRef = useRef(false);
@@ -205,10 +207,11 @@ export default function ClientPowerSyncWrapper({
           clearRetryTimer();
           clearReconnectTimers();
           isConnectingRef.current = false;
-          void powersync.disconnect().then(() => {
-            console.log("⚪ PowerSync : Déconnecté");
+          // Déconnecter ET vider SQLite local pour éviter toute fuite entre comptes agences
+          void powersync.disconnectAndClear().then(() => {
+            console.log("⚪ PowerSync : Déconnecté et cache local vidé");
           }).catch(() => {
-            /* ignore */
+            void powersync.disconnect().catch(() => {});
           });
         }, 0);
       }
@@ -226,7 +229,8 @@ export default function ClientPowerSyncWrapper({
     };
   }, []);
 
-  if (!ready) {
+  // Ne jamais bloquer l'écran de connexion /login derrière l'initialisation SQLite
+  if (!ready && pathname !== "/login") {
     return (
       <main className="fixed inset-0 z-50 bg-[#F4F6F8] flex flex-col items-center justify-center p-6 select-none">
         <div className="relative flex items-center justify-center">

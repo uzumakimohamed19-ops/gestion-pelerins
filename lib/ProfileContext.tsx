@@ -3,7 +3,13 @@
 import { createContext, useContext, useEffect, useMemo, useState, useCallback, useRef } from 'react'
 import { usePathname, useRouter } from 'next/navigation'
 import { usePowerSync, useQuery } from '@powersync/react'
-import { requireSupabaseRows, supabase, getSession, isOfflineMode } from '@/lib/supabase'
+import {
+  requireSupabaseRows,
+  supabase,
+  getSession,
+  getPersistedSupabaseUserId,
+} from '@/lib/supabase'
+import { clearAllLocalSessionArtifacts } from '@/lib/sessionCleanup'
 import { Capacitor } from '@capacitor/core'
 import { App as CapacitorApp } from '@capacitor/app'
 import { NativeBiometric } from '@capgo/capacitor-native-biometric'
@@ -25,6 +31,7 @@ type ProfileContextValue = {
   profile: WorkProfile | null
   currentProfile: WorkProfile | null
   profiles: WorkProfile[]
+  userRole: string | null
   loading: boolean
   isDirection: boolean
   isIntermediaire: boolean
@@ -33,6 +40,7 @@ type ProfileContextValue = {
   canAccessHajjEtatGeneral: boolean
   comptaAccessLevel: ComptaAccessLevel
   isBiometricAvailable: boolean
+  verifyProfilePin: (profile: WorkProfile, pin: string) => Promise<void>
   selectProfile: (profile: WorkProfile, pin: string) => Promise<void>
   unlockWithBiometrics: (profile: WorkProfile) => Promise<void>
   createProfile: (name: string, type: WorkProfileType, pin: string) => Promise<void>
@@ -44,7 +52,10 @@ const ProfileContext = createContext<ProfileContextValue | null>(null)
 const SESSION_PROFILE_ID_KEY = (userId: string) => `active_profile_id_${userId}`
 const SESSION_PROFILE_DATA_KEY = (userId: string) => `active_profile_data_${userId}`
 const LAST_ACTIVITY_KEY = (userId: string) => `profile_last_activity_${userId}`
+const PIN_ATTEMPTS_KEY = (profileId: string) => `pin_attempts_${profileId}`
+
 const INACTIVITY_TIMEOUT_MS = 15 * 60 * 1000 // 15 minutes
+const ACTIVITY_WRITE_THROTTLE_MS = 30 * 1000 // 30 secondes max entre deux écritures localStorage
 
 async function hashPin(pin: string): Promise<string> {
   const bytes = new TextEncoder().encode(pin)
@@ -52,6 +63,111 @@ async function hashPin(pin: string): Promise<string> {
   return Array.from(new Uint8Array(digest))
     .map((b) => b.toString(16).padStart(2, '0'))
     .join('')
+}
+
+/**
+ * Protection anti force-brute par profil :
+ * - 5 essais ratés → blocage 30 secondes
+ * - 8 essais ratés ou plus → blocage 2 minutes
+ */
+function checkPinLockout(profileId: string): void {
+  if (typeof window === 'undefined') return
+  try {
+    const raw = localStorage.getItem(PIN_ATTEMPTS_KEY(profileId))
+    if (!raw) return
+    const parsed = JSON.parse(raw) as { count?: number; lockedUntil?: number }
+    if (parsed.lockedUntil && Date.now() < parsed.lockedUntil) {
+      const remainingSec = Math.max(1, Math.ceil((parsed.lockedUntil - Date.now()) / 1000))
+      throw new Error(
+        `Trop de tentatives incorrectes. Réessayez dans ${remainingSec} seconde${remainingSec > 1 ? 's' : ''}.`
+      )
+    }
+  } catch (err) {
+    if (err instanceof Error && err.message.startsWith('Trop de tentatives')) {
+      throw err
+    }
+  }
+}
+
+function recordPinFailure(profileId: string): string {
+  if (typeof window === 'undefined') return 'Code PIN incorrect.'
+  try {
+    const raw = localStorage.getItem(PIN_ATTEMPTS_KEY(profileId))
+    const prev = raw ? (JSON.parse(raw) as { count?: number }) : { count: 0 }
+    const count = (prev.count || 0) + 1
+    let lockedUntil = 0
+    if (count >= 8) {
+      lockedUntil = Date.now() + 2 * 60 * 1000
+    } else if (count >= 5) {
+      lockedUntil = Date.now() + 30 * 1000
+    }
+    localStorage.setItem(PIN_ATTEMPTS_KEY(profileId), JSON.stringify({ count, lockedUntil }))
+    if (lockedUntil > 0) {
+      const secs = Math.ceil((lockedUntil - Date.now()) / 1000)
+      return `Code PIN incorrect. Accès bloqué pendant ${secs}s par sécurité.`
+    }
+    const left = Math.max(1, 5 - count)
+    if (count >= 3) {
+      return `Code PIN incorrect (${left} essai${left > 1 ? 's' : ''} restant${left > 1 ? 's' : ''} avant verrouillage temporaire).`
+    }
+  } catch {}
+  return 'Code PIN incorrect.'
+}
+
+function resetPinFailures(profileId: string): void {
+  if (typeof window === 'undefined') return
+  try {
+    localStorage.removeItem(PIN_ATTEMPTS_KEY(profileId))
+  } catch {}
+}
+
+/**
+ * Stocke uniquement les métadonnées publiques du profil actif (JAMAIS `pin_hash`)
+ */
+function persistSafeProfileSnapshot(userId: string, p: WorkProfile) {
+  try {
+    const safeSnapshot = {
+      id: p.id,
+      user_id: p.user_id,
+      name: p.name,
+      profile_type: p.profile_type,
+    }
+    localStorage.setItem(SESSION_PROFILE_ID_KEY(userId), p.id)
+    localStorage.setItem(SESSION_PROFILE_DATA_KEY(userId), JSON.stringify(safeSnapshot))
+    localStorage.setItem(`last_selected_profile_id_${userId}`, p.id)
+
+    const accessLevel: ComptaAccessLevel =
+      p.profile_type === 'direction'
+        ? 'full'
+        : p.profile_type === 'intermediaire'
+        ? 'restricted'
+        : 'none'
+    localStorage.setItem('compta_access_level', accessLevel)
+  } catch {}
+}
+
+function readSafeProfileSnapshot(userId: string, expectedId: string): WorkProfile | null {
+  try {
+    const cached = localStorage.getItem(SESSION_PROFILE_DATA_KEY(userId))
+    if (!cached) return null
+    const parsed = JSON.parse(cached) as Partial<WorkProfile>
+    if (
+      parsed.id === expectedId &&
+      parsed.user_id === userId &&
+      typeof parsed.name === 'string' &&
+      (parsed.profile_type === 'direction' ||
+        parsed.profile_type === 'agent' ||
+        parsed.profile_type === 'intermediaire')
+    ) {
+      return {
+        id: parsed.id,
+        user_id: parsed.user_id,
+        name: parsed.name,
+        profile_type: parsed.profile_type,
+      }
+    }
+  } catch {}
+  return null
 }
 
 export function useWorkProfile() {
@@ -63,7 +179,14 @@ export function useWorkProfile() {
 }
 
 export function ProfileRouteGuard({ children }: { children: React.ReactNode }) {
-  const { profile, loading, canViewAmounts, canAccessJournal, canAccessHajjEtatGeneral } = useWorkProfile()
+  const {
+    profile,
+    userRole,
+    loading,
+    canViewAmounts,
+    canAccessJournal,
+    canAccessHajjEtatGeneral,
+  } = useWorkProfile()
   const pathname = usePathname()
   const router = useRouter()
 
@@ -72,6 +195,7 @@ export function ProfileRouteGuard({ children }: { children: React.ReactNode }) {
     const norm = pathname.toLowerCase()
     return (
       norm.startsWith('/hajj/comptabilite') ||
+      norm.startsWith('/hajj/virements') ||
       norm.startsWith('/hajj/etat-general') ||
       norm.startsWith('/agence/compta') ||
       norm.startsWith('/agence/journal')
@@ -83,33 +207,70 @@ export function ProfileRouteGuard({ children }: { children: React.ReactNode }) {
     const norm = pathname.toLowerCase()
     return (
       (!canAccessJournal && norm.startsWith('/agence/journal')) ||
-      (!canAccessHajjEtatGeneral && norm.startsWith('/hajj/etat-general'))
+      (!canAccessHajjEtatGeneral &&
+        (norm.startsWith('/hajj/etat-general') || norm.includes('/etat-general')))
     )
   }, [pathname, canAccessJournal, canAccessHajjEtatGeneral])
+
+  const isAdminOnlyRoute = useMemo(() => {
+    if (!pathname) return false
+    return pathname.toLowerCase().startsWith('/hajj/admin')
+  }, [pathname])
+
+  const isBlockedAdmin = useMemo(() => {
+    if (!isAdminOnlyRoute || !userRole) return false
+    const r = userRole.toLowerCase()
+    return r !== 'admin' && r !== 'super_admin'
+  }, [isAdminOnlyRoute, userRole])
 
   useEffect(() => {
     if (loading || !profile) return
 
-    // 1. Redirection pour les agents simples (aucune finance autorisée)
-    if (!canViewAmounts && isFinancialRoute) {
-      router.replace('/agence/dashboard')
+    if (isBlockedAdmin) {
+      router.replace('/hajj/dashboard')
       return
     }
 
-    // 2. Redirection spécifique pour le profil intermédiaire (bloqué sur journal et état général hajj)
-    if (isRestrictedForIntermediate) {
-      router.replace('/agence/dashboard')
+    if (!canViewAmounts && isFinancialRoute) {
+      router.replace(pathname?.startsWith('/hajj') ? '/hajj/dashboard' : '/agence/dashboard')
+      return
     }
-  }, [canViewAmounts, isFinancialRoute, isRestrictedForIntermediate, loading, profile, router])
+
+    if (isRestrictedForIntermediate) {
+      router.replace(pathname?.startsWith('/hajj') ? '/hajj/dashboard' : '/agence/dashboard')
+    }
+  }, [
+    canViewAmounts,
+    isBlockedAdmin,
+    isFinancialRoute,
+    isRestrictedForIntermediate,
+    loading,
+    pathname,
+    profile,
+    router,
+  ])
 
   if (!loading && profile) {
+    if (isBlockedAdmin) {
+      return (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#F4F6F8] p-4">
+          <div className="p-6 bg-white rounded-3xl border border-slate-200 shadow-sm text-center max-w-sm">
+            <p className="text-sm font-black text-slate-900 uppercase">Accès Administrateur Requis</p>
+            <p className="text-xs text-slate-500 mt-1">
+              Cette section est réservée aux administrateurs autorisés.
+            </p>
+          </div>
+        </div>
+      )
+    }
+
     if (!canViewAmounts && isFinancialRoute) {
       return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#F4F6F8]">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#F4F6F8] p-4">
           <div className="p-6 bg-white rounded-3xl border border-slate-200 shadow-sm text-center max-w-sm">
             <p className="text-sm font-black text-slate-900 uppercase">Accès Réservé</p>
             <p className="text-xs text-slate-500 mt-1">
-              Section réservée à la Direction et aux Superviseurs.
+              Section financière réservée à la Direction et aux Superviseurs.
             </p>
           </div>
         </div>
@@ -118,11 +279,11 @@ export function ProfileRouteGuard({ children }: { children: React.ReactNode }) {
 
     if (isRestrictedForIntermediate) {
       return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#F4F6F8]">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#F4F6F8] p-4">
           <div className="p-6 bg-white rounded-3xl border border-slate-200 shadow-sm text-center max-w-sm">
             <p className="text-sm font-black text-slate-900 uppercase">Accès Direction Requis</p>
             <p className="text-xs text-slate-500 mt-1">
-              Cette section est strictement réservée à la Direction Principale et Adjointe.
+              Cette section est strictement réservée à la Direction.
             </p>
           </div>
         </div>
@@ -141,62 +302,69 @@ export default function ProfileProvider({ children }: { children: React.ReactNod
   const [userId, setUserId] = useState<string | null>(null)
   const [profile, setProfile] = useState<WorkProfile | null>(null)
   const [authInitialized, setAuthInitialized] = useState(false)
+  const [profileHydrated, setProfileHydrated] = useState(false)
   const [isBiometricAvailable, setIsBiometricAvailable] = useState(false)
+  const [cachedRole, setCachedRole] = useState<string | null>(null)
 
-  const lastActivityRef = useRef<number>(Date.now())
+  const lastActivityWriteRef = useRef<number>(0)
   const activeUserIdRef = useRef<string | null>(null)
 
-  // 1. Récupération résiliente hors-ligne de la session
+  // 1. Récupération immédiate (0 ms) depuis le vrai jeton Supabase persisté + confirmation async
   useEffect(() => {
     let isMounted = true
 
-    const getStoredUserIdOffline = () => {
+    const persistedUid = getPersistedSupabaseUserId()
+    if (persistedUid) {
+      activeUserIdRef.current = persistedUid
+      setUserId(persistedUid)
       try {
-        for (let i = 0; i < localStorage.length; i++) {
-          const key = localStorage.key(i)
-          if (key && key.startsWith('active_profile_id_')) {
-            return key.replace('active_profile_id_', '')
-          }
-        }
+        const r = localStorage.getItem(`cached_user_role_${persistedUid}`)
+        if (r) setCachedRole(r)
       } catch {}
-      return null
     }
 
     getSession()
       .then(({ data: { session } }) => {
-        if (isMounted) {
-          const currentId = session?.user?.id ?? getStoredUserIdOffline()
-          setUserId(currentId)
-          setAuthInitialized(true)
-        }
+        if (!isMounted) return
+        const currentId = session?.user?.id ?? null
+        activeUserIdRef.current = currentId
+        setUserId(currentId)
+        setAuthInitialized(true)
       })
       .catch(() => {
-        // Mode déconnecté : on préserve l'utilisateur local sans déconnecter
-        if (isMounted) {
-          const currentId = getStoredUserIdOffline()
-          setUserId(currentId)
-          setAuthInitialized(true)
-        }
+        if (!isMounted) return
+        const fallbackUid = getPersistedSupabaseUserId()
+        activeUserIdRef.current = fallbackUid
+        setUserId(fallbackUid)
+        setAuthInitialized(true)
       })
 
     const { data: authListener } = supabase.auth.onAuthStateChange((event, session) => {
       if (!isMounted) return
+
+      if (event === 'SIGNED_OUT') {
+        activeUserIdRef.current = null
+        setProfile(null)
+        setUserId(null)
+        setCachedRole(null)
+        setProfileHydrated(true)
+        setAuthInitialized(true)
+        clearAllLocalSessionArtifacts()
+        return
+      }
+
       const currentId = session?.user?.id ?? null
-      const userChanged = activeUserIdRef.current !== currentId && Boolean(currentId)
-      
+      const userChanged = Boolean(activeUserIdRef.current && currentId && activeUserIdRef.current !== currentId)
+
       if (currentId) {
         activeUserIdRef.current = currentId
         setUserId(currentId)
       }
-
       setAuthInitialized(true)
 
-      // Seule une déconnexion explicite vide le profil actif
-      if (event === 'SIGNED_OUT') {
+      if (userChanged) {
         setProfile(null)
-        setUserId(null)
-      } else if (userChanged) {
-        setProfile(null)
+        setProfileHydrated(false)
       }
     })
 
@@ -206,18 +374,33 @@ export default function ProfileProvider({ children }: { children: React.ReactNod
     }
   }, [])
 
-  // 2. Récupération réactive SQLite PowerSync dès que userId est disponible
+  // 2. Profils de travail + rôle Supabase via SQLite PowerSync
   const { data: localProfiles = [], isLoading: isQueryLoading } = useQuery<WorkProfile>(
     'SELECT id, user_id, name, profile_type, pin_hash FROM account_profiles WHERE user_id = ? ORDER BY profile_type ASC, created_at ASC',
     [userId ?? '']
   )
 
-  // 3. Fallback immédiat vers Supabase si SQLite local est vide (nouvel appareil)
+  const { data: userProfileRows = [] } = useQuery<{ role: string | null }>(
+    'SELECT role FROM profiles WHERE id = ? LIMIT 1',
+    [userId ?? '']
+  )
+
+  const userRole = userProfileRows[0]?.role ?? cachedRole
+
+  useEffect(() => {
+    if (userId && userProfileRows[0]?.role) {
+      setCachedRole(userProfileRows[0].role)
+      try {
+        localStorage.setItem(`cached_user_role_${userId}`, userProfileRows[0].role)
+      } catch {}
+    }
+  }, [userId, userProfileRows])
+
+  // 3. Secours Supabase direct si SQLite local est encore vide (nouvel appareil)
   useEffect(() => {
     if (!userId || localProfiles.length > 0) return
 
     let isMounted = true
-
     void (async () => {
       try {
         const { data, error } = await supabase
@@ -251,7 +434,7 @@ export default function ProfileProvider({ children }: { children: React.ReactNod
     }
   }, [userId, localProfiles.length, db])
 
-  // 4. Test biométrie
+  // 4. Test biométrie native Capacitor
   useEffect(() => {
     if (Capacitor.isNativePlatform()) {
       NativeBiometric.isAvailable()
@@ -260,15 +443,20 @@ export default function ProfileProvider({ children }: { children: React.ReactNod
     }
   }, [])
 
-  const updateActivity = useCallback(() => {
-    const now = Date.now()
-    lastActivityRef.current = now
-    if (userId) {
+  const updateActivity = useCallback(
+    (force = false) => {
+      if (!userId) return
+      const now = Date.now()
+      if (!force && now - lastActivityWriteRef.current < ACTIVITY_WRITE_THROTTLE_MS) {
+        return
+      }
+      lastActivityWriteRef.current = now
       try {
         localStorage.setItem(LAST_ACTIVITY_KEY(userId), String(now))
       } catch {}
-    }
-  }, [userId])
+    },
+    [userId]
+  )
 
   const clearProfile = useCallback(() => {
     setProfile(null)
@@ -285,6 +473,7 @@ export default function ProfileProvider({ children }: { children: React.ReactNod
   useEffect(() => {
     if (!userId) {
       setProfile(null)
+      setProfileHydrated(true)
       return
     }
     setProfile((current) => (current && current.user_id !== userId ? null : current))
@@ -294,16 +483,26 @@ export default function ProfileProvider({ children }: { children: React.ReactNod
     if (!userId) return false
 
     try {
+      const storedId = localStorage.getItem(SESSION_PROFILE_ID_KEY(userId))
+      if (!storedId) {
+        setProfile(null)
+        return true
+      }
+
       const storedRaw = localStorage.getItem(LAST_ACTIVITY_KEY(userId))
       if (!storedRaw) {
-        updateActivity()
+        updateActivity(true)
         return false
       }
 
       const storedTime = Number(storedRaw)
       if (storedTime > 0 && Date.now() - storedTime > INACTIVITY_TIMEOUT_MS) {
         clearProfile()
-        if (pathname !== '/profile-selection' && pathname !== '/login' && !pathname.startsWith('/auth')) {
+        if (
+          pathname !== '/profile-selection' &&
+          pathname !== '/login' &&
+          !pathname?.startsWith('/auth')
+        ) {
           router.replace('/profile-selection')
         }
         return true
@@ -313,7 +512,7 @@ export default function ProfileProvider({ children }: { children: React.ReactNod
     return false
   }, [clearProfile, pathname, router, updateActivity, userId])
 
-  // 5. Restauration de session
+  // 5. Restauration immédiate (en ligne + hors-ligne) sans race condition au rechargement
   useEffect(() => {
     if (!userId) return
 
@@ -321,50 +520,49 @@ export default function ProfileProvider({ children }: { children: React.ReactNod
       const storedId = localStorage.getItem(SESSION_PROFILE_ID_KEY(userId))
       const storedRaw = localStorage.getItem(LAST_ACTIVITY_KEY(userId))
 
-      if (!storedId) return
+      if (!storedId) {
+        setProfileHydrated(true)
+        return
+      }
 
       if (storedRaw) {
         const storedTime = Number(storedRaw)
         if (storedTime > 0 && Date.now() - storedTime > INACTIVITY_TIMEOUT_MS) {
           clearProfile()
-          if (pathname !== '/profile-selection' && pathname !== '/login' && !pathname.startsWith('/auth')) {
+          setProfileHydrated(true)
+          if (
+            pathname !== '/profile-selection' &&
+            pathname !== '/login' &&
+            !pathname?.startsWith('/auth')
+          ) {
             router.replace('/profile-selection')
           }
           return
         }
       }
 
-      let current = localProfiles.find((p) => p.id === storedId && p.user_id === userId)
-      if (!current && isOfflineMode()) {
-        const cached = localStorage.getItem(SESSION_PROFILE_DATA_KEY(userId))
-        if (cached) {
-          try {
-            const parsed = JSON.parse(cached) as Partial<WorkProfile>
-            if (
-              parsed.id === storedId &&
-              parsed.user_id === userId &&
-              typeof parsed.name === 'string' &&
-              (parsed.profile_type === 'direction' || parsed.profile_type === 'agent' || parsed.profile_type === 'intermediaire') &&
-              typeof parsed.pin_hash === 'string'
-            ) {
-              current = parsed as WorkProfile
-            }
-          } catch {}
-        }
-      }
+      // Priorité à SQLite local ; repli immédiat sur le snapshot sécurisé (même en ligne pendant les 100ms d'init SQLite)
+      const fromSqlite = localProfiles.find((p) => p.id === storedId && p.user_id === userId)
+      const current = fromSqlite ?? readSafeProfileSnapshot(userId, storedId)
 
       if (current) {
         setProfile(current)
-        updateActivity()
-
-        // Restauration du niveau d'accès compta
-        const level = current.profile_type === 'direction' ? 'full' : current.profile_type === 'intermediaire' ? 'restricted' : 'none'
+        updateActivity(false)
+        const level: ComptaAccessLevel =
+          current.profile_type === 'direction'
+            ? 'full'
+            : current.profile_type === 'intermediaire'
+            ? 'restricted'
+            : 'none'
         localStorage.setItem('compta_access_level', level)
       }
-    } catch {}
+      setProfileHydrated(true)
+    } catch {
+      setProfileHydrated(true)
+    }
   }, [userId, localProfiles, clearProfile, updateActivity, pathname, router])
 
-  // Inactivité 15 min
+  // 6. Inactivité 15 min + réveil instantané Web/PWA (`visibilitychange`) + synchro multi-onglets (`storage`)
   useEffect(() => {
     if (!profile || !userId) return
 
@@ -372,24 +570,49 @@ export default function ProfileProvider({ children }: { children: React.ReactNod
       lockIfInactive()
     }, 15000)
 
-    const onAction = () => updateActivity()
-    const events = ['mousedown', 'keydown', 'touchstart']
+    const onAction = () => updateActivity(false)
+    const onVisibilityOrFocus = () => {
+      if (document.visibilityState === 'visible') {
+        lockIfInactive()
+      }
+    }
+    const onStorageSync = (e: StorageEvent) => {
+      if (!e.key) return
+      if (e.key === SESSION_PROFILE_ID_KEY(userId) && !e.newValue) {
+        setProfile(null)
+        if (
+          pathname !== '/profile-selection' &&
+          pathname !== '/login' &&
+          !pathname?.startsWith('/auth')
+        ) {
+          router.replace('/profile-selection')
+        }
+      }
+    }
+
+    const events = ['mousedown', 'keydown', 'touchstart'] as const
     events.forEach((evt) => window.addEventListener(evt, onAction, { passive: true }))
+    document.addEventListener('visibilitychange', onVisibilityOrFocus)
+    window.addEventListener('focus', onVisibilityOrFocus)
+    window.addEventListener('storage', onStorageSync)
 
     return () => {
       clearInterval(interval)
       events.forEach((evt) => window.removeEventListener(evt, onAction))
+      document.removeEventListener('visibilitychange', onVisibilityOrFocus)
+      window.removeEventListener('focus', onVisibilityOrFocus)
+      window.removeEventListener('storage', onStorageSync)
     }
-  }, [profile, userId, lockIfInactive, updateActivity])
+  }, [profile, userId, lockIfInactive, updateActivity, pathname, router])
 
-  // Inactivité réveil Capacitor
+  // Réveil natif Capacitor
   useEffect(() => {
     if (!Capacitor.isNativePlatform() || !userId) return
 
     const listener = CapacitorApp.addListener('appStateChange', (state) => {
       if (state.isActive) {
         if (!lockIfInactive()) {
-          updateActivity()
+          updateActivity(true)
         }
       }
     })
@@ -399,51 +622,56 @@ export default function ProfileProvider({ children }: { children: React.ReactNod
     }
   }, [userId, lockIfInactive, updateActivity])
 
-  // Redirection automatique si aucun profil de travail actif
+  // Redirection vers /profile-selection uniquement une fois la restauration terminée
   useEffect(() => {
-    if (!authInitialized || !userId) return
+    if (!authInitialized || !profileHydrated || !userId) return
+    if (isQueryLoading && !profile) return
 
     const isExempt =
       pathname === '/login' ||
       pathname === '/profile-selection' ||
-      pathname.startsWith('/auth')
+      pathname?.startsWith('/auth')
 
     if (!profile && !isExempt) {
       router.replace('/profile-selection')
     }
-  }, [authInitialized, pathname, profile, router, userId])
+  }, [authInitialized, profileHydrated, isQueryLoading, pathname, profile, router, userId])
 
-  const selectProfile = useCallback(
+  /**
+   * Vérifie le PIN d'un profil (ex: autorisation Directeur Principal) SANS ouvrir sa session !
+   */
+  const verifyProfilePin = useCallback(
     async (candidate: WorkProfile, pin: string) => {
       if (!userId || candidate.user_id !== userId) {
         throw new Error('Profil indisponible pour cette session.')
       }
-      if (!pin || pin.length < 4) throw new Error('Le code PIN doit comporter au moins 4 chiffres.')
-      if (!/^[0-9]{4,6}$/.test(pin)) throw new Error('Le code PIN doit comporter 4 à 6 chiffres.')
+      if (!pin || !/^[0-9]{4,6}$/.test(pin)) {
+        throw new Error('Le code PIN doit comporter 4 à 6 chiffres.')
+      }
+
+      checkPinLockout(candidate.id)
 
       const inputHash = await hashPin(pin)
-      if (inputHash !== candidate.pin_hash) throw new Error('Code PIN incorrect.')
+      if (inputHash !== candidate.pin_hash) {
+        const msg = recordPinFailure(candidate.id)
+        throw new Error(msg)
+      }
 
+      resetPinFailures(candidate.id)
+    },
+    [userId]
+  )
+
+  const selectProfile = useCallback(
+    async (candidate: WorkProfile, pin: string) => {
+      await verifyProfilePin(candidate, pin)
       setProfile(candidate)
-      updateActivity()
-
+      updateActivity(true)
       if (userId) {
-        try {
-          localStorage.setItem(SESSION_PROFILE_ID_KEY(userId), candidate.id)
-          localStorage.setItem(SESSION_PROFILE_DATA_KEY(userId), JSON.stringify(candidate))
-          localStorage.setItem(`last_selected_profile_id_${userId}`, candidate.id)
-
-          const accessLevel: ComptaAccessLevel =
-            candidate.profile_type === 'direction'
-              ? 'full'
-              : candidate.profile_type === 'intermediaire'
-              ? 'restricted'
-              : 'none'
-          localStorage.setItem('compta_access_level', accessLevel)
-        } catch {}
+        persistSafeProfileSnapshot(userId, candidate)
       }
     },
-    [userId, updateActivity]
+    [userId, updateActivity, verifyProfilePin]
   )
 
   const unlockWithBiometrics = useCallback(
@@ -451,7 +679,9 @@ export default function ProfileProvider({ children }: { children: React.ReactNod
       if (!userId || candidate.user_id !== userId) {
         throw new Error('Profil indisponible pour cette session.')
       }
-      if (!Capacitor.isNativePlatform()) throw new Error('Biométrie disponible uniquement sur mobile.')
+      if (!Capacitor.isNativePlatform()) {
+        throw new Error('Biométrie disponible uniquement sur mobile.')
+      }
 
       await NativeBiometric.verifyIdentity({
         reason: `Déverrouiller le profil ${candidate.name}`,
@@ -460,24 +690,10 @@ export default function ProfileProvider({ children }: { children: React.ReactNod
         description: 'Empreinte digitale ou reconnaissance faciale',
       })
 
+      resetPinFailures(candidate.id)
       setProfile(candidate)
-      updateActivity()
-
-      if (userId) {
-        try {
-          localStorage.setItem(SESSION_PROFILE_ID_KEY(userId), candidate.id)
-          localStorage.setItem(SESSION_PROFILE_DATA_KEY(userId), JSON.stringify(candidate))
-          localStorage.setItem(`last_selected_profile_id_${userId}`, candidate.id)
-
-          const accessLevel: ComptaAccessLevel =
-            candidate.profile_type === 'direction'
-              ? 'full'
-              : candidate.profile_type === 'intermediaire'
-              ? 'restricted'
-              : 'none'
-          localStorage.setItem('compta_access_level', accessLevel)
-        } catch {}
-      }
+      updateActivity(true)
+      persistSafeProfileSnapshot(userId, candidate)
     },
     [userId, updateActivity]
   )
@@ -488,13 +704,11 @@ export default function ProfileProvider({ children }: { children: React.ReactNod
       if (!name.trim()) throw new Error('Nom requis.')
       if (!/^[0-9]{4,6}$/.test(pin)) throw new Error('Le PIN doit comporter 4 à 6 chiffres.')
 
-      // Jusqu'à 2 comptes Direction
       const directions = localProfiles.filter((p) => p.profile_type === 'direction')
       if (type === 'direction' && directions.length >= 2) {
         throw new Error('Limite de 2 profils Direction atteinte.')
       }
 
-      // Jusqu'à 2 comptes Agents
       const agents = localProfiles.filter((p) => p.profile_type === 'agent')
       if (type === 'agent' && agents.length >= 2) {
         throw new Error('Limite de 2 profils Agents atteinte.')
@@ -503,7 +717,7 @@ export default function ProfileProvider({ children }: { children: React.ReactNod
       const id = crypto.randomUUID()
       const now = new Date().toISOString()
       const pinHash = await hashPin(pin)
-      const profile = {
+      const newProfile = {
         id,
         user_id: userId,
         name: name.trim(),
@@ -512,13 +726,21 @@ export default function ProfileProvider({ children }: { children: React.ReactNod
         created_at: now,
         updated_at: now,
       }
-      const { error } = await supabase.from('account_profiles').insert(profile)
+      const { error } = await supabase.from('account_profiles').insert(newProfile)
       if (error) throw error
 
       await db.execute(
-        `INSERT OR REPLACE INTO account_profiles (id, user_id, name, profile_type, pin_hash, created_at, updated_at) 
+        `INSERT OR REPLACE INTO account_profiles (id, user_id, name, profile_type, pin_hash, created_at, updated_at)
          VALUES (?, ?, ?, ?, ?, ?, ?)`,
-        [profile.id, profile.user_id, profile.name, profile.profile_type, profile.pin_hash, profile.created_at, profile.updated_at]
+        [
+          newProfile.id,
+          newProfile.user_id,
+          newProfile.name,
+          newProfile.profile_type,
+          newProfile.pin_hash,
+          newProfile.created_at,
+          newProfile.updated_at,
+        ]
       )
     },
     [db, userId, localProfiles]
@@ -529,10 +751,11 @@ export default function ProfileProvider({ children }: { children: React.ReactNod
       const target = localProfiles.find((p) => p.id === profileId)
       if (!target) throw new Error('Profil introuvable.')
 
-      const oldHash = await hashPin(oldPin)
-      if (oldHash !== target.pin_hash) throw new Error('Ancien code PIN incorrect.')
+      await verifyProfilePin(target, oldPin)
 
-      if (!/^[0-9]{4,6}$/.test(newPin)) throw new Error('Le nouveau PIN doit comporter 4 à 6 chiffres.')
+      if (!/^[0-9]{4,6}$/.test(newPin)) {
+        throw new Error('Le nouveau PIN doit comporter 4 à 6 chiffres.')
+      }
 
       const newHash = await hashPin(newPin)
       const now = new Date().toISOString()
@@ -550,7 +773,7 @@ export default function ProfileProvider({ children }: { children: React.ReactNod
 
       setProfile((prev) => (prev?.id === profileId ? { ...prev, pin_hash: newHash } : prev))
     },
-    [db, localProfiles]
+    [db, localProfiles, verifyProfilePin]
   )
 
   const isDirection = profile?.profile_type === 'direction'
@@ -558,14 +781,19 @@ export default function ProfileProvider({ children }: { children: React.ReactNod
   const canViewAmounts = isDirection || isIntermediaire
   const canAccessJournal = isDirection
   const canAccessHajjEtatGeneral = isDirection
-  const comptaAccessLevel: ComptaAccessLevel = isDirection ? 'full' : isIntermediaire ? 'restricted' : 'none'
+  const comptaAccessLevel: ComptaAccessLevel = isDirection
+    ? 'full'
+    : isIntermediaire
+    ? 'restricted'
+    : 'none'
 
   const value = useMemo<ProfileContextValue>(
     () => ({
       profile,
       currentProfile: profile,
       profiles: localProfiles,
-      loading: !authInitialized || (Boolean(userId) && isQueryLoading),
+      userRole,
+      loading: !authInitialized || !profileHydrated || (Boolean(userId) && !profile && isQueryLoading),
       isDirection,
       isIntermediaire,
       canViewAmounts,
@@ -573,6 +801,7 @@ export default function ProfileProvider({ children }: { children: React.ReactNod
       canAccessHajjEtatGeneral,
       comptaAccessLevel,
       isBiometricAvailable,
+      verifyProfilePin,
       selectProfile,
       unlockWithBiometrics,
       createProfile,
@@ -582,7 +811,9 @@ export default function ProfileProvider({ children }: { children: React.ReactNod
     [
       profile,
       localProfiles,
+      userRole,
       authInitialized,
+      profileHydrated,
       userId,
       isQueryLoading,
       isDirection,
@@ -592,6 +823,7 @@ export default function ProfileProvider({ children }: { children: React.ReactNod
       canAccessHajjEtatGeneral,
       comptaAccessLevel,
       isBiometricAvailable,
+      verifyProfilePin,
       selectProfile,
       unlockWithBiometrics,
       createProfile,

@@ -25,7 +25,36 @@ export default function PwaInstaller() {
           registrations.forEach((registration) => void registration.unregister())
         })
       } else {
-        void navigator.serviceWorker.register('/sw.js', { scope: '/' })
+        void navigator.serviceWorker
+          .register('/sw.js', { scope: '/' })
+          .then((reg) => {
+            // Pré-cache silencieux des pages clés quand en ligne pour navigation instantanée hors-ligne
+            const warmRoutes = () => {
+              if (!navigator.onLine) return
+              const sw = reg.active || navigator.serviceWorker.controller
+              if (!sw) return
+              sw.postMessage({
+                type: 'PRECACHE_ROUTES',
+                routes: [
+                  '/',
+                  '/profile-selection',
+                  '/hajj/dashboard',
+                  '/hajj/liste-pelerins',
+                  '/hajj/ajouter-pelerin',
+                  '/hajj/pelerin',
+                  '/hajj/comptabilite',
+                  '/hajj/virements',
+                  '/hajj/etat-general',
+                  '/hajj/repartition-hotels',
+                  '/hajj/documents',
+                  '/hajj/nusuk',
+                  '/agence/dashboard',
+                ],
+              })
+            }
+            window.setTimeout(warmRoutes, 4000)
+          })
+          .catch(() => {})
       }
     }
 

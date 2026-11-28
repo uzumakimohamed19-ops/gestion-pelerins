@@ -1,25 +1,79 @@
 <!DOCTYPE html>
 <html lang="fr">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>TravelOS - Hors-ligne</title>
-  <script src="https://cdn.tailwindcss.com"></script>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <title>Agence Pro · Hors ligne</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: #f8fafc;
+      color: #0f172a;
+      min-height: 100dvh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+    }
+    .card {
+      width: 100%;
+      max-width: 380px;
+      background: #ffffff;
+      border: 1px solid #e2e8f0;
+      border-radius: 28px;
+      padding: 28px 24px;
+      text-align: center;
+      box-shadow: 0 20px 45px rgba(15, 23, 42, 0.08);
+    }
+    .icon {
+      width: 60px;
+      height: 60px;
+      margin: 0 auto 18px;
+      border-radius: 18px;
+      background: #eff6ff;
+      color: #1d4ed8;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    h1 { font-size: 19px; font-weight: 800; letter-spacing: -0.02em; margin-bottom: 8px; }
+    p { font-size: 13px; line-height: 1.55; color: #64748b; margin-bottom: 22px; }
+    .actions { display: flex; flex-direction: column; gap: 10px; }
+    button {
+      width: 100%;
+      height: 46px;
+      border: none;
+      border-radius: 14px;
+      font-size: 13px;
+      font-weight: 800;
+      cursor: pointer;
+    }
+    .primary { background: #1e3a5f; color: #ffffff; }
+    .secondary { background: #f1f5f9; color: #334155; }
+  </style>
 </head>
-<body class="bg-slate-950 text-white min-h-screen flex flex-col items-center justify-center p-4">
-  <div class="text-center max-w-md bg-slate-900 p-8 rounded-2xl border border-slate-800 shadow-2xl">
-    <div class="w-16 h-16 bg-amber-500/10 border border-amber-500/30 text-amber-500 rounded-2xl flex items-center justify-center mx-auto mb-6">
-      <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 1v22h22M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+<body>
+  <div class="card">
+    <div class="icon">
+      <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+        <line x1="2" y1="2" x2="22" y2="22"></line>
+        <path d="M8.5 16.5a5 5 0 0 1 7 0"></path>
+        <path d="M2 8.82a15 15 0 0 1 4.17-2.65"></path>
+        <path d="M10.66 5c4.01-.36 8.14.9 11.34 3.76"></path>
+        <path d="M16.85 11.25a10 10 0 0 1 2.22 1.68"></path>
+        <path d="M5 13a10 10 0 0 1 5.24-2.76"></path>
+        <line x1="12" y1="20" x2="12.01" y2="20"></line>
+      </svg>
     </div>
-
-    <h1 class="text-xl font-black tracking-tight mb-2">Connexion interrompue</h1>
-    <p class="text-sm text-slate-400 leading-relaxed mb-6">
-      Il semble que vous n'êtes pas connecté à Internet. L'application **TravelOS** nécessite une connexion active pour synchroniser vos données de suivi Hajj.
+    <h1>Mode hors ligne</h1>
+    <p>
+      Cette page n'a pas encore été mise en cache sur cet appareil. Revenez à votre espace ou connectez-vous à Internet.
     </p>
-
-    <button onclick="window.location.reload()" class="w-full py-2.5 bg-indigo-600 hover:bg-indigo-500 font-bold text-sm rounded-xl transition-all active:scale-95">
-      Réessayer la connexion
-    </button>
+    <div class="actions">
+      <button class="primary" onclick="window.location.href='/'">Ouvrir l'application</button>
+      <button class="secondary" onclick="window.location.reload()">Réessayer</button>
+    </div>
   </div>
 </body>
 </html>

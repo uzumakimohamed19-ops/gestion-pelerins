@@ -16,6 +16,8 @@ function getCacheVersion() {
  */
 export async function invalidateAppCacheOnUpdate() {
   if (typeof window === 'undefined') return
+  // Ne jamais vider les caches ni recharger si l'utilisateur est hors-ligne (évite la page "Pas d'Internet" Chrome)
+  if (typeof navigator !== 'undefined' && !navigator.onLine) return
 
   const version = getCacheVersion()
   const previousVersion = window.localStorage.getItem(CACHE_VERSION_KEY)
