@@ -13,6 +13,12 @@ const config: CapacitorConfig = {
     ]
   },
   plugins: {
+    SplashScreen: {
+      launchShowDuration: 0,
+      launchAutoHide: true,
+      backgroundColor: '#FFFFFFFF',
+      showSpinner: false,
+    },
     StatusBar: {
       // Épouse le haut de l'écran sans créer d'espace blanc artificiel
       overlaysWebView: true,

@@ -324,6 +324,24 @@ export default function DetailsPelerin() {
     return () => setHideNavbar(false)
   }, [showScanModal, showPdfExportModal, showReceiptModal, setHideNavbar])
 
+  // Toujours démarrer la fiche pèlerin tout en haut (neutralise la rétention de scroll Next.js sur en-tête sticky)
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    setMobileTab('dossier')
+    const resetToTop = () => {
+      window.scrollTo({ top: 0, left: 0, behavior: 'instant' as ScrollBehavior })
+      document.documentElement.scrollTop = 0
+      document.body.scrollTop = 0
+    }
+    resetToTop()
+    const raf = window.requestAnimationFrame(resetToTop)
+    const timer = window.setTimeout(resetToTop, 60)
+    return () => {
+      window.cancelAnimationFrame(raf)
+      window.clearTimeout(timer)
+    }
+  }, [id])
+
   const handleChange = (field: string, value: any) => {
     if (!p) return
     setPelerin({ ...p, [field]: value })
@@ -1004,7 +1022,7 @@ export default function DetailsPelerin() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-50 md:bg-[radial-gradient(ellipse_at_top_right,_var(--tw-gradient-stops))] md:from-slate-100 md:via-slate-50 md:to-white pb-28 md:pb-16 transition-all duration-500">
+    <div className="min-h-screen bg-slate-50 md:bg-[radial-gradient(ellipse_at_top_right,_var(--tw-gradient-stops))] md:from-slate-100 md:via-slate-50 md:to-white pb-28 md:pb-16">
       {/* =================================================================== */}
       {/* 📱 VERSION MOBILE NATIVE — EN-TÊTE BLANC PUR (`md:hidden`)          */}
       {/* =================================================================== */}

@@ -1,5 +1,5 @@
 // Fichier public/sw.js
-const CACHE_NAME = 'hajj-v8'; // Pré-cache complet HTML + chunks JS/CSS Next.js → Zéro page "Pas d'Internet" Chrome
+const CACHE_NAME = 'hajj-v9'; // Pré-cache complet HTML + manifest dynamique + chunks JS/CSS Next.js
 const MEDIA_CACHE_NAME = 'hajj-media-v1';
 const MAX_MEDIA_ENTRIES = 260;
 
@@ -7,6 +7,8 @@ const CORE_PRECACHE_ASSETS = [
   '/',
   '/icon-192x192.png',
   '/icon-512x512.png',
+  '/splash-blank-512x512.png',
+  '/manifest.webmanifest',
   '/manifest.json',
   '/offline.html',
 ];
