@@ -12,6 +12,7 @@ import AppUpdateBanner from '@/components/AppUpdateBanner'
 import PushActivityTracker from '@/components/PushActivityTracker'
 import NetworkProvider from '@/lib/NetworkContext'
 import OfflinePill from '@/components/OfflinePill'
+import AppLaunchSplash from '@/components/AppLaunchSplash'
 
 export const metadata = {
   title: 'Agence Pro',
@@ -105,6 +106,7 @@ export default function RootLayout({
       </head>
       
       <body className="min-h-screen m-0 p-0 antialiased text-slate-900 flex flex-col overscroll-y-contain bg-white dark:bg-[#000000]">
+        <AppLaunchSplash />
         <NetworkProvider>
           <AppUpdateBanner />
           <AppCacheGuard />
@@ -119,11 +121,13 @@ export default function RootLayout({
                     {/* Bandeau d'arrière-plan sans décalage de contenu */}
                     <TopBarContainer />
 
+                    {/* Micro-pilule hors-ligne ultra-compacte dans le flux (zéro donnée masquée) */}
+                    <OfflinePill />
+
                     <main className="flex-1 flex flex-col min-h-screen lg:pl-64">
                       {children}
                     </main>
 
-                    <OfflinePill />
                     <PwaInstaller />
                     <PushActivityTracker />
                   </UIProvider>

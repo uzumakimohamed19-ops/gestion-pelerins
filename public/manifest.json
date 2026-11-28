@@ -1,13 +1,13 @@
 {
   "id": "/",
-  "name": "AgencePro - Gestion Hajj",
-  "short_name": "AgencePro",
-  "description": "Tableau de gestion et de suivi de campagne",
+  "name": "Agence Pro — Gestion Hajj & Voyages",
+  "short_name": "Agence Pro",
+  "description": "Gestion des pèlerins, opérations et suivi de campagne",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
-  "background_color": "#f8fafc",
-  "theme_color": "#2563eb",
+  "background_color": "#ffffff",
+  "theme_color": "#ffffff",
   "icons": [
     {
       "src": "/icon-192x192.png",
