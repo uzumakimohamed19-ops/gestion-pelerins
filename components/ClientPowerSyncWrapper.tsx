@@ -8,7 +8,6 @@ import { PowerSyncContext } from "@powersync/react";
 import { powersync } from "@/lib/powersync/db";
 import { SupabaseConnector } from "@/lib/powersync/SupabaseConnector";
 import { supabase, getSession } from "@/lib/supabase";
-import AppSplashScreen from "@/components/AppSplashScreen";
 
 export default function ClientPowerSyncWrapper({
   children,
@@ -230,8 +229,10 @@ export default function ClientPowerSyncWrapper({
   }, []);
 
   // Ne jamais bloquer l'écran de connexion /login derrière l'initialisation SQLite
+  // Pendant le démarrage, AppLaunchSplash couvre déjà l'écran au-dessus (z-[9998]) :
+  // on rend une surface blanche neutre pour éviter tout doublon ou redémarrage d'animation.
   if (!ready && pathname !== "/login") {
-    return <AppSplashScreen />;
+    return <div className="fixed inset-0 bg-white" style={{ backgroundColor: "#FFFFFF" }} />;
   }
 
   return (

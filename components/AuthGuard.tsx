@@ -9,7 +9,6 @@ import {
   isOfflineMode,
 } from '@/lib/supabase'
 import { clearAllLocalSessionArtifacts } from '@/lib/sessionCleanup'
-import AppSplashScreen from '@/components/AppSplashScreen'
 
 function withTimeout<T>(promise: Promise<T>, ms = 3000): Promise<T> {
   return Promise.race([
@@ -25,7 +24,6 @@ export default function AuthGuard({ children }: { children: React.ReactNode }) {
   const router = useRouter()
   const [ready, setReady] = useState(false)
   const [authenticated, setAuthenticated] = useState(false)
-  const [isDark, setIsDark] = useState(false)
 
   const isRedirectingRef = useRef(false)
 
@@ -36,22 +34,6 @@ export default function AuthGuard({ children }: { children: React.ReactNode }) {
 
   const isPublicRouteRef = useRef(isPublicRoute)
   isPublicRouteRef.current = isPublicRoute
-
-  // Synchronisation du thème après hydratation SSR (zéro hydration mismatch)
-  useEffect(() => {
-    const syncTheme = () => {
-      try {
-        setIsDark(localStorage.getItem('compta_theme_dark') === 'true')
-      } catch {}
-    }
-    syncTheme()
-    window.addEventListener('storage', syncTheme)
-    window.addEventListener('theme-change', syncTheme)
-    return () => {
-      window.removeEventListener('storage', syncTheme)
-      window.removeEventListener('theme-change', syncTheme)
-    }
-  }, [])
 
   // 1. Abonnement unique (ne se réexécute plus à chaque changement de route)
   useEffect(() => {
@@ -136,7 +118,7 @@ export default function AuthGuard({ children }: { children: React.ReactNode }) {
   if (isPublicRoute) return <>{children}</>
 
   if (!ready || !authenticated) {
-    return <AppSplashScreen darkOverride={isDark} />
+    return <div className="fixed inset-0 bg-white" style={{ backgroundColor: '#FFFFFF' }} />
   }
 
   return <>{children}</>

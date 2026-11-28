@@ -5,19 +5,21 @@ import { Building2, Plane } from 'lucide-react'
 import { getPersistedSupabaseUserId } from '@/lib/supabase'
 
 interface AppSplashScreenProps {
+  id?: string
   statusText?: string
   exiting?: boolean
   darkOverride?: boolean
 }
 
 /**
- * Splash Screen Signature Agence Pro (Fond blanc pur, style ouverture cinéma Disney+ / Netflix) :
- * - Toile blanche épurée avec astrolabe de navigation bleu royal & or champagne ultra-subtil
- * - Logo vectoriel Agence Pro qui se dessine en direct ("A" + envol de la trajectoire avion cyan)
- * - Bulles de chargement animées verticalement avec icônes miniatures métier :
- *   Pèlerin / Kaaba · Avion · Agence de voyage
+ * Splash Screen Signature Agence Pro :
+ * - Fond blanc pur minimaliste sans aucune distraction en arrière-plan
+ * - Logo vectoriel Agence Pro animé directement sur fond blanc (sans cadre bleu)
+ * - 3 grandes bulles métier (Pèlerin/Kaaba · Avion · Agence) placées juste sous le logo et le texte,
+ *   reliées par une ligne bleue lumineuse qui se balade fluidement entre elles.
  */
 export default function AppSplashScreen({
+  id,
   statusText,
   exiting = false,
 }: AppSplashScreenProps) {
@@ -37,224 +39,199 @@ export default function AppSplashScreen({
 
   return (
     <main
+      id={id}
       aria-label="Ouverture Agence Pro"
-      className={`fixed inset-0 z-[9998] overflow-hidden bg-white text-[#061A44] flex flex-col items-center justify-between px-6 pt-[max(2.25rem,env(safe-area-inset-top))] pb-[max(2.25rem,env(safe-area-inset-bottom))] select-none transition-all duration-400 ease-out ${
+      style={{ backgroundColor: '#FFFFFF', color: '#061A44' }}
+      className={`ap-splash-surface fixed inset-0 z-[9998] overflow-hidden flex flex-col items-center justify-center px-6 pt-[max(2rem,env(safe-area-inset-top))] pb-[max(2rem,env(safe-area-inset-bottom))] select-none transition-all duration-500 ease-out ${
         exiting
-          ? 'opacity-0 scale-[1.04] blur-[2px] pointer-events-none'
-          : 'opacity-100 scale-100 blur-0'
+          ? 'opacity-0 scale-[1.03] pointer-events-none'
+          : 'opacity-100 scale-100'
       }`}
     >
-      {/* ── DÉCOR ARCHITECTURAL SUBTIL SUR FOND BLANC : ASTROLABE & TRAJECTOIRES ── */}
-      <div
-        aria-hidden="true"
-        className="pointer-events-none absolute inset-0 flex items-center justify-center overflow-hidden"
-      >
-        <svg
-          viewBox="0 0 600 600"
-          className="w-[520px] h-[520px] sm:w-[680px] sm:h-[680px]"
-        >
-          <g className="ap-compass-slow" style={{ transformOrigin: '300px 300px' }}>
+      {/* ── BLOC CENTRAL UNIFIÉ : LOGO SUR FOND BLANC + TEXTE + BULLES RELIÉES ── */}
+      <div className="flex flex-col items-center w-full max-w-sm">
+        {/* Emblème vectoriel Agence Pro animé directement sur fond blanc pur */}
+        <div className="ap-logo-enter relative w-[124px] h-[124px] sm:w-[140px] sm:h-[140px] flex items-center justify-center">
+          <svg viewBox="0 0 120 120" className="w-full h-full overflow-visible">
+            <defs>
+              <linearGradient id="ap-leg-navy" x1="0%" y1="0%" x2="100%" y2="100%">
+                <stop offset="0%" stopColor="#0D47B8" />
+                <stop offset="55%" stopColor="#07276E" />
+                <stop offset="100%" stopColor="#041540" />
+              </linearGradient>
+              <linearGradient id="ap-arc-electric" x1="0%" y1="100%" x2="100%" y2="0%">
+                <stop offset="0%" stopColor="#0052E0" />
+                <stop offset="52%" stopColor="#0096FF" />
+                <stop offset="100%" stopColor="#26CCFF" />
+              </linearGradient>
+            </defs>
+
+            {/* Pilier "A" architectural en bleu royal profond directement sur blanc */}
+            <path
+              d="M29 94 L53.5 25 Q60 11 66.5 25 L91 94"
+              fill="none"
+              stroke="url(#ap-leg-navy)"
+              strokeWidth="15.5"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              className="ap-stroke-a"
+            />
+
+            {/* Découpe négative blanche nette là où la trajectoire coupe le A */}
+            <path
+              d="M18 61 C11 78, 51 83, 97 38"
+              fill="none"
+              stroke="#FFFFFF"
+              strokeWidth="16"
+              strokeLinecap="round"
+              className="ap-stroke-arc"
+            />
+
+            {/* Trajectoire avion bleu électrique qui s'envole à travers le A */}
+            <path
+              d="M18 61 C11 78, 51 83, 97 38"
+              fill="none"
+              stroke="url(#ap-arc-electric)"
+              strokeWidth="9.5"
+              strokeLinecap="round"
+              className="ap-stroke-arc"
+            />
+
+            {/* Pointe avion bicolore */}
+            <g className="ap-plane-tip">
+              <polygon points="108,29 86,36 96,42.5 98.5,54" fill="#0096FF" />
+              <polygon points="108,29 96,42.5 98.5,54" fill="#07276E" />
+            </g>
+
+            {/* Éclat discret au sommet de l'envol */}
             <circle
-              cx="300"
-              cy="300"
-              r="256"
+              cx="106"
+              cy="31"
+              r="6.5"
               fill="none"
-              stroke="rgba(7, 39, 110, 0.06)"
-              strokeWidth="1"
-              strokeDasharray="3 12"
+              stroke="#0096FF"
+              strokeWidth="1.6"
+              className="ap-star-pulse"
             />
-            <circle
-              cx="300"
-              cy="300"
-              r="210"
-              fill="none"
-              stroke="rgba(212, 163, 89, 0.16)"
-              strokeWidth="0.9"
-              strokeDasharray="1 18"
-            />
-            {/* 4 repères cardinaux or champagne */}
-            <line x1="300" y1="36" x2="300" y2="50" stroke="rgba(212, 163, 89, 0.45)" strokeWidth="1.4" />
-            <line x1="300" y1="550" x2="300" y2="564" stroke="rgba(212, 163, 89, 0.45)" strokeWidth="1.4" />
-            <line x1="36" y1="300" x2="50" y2="300" stroke="rgba(212, 163, 89, 0.45)" strokeWidth="1.4" />
-            <line x1="550" y1="300" x2="564" y2="300" stroke="rgba(212, 163, 89, 0.45)" strokeWidth="1.4" />
-          </g>
-
-          <g className="ap-compass-reverse" style={{ transformOrigin: '300px 300px' }}>
-            <ellipse
-              cx="300"
-              cy="300"
-              rx="232"
-              ry="114"
-              transform="rotate(-24 300 300)"
-              fill="none"
-              stroke="rgba(0, 150, 255, 0.085)"
-              strokeWidth="1"
-            />
-            <circle cx="511" cy="206" r="3" fill="#0096FF" opacity="0.45" />
-            <circle cx="89" cy="394" r="2.4" fill="#D4A359" opacity="0.5" />
-          </g>
-
-          <circle
-            cx="300"
-            cy="300"
-            r="138"
-            fill="none"
-            stroke="rgba(7, 39, 110, 0.045)"
-            strokeWidth="1"
-          />
-        </svg>
-      </div>
-
-      {/* Haut : mention discrète */}
-      <div className="relative z-10 h-6 flex items-center justify-center">
-        <span className="ap-tagline-in inline-flex items-center gap-1.5 text-[10px] font-bold tracking-[0.22em] uppercase text-slate-400">
-          <span className="w-1.5 h-1.5 rounded-full bg-[#D4A359]" />
-          Plateforme Officielle
-        </span>
-      </div>
-
-      {/* ── CENTRE : EMBLÈME VECTORIEL ANIMÉ + TYPOGRAPHIE DE MARQUE ── */}
-      <div className="relative z-10 flex flex-col items-center">
-        {/* Médaillon Squircle Agence Pro sur fond blanc */}
-        <div className="ap-badge-rise relative w-[112px] h-[112px] sm:w-[126px] sm:h-[126px] rounded-[30px] sm:rounded-[34px] p-[2px] bg-gradient-to-br from-[#29D3FF]/60 via-[#07276E]/25 to-[#D4A359]/55 shadow-[0_26px_60px_-14px_rgba(7,39,110,0.34)]">
-          <div
-            style={{
-              background:
-                'linear-gradient(145deg, #0B4FD1 0%, #062163 56%, #031033 100%)',
-            }}
-            className="relative w-full h-full rounded-[28px] sm:rounded-[32px] overflow-hidden flex items-center justify-center"
-          >
-            {/* Emblème vectoriel exact Agence Pro animé */}
-            <svg viewBox="0 0 120 120" className="w-[84%] h-[84%] overflow-visible">
-              <defs>
-                <linearGradient id="ap-leg-white" x1="0%" y1="0%" x2="100%" y2="100%">
-                  <stop offset="0%" stopColor="#FFFFFF" />
-                  <stop offset="68%" stopColor="#E6F2FF" />
-                  <stop offset="100%" stopColor="#38BDF8" />
-                </linearGradient>
-                <linearGradient id="ap-arc-cyan" x1="0%" y1="100%" x2="100%" y2="0%">
-                  <stop offset="0%" stopColor="#0066FF" />
-                  <stop offset="52%" stopColor="#00B4FF" />
-                  <stop offset="100%" stopColor="#48E5FF" />
-                </linearGradient>
-              </defs>
-
-              {/* Pilier "A" architectural */}
-              <path
-                d="M31 92 L54 27 Q60 14 66 27 L89 92"
-                fill="none"
-                stroke="url(#ap-leg-white)"
-                strokeWidth="15.5"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                className="ap-stroke-a"
-              />
-
-              {/* Ombre de profondeur sous la courbe d'envol */}
-              <path
-                d="M21 63 C14 78, 52 84, 96 42"
-                fill="none"
-                stroke="rgba(3, 16, 51, 0.55)"
-                strokeWidth="13"
-                strokeLinecap="round"
-                className="ap-stroke-arc"
-              />
-
-              {/* Trajectoire cyan qui s'envole à travers le A */}
-              <path
-                d="M20 60 C13 76, 51 81, 96 39"
-                fill="none"
-                stroke="url(#ap-arc-cyan)"
-                strokeWidth="9.5"
-                strokeLinecap="round"
-                className="ap-stroke-arc"
-              />
-
-              {/* Pointe avion */}
-              <g className="ap-plane-tip">
-                <polygon points="106,31 85,37 95,43 97,54" fill="#33DBFF" />
-                <polygon points="106,31 95,43 97,54" fill="#0088FF" />
-              </g>
-
-              {/* Éclat au sommet de la trajectoire */}
-              <circle
-                cx="104"
-                cy="33"
-                r="6"
-                fill="none"
-                stroke="#7CEEFF"
-                strokeWidth="1.5"
-                className="ap-star-pulse"
-              />
-            </svg>
-
-            {/* Reflet lumineux diagonal */}
-            <div
-              aria-hidden="true"
-              className="ap-splash-sheen absolute inset-y-0 -left-1/2 w-1/2 bg-gradient-to-r from-transparent via-white/30 to-transparent pointer-events-none"
-            />
-          </div>
+          </svg>
         </div>
 
-        {/* Révélation typographique sur fond blanc */}
-        <div className="mt-7 overflow-hidden">
-          <h1 className="ap-mask-up text-[32px] sm:text-[36px] font-black tracking-[-0.035em] leading-none flex items-baseline justify-center">
+        {/* Typographie de marque */}
+        <div className="mt-4 overflow-hidden">
+          <h1 className="ap-mask-up text-[34px] sm:text-[38px] font-black tracking-[-0.035em] leading-none flex items-baseline justify-center">
             <span className="text-[#061A44]">Agence</span>
-            <span className="text-[#0096FF] ml-1.5">Pro</span>
+            <span className="text-[#0088FF] ml-1.5">Pro</span>
           </h1>
         </div>
 
         {/* Filet or champagne */}
         <div className="ap-gold-rule mt-3.5 w-14 h-[1.5px] rounded-full bg-gradient-to-r from-transparent via-[#D4A359] to-transparent" />
 
-        {/* Sous-titre */}
+        {/* Sous-titre métier */}
         <p className="ap-tagline-in mt-3 text-[11px] font-bold tracking-[0.26em] uppercase text-slate-500">
           Hajj &nbsp;·&nbsp; Voyages &nbsp;·&nbsp; Gestion
         </p>
-      </div>
 
-      {/* ── PIED : NOM D'AGENCE + BULLES DE CHARGEMENT VERTICALES (PÈLERIN · AVION · AGENCE) ── */}
-      <div className="relative z-10 flex flex-col items-center gap-4 w-full max-w-xs">
         {agencyName && (
-          <p className="ap-tagline-in text-[11px] font-extrabold tracking-[0.14em] uppercase text-[#07276E] truncate max-w-full">
+          <p className="ap-tagline-in mt-2 text-[11.5px] font-extrabold tracking-[0.14em] uppercase text-[#07276E] truncate max-w-full">
             {agencyName}
           </p>
         )}
 
-        {/* 3 bulles miniatures en vague verticale fluide */}
-        <div className="flex items-center justify-center gap-4 pt-2" aria-hidden="true">
+        {/* ── BULLES DE CHARGEMENT AGRANDIES + LIGNE BLEUE QUI SE BALADE ENTRE ELLES ── */}
+        <div
+          className="ap-bubbles-enter relative mt-10 w-[256px] sm:w-[288px] h-[72px] flex items-center justify-between"
+          aria-hidden="true"
+        >
+          {/* Ligne bleue fluide qui circule entre les 3 bulles */}
+          <svg
+            viewBox="0 0 200 32"
+            preserveAspectRatio="none"
+            className="pointer-events-none absolute left-7 right-7 sm:left-8 sm:right-8 top-1/2 -translate-y-1/2 w-[calc(100%-3.5rem)] sm:w-[calc(100%-4rem)] h-8 overflow-visible z-0"
+          >
+            <defs>
+              <linearGradient id="ap-travel-blue" x1="0%" y1="0%" x2="100%" y2="0%">
+                <stop offset="0%" stopColor="#0055FF" />
+                <stop offset="50%" stopColor="#0096FF" />
+                <stop offset="100%" stopColor="#38D4FF" />
+              </linearGradient>
+            </defs>
+
+            {/* Rail de connexion subtil */}
+            <path
+              d="M 0 16 Q 50 7 100 16 T 200 16"
+              pathLength={200}
+              fill="none"
+              stroke="rgba(0, 122, 255, 0.14)"
+              strokeWidth="2.6"
+              strokeLinecap="round"
+            />
+
+            {/* Halo doux accompagnant la ligne bleue */}
+            <path
+              d="M 0 16 Q 50 7 100 16 T 200 16"
+              pathLength={200}
+              fill="none"
+              stroke="#0096FF"
+              strokeOpacity="0.22"
+              strokeWidth="7"
+              strokeLinecap="round"
+              className="ap-line-travel"
+            />
+
+            {/* Ligne bleue vive qui se balade entre les bulles */}
+            <path
+              d="M 0 16 Q 50 7 100 16 T 200 16"
+              pathLength={200}
+              fill="none"
+              stroke="url(#ap-travel-blue)"
+              strokeWidth="3.6"
+              strokeLinecap="round"
+              className="ap-line-travel"
+            />
+          </svg>
+
           {/* Bulle 1 : Pèlerin / Kaaba */}
-          <div className="ap-bubble-1 w-10 h-10 rounded-full bg-[#FFFBF2] border border-[#D4A359]/45 shadow-[0_8px_20px_-6px_rgba(212,163,89,0.45)] flex items-center justify-center text-[#B8832D]">
+          <div
+            style={{ backgroundColor: '#FFFDF7' }}
+            className="ap-bubble-1 relative z-10 w-14 h-14 sm:w-16 sm:h-16 rounded-full border-[1.5px] border-[#D4A359]/55 shadow-[0_12px_28px_-8px_rgba(212,163,89,0.42)] flex items-center justify-center text-[#B8832D]"
+          >
             <svg
-              width="17"
-              height="17"
+              width="25"
+              height="25"
               viewBox="0 0 24 24"
               fill="none"
               stroke="currentColor"
-              strokeWidth="1.9"
+              strokeWidth="1.85"
               strokeLinecap="round"
               strokeLinejoin="round"
             >
               <path d="M4 9.5L12 5l8 4.5v8.5L12 22l-8-4v-8.5z" />
               <path d="M4 9.5L12 14l8-4.5" />
               <path d="M12 14v8" />
-              <path d="M7.5 11.4l4.5 2.6 4.5-2.6" stroke="#D4A359" strokeWidth="1.6" />
+              <path d="M7.5 11.4l4.5 2.6 4.5-2.6" stroke="#D4A359" strokeWidth="1.7" />
             </svg>
           </div>
 
           {/* Bulle 2 : Avion / Vol */}
-          <div className="ap-bubble-2 w-10 h-10 rounded-full bg-[#F0F9FF] border border-[#0096FF]/35 shadow-[0_8px_20px_-6px_rgba(0,150,255,0.4)] flex items-center justify-center text-[#0088EE]">
-            <Plane size={16} strokeWidth={2.1} />
+          <div
+            style={{ backgroundColor: '#F4FAFF' }}
+            className="ap-bubble-2 relative z-10 w-14 h-14 sm:w-16 sm:h-16 rounded-full border-[1.5px] border-[#0096FF]/45 shadow-[0_12px_28px_-8px_rgba(0,150,255,0.4)] flex items-center justify-center text-[#0082EE]"
+          >
+            <Plane size={24} strokeWidth={2} />
           </div>
 
           {/* Bulle 3 : Agence de voyage */}
-          <div className="ap-bubble-3 w-10 h-10 rounded-full bg-[#EFF4FF] border border-[#07276E]/25 shadow-[0_8px_20px_-6px_rgba(7,39,110,0.35)] flex items-center justify-center text-[#07276E]">
-            <Building2 size={16} strokeWidth={2.1} />
+          <div
+            style={{ backgroundColor: '#F3F6FF' }}
+            className="ap-bubble-3 relative z-10 w-14 h-14 sm:w-16 sm:h-16 rounded-full border-[1.5px] border-[#07276E]/30 shadow-[0_12px_28px_-8px_rgba(7,39,110,0.34)] flex items-center justify-center text-[#07276E]"
+          >
+            <Building2 size={24} strokeWidth={2} />
           </div>
         </div>
 
         {statusText && (
-          <p className="text-[10px] font-semibold tracking-wider text-slate-400">
+          <p className="mt-5 text-[10.5px] font-semibold tracking-wider text-slate-400">
             {statusText}
           </p>
         )}

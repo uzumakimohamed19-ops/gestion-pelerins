@@ -51,6 +51,11 @@ export default function RootLayout({
 
         <style dangerouslySetInnerHTML={{
           __html: `
+            /* 0. Masquage instantané frame-0 du splash si déjà joué durant cette session */
+            html[data-ap-splash-done="1"] #ap-launch-splash {
+              display: none !important;
+            }
+
             /* 1. Verrouillage du scroll et des rebonds */
             html, body {
               overscroll-behavior-y: contain !important;
@@ -83,6 +88,14 @@ export default function RootLayout({
               }
             }
           `
+        }} />
+
+        <script dangerouslySetInnerHTML={{
+          __html: `try {
+            if (sessionStorage.getItem('agencepro_launch_splash_done') === '1') {
+              document.documentElement.setAttribute('data-ap-splash-done', '1');
+            }
+          } catch (_) {}`
         }} />
 
         <script dangerouslySetInnerHTML={{
